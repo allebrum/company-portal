@@ -1,0 +1,33 @@
+@import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --brand: #9333ea;
+    --brand-hover: #7e22ce;
+  }
+  html {
+    font-family: 'Quicksand', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-white text-gray-800;
+  }
+}
+
+@layer components {
+  .eyebrow {
+    @apply text-[10px] uppercase tracking-[0.1em] font-semibold text-brand-600;
+  }
+  .kbd {
+    @apply px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-mono text-[11px] border border-gray-200;
+  }
+}
+
+@layer utilities {
+  .tabular-nums { font-variant-numeric: tabular-nums; }
+}

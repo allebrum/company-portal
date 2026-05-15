@@ -1,0 +1,14 @@
+node_modules/
+.pnpm-store/
+dist/
+build/
+out/
+.next/
+*.log
+.env
+.env.local
+.env.*.local
+.DS_Store
+coverage/
+*.tsbuildinfo
+apps/api/drizzle/meta/_journal.json.bak

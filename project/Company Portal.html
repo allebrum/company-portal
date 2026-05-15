@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Allebrum · Company Portal</title>
+  <meta name="theme-color" content="#9333ea" />
+
+  <link rel="icon" type="image/png" href="assets/icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="assets/tokens.css" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Quicksand', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <style>
+    html, body, #root { height: 100%; }
+    body {
+      font-family: 'Quicksand', system-ui, sans-serif;
+      color: #4b5563;
+      background: #f9fafb;
+      -webkit-font-smoothing: antialiased;
+    }
+    /* Dense mode — tighten the studio when the user toggles density */
+    html[data-density="dense"] main { font-size: 13px; }
+    html[data-density="dense"] main .p-6 { padding: 16px; }
+    html[data-density="dense"] main .lg\:p-8 { padding: 20px; }
+    html[data-density="dense"] main .p-5 { padding: 14px; }
+    html[data-density="dense"] main .py-3 { padding-top: 6px; padding-bottom: 6px; }
+    html[data-density="dense"] main .py-2 { padding-top: 4px; padding-bottom: 4px; }
+    html[data-density="dense"] main .text-3xl { font-size: 24px; }
+    html[data-density="dense"] main .text-xl { font-size: 17px; }
+    html[data-density="dense"] main .space-y-8 > * + * { margin-top: 16px; }
+    html[data-density="dense"] main .space-y-6 > * + * { margin-top: 12px; }
+    html[data-density="dense"] main .gap-6 { gap: 12px; }
+    html[data-density="dense"] main .gap-4 { gap: 10px; }
+    html[data-density="dense"] main .mb-4 { margin-bottom: 8px; }
+    html[data-density="dense"] main .mt-2 { margin-top: 4px; }
+    html[data-density="dense"] main .rounded-2xl { border-radius: 12px; }
+
+    /* Print friendly for PDF export */
+    @media print {
+      aside, .sticky.top-0 { display: none !important; }
+      body { background: white; }
+      main { overflow: visible !important; }
+    }
+    /* Light scrollbar */
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 9999px; border: 2px solid transparent; background-clip: content-box; }
+    ::-webkit-scrollbar-thumb:hover { background: #9ca3af; background-clip: content-box; border: 2px solid transparent; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React + Babel (pinned) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <!-- App modules (order matters) -->
+  <script type="text/babel" src="app/tweaks-panel.jsx"></script>
+  <script type="text/babel" src="app/icons.jsx"></script>
+  <script type="text/babel" src="app/data.jsx"></script>
+  <script type="text/babel" src="app/ui.jsx"></script>
+  <script type="text/babel" src="app/state.jsx"></script>
+  <script type="text/babel" src="app/shell.jsx"></script>
+  <script type="text/babel" src="app/pages/dashboard.jsx"></script>
+  <script type="text/babel" src="app/pages/time.jsx"></script>
+  <script type="text/babel" src="app/pages/todos.jsx"></script>
+  <script type="text/babel" src="app/pages/roadmap.jsx"></script>
+  <script type="text/babel" src="app/pages/approvals.jsx"></script>
+  <script type="text/babel" src="app/pages/integrations.jsx"></script>
+  <script type="text/babel" src="app/pages/reports.jsx"></script>
+  <script type="text/babel" src="app/pages/admin.jsx"></script>
+  <script type="text/babel" src="app/app.jsx"></script>
+</body>
+</html>

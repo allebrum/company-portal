@@ -1,0 +1,545 @@
+'use client';
+
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import { qk } from '@/lib/queryKeys';
+import type {
+  CreateClientInput,
+  UpdateClientInput,
+  CreateProjectInput,
+  UpdateProjectInput,
+  CreateGoalInput,
+  UpdateGoalInput,
+  MoveGoalInput,
+  AddResourceInput,
+  CreateTodoInput,
+  UpdateTodoInput,
+  StartTimerInput,
+  ManualEntryInput,
+  PayConfigInput,
+  GeneratePeriodsInput,
+  ConnectIntegrationInput,
+  LinkFolderInput,
+  InviteUserInput,
+  UpdateUserInput,
+  ActivityPayload,
+  TimerPayload,
+  Role,
+} from '@allebrum/shared';
+
+// ---- Types (matching API row shapes; permissive to avoid double-maintaining schema) ----
+export type UserRow = {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  initials: string;
+  color: string;
+  billable: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+};
+export type ClientRow = { id: string; name: string; kind: string; color: string };
+export type ProjectRow = {
+  id: string;
+  clientId: string;
+  name: string;
+  code: string;
+  billable: boolean;
+  budgetHrs: number;
+  color: string;
+};
+export type GoalResourceRow = {
+  id: string;
+  goalId: string;
+  kind: string;
+  title: string;
+  url: string;
+  meta: string;
+  addedBy: string | null;
+  addedAt: string;
+};
+export type GoalRow = {
+  id: string;
+  clientId: string;
+  projectId: string;
+  title: string;
+  status: 'backlog' | 'in-progress' | 'review' | 'done';
+  ownerId: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  priority: 'low' | 'medium' | 'high';
+  tag: string;
+  resources: GoalResourceRow[];
+};
+export type TodoRow = {
+  id: string;
+  title: string;
+  assigneeId: string | null;
+  clientId: string | null;
+  projectId: string | null;
+  goalId: string | null;
+  status: 'open' | 'done';
+  dueDate: string | null;
+  estimateMin: number;
+  loggedMin: number;
+  priority: 'low' | 'medium' | 'high';
+  tags: string[];
+  private: boolean;
+};
+export type EntryRow = {
+  id: string;
+  userId: string;
+  projectId: string;
+  note: string;
+  startIso: string;
+  durationMin: number;
+  payPeriodId: string | null;
+  status: 'draft' | 'submitted' | 'approved' | 'rejected';
+  submittedAt: string | null;
+  approvedAt: string | null;
+  approvedBy: string | null;
+  rejectionNote: string | null;
+  todoId: string | null;
+};
+export type PayPeriodRow = {
+  id: string;
+  label: string;
+  startDate: string;
+  endDate: string;
+  approvalCutoff: string;
+  payDate: string;
+  status: 'open' | 'review' | 'closed';
+  closedAt: string | null;
+};
+export type PayConfigRow = {
+  id: string;
+  cadence: 'by-date' | 'weekly' | 'bi-weekly';
+  payDates: (number | 'last')[];
+  weekendRule: 'prior' | 'after' | 'as-is';
+  anchor: string | null;
+  processingBufferDays: number;
+  payDelayDays: number;
+  autoClose: boolean;
+  approverId: string | null;
+};
+export type IntegrationRow = {
+  kind: string;
+  connected: boolean;
+  account: string | null;
+  connectedAt: string | null;
+  lastSyncAt: string | null;
+  autoSync: boolean;
+  syncIntervalHours: number;
+  config: Record<string, unknown>;
+};
+export type DriveFolderRow = {
+  id: string;
+  drivePath: string;
+  clientId: string;
+  itemCount: number;
+  lastSync: string;
+};
+export type DriveItemRow = {
+  id: string;
+  folderId: string;
+  kind: string;
+  title: string;
+  path: string;
+  meta: string;
+  modified: string | null;
+};
+
+// ---- Bootstrap ----
+export type BootstrapData = {
+  me: UserRow;
+  users: UserRow[];
+  clients: ClientRow[];
+  projects: ProjectRow[];
+  goals: GoalRow[];
+  todos: TodoRow[];
+  entries: EntryRow[];
+  timers: TimerPayload[];
+  payPeriods: PayPeriodRow[];
+  payConfig: PayConfigRow;
+  integrations: IntegrationRow[];
+  driveFolders: DriveFolderRow[];
+  driveItems: DriveItemRow[];
+  activity: ActivityPayload[];
+};
+
+export function useBootstrap() {
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: qk.bootstrap,
+    queryFn: async () => {
+      const data = await api.get<BootstrapData>('/bootstrap');
+      qc.setQueryData(qk.users, data.users);
+      qc.setQueryData(qk.clients, data.clients);
+      qc.setQueryData(qk.projects, data.projects);
+      qc.setQueryData(qk.goals, data.goals);
+      qc.setQueryData(qk.todos, data.todos);
+      qc.setQueryData(qk.entries(), data.entries);
+      qc.setQueryData(qk.timers, data.timers);
+      qc.setQueryData(qk.payPeriods, data.payPeriods);
+      qc.setQueryData(qk.payConfig, data.payConfig);
+      qc.setQueryData(qk.integrations, data.integrations);
+      qc.setQueryData(qk.driveFolders, data.driveFolders);
+      qc.setQueryData(qk.driveItems(), data.driveItems);
+      qc.setQueryData(qk.activity, data.activity);
+      return data;
+    },
+  });
+}
+
+// ---- Users ----
+export function useUsers() {
+  return useQuery({ queryKey: qk.users, queryFn: () => api.get<UserRow[]>('/users') });
+}
+export function useInviteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: InviteUserInput) => api.post<UserRow>('/users', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.users }),
+  });
+}
+export function useUpdateUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateUserInput }) => api.patch<UserRow>(`/users/${id}`, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.users }),
+  });
+}
+export function useDeleteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del<{ ok: true }>(`/users/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.users }),
+  });
+}
+
+// ---- Clients / Projects ----
+export function useClients() {
+  return useQuery({ queryKey: qk.clients, queryFn: () => api.get<ClientRow[]>('/clients') });
+}
+export function useCreateClient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateClientInput) => api.post<ClientRow>('/clients', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.clients }),
+  });
+}
+export function useUpdateClient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateClientInput }) =>
+      api.patch<ClientRow>(`/clients/${id}`, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.clients }),
+  });
+}
+export function useProjects() {
+  return useQuery({ queryKey: qk.projects, queryFn: () => api.get<ProjectRow[]>('/projects') });
+}
+export function useCreateProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateProjectInput) => api.post<ProjectRow>('/projects', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.projects }),
+  });
+}
+export function useUpdateProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateProjectInput }) =>
+      api.patch<ProjectRow>(`/projects/${id}`, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.projects }),
+  });
+}
+
+// ---- Goals ----
+export function useGoals() {
+  return useQuery({ queryKey: qk.goals, queryFn: () => api.get<GoalRow[]>('/goals') });
+}
+export function useCreateGoal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateGoalInput) => api.post<GoalRow>('/goals', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.goals }),
+  });
+}
+export function useUpdateGoal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateGoalInput }) => api.patch<GoalRow>(`/goals/${id}`, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.goals }),
+  });
+}
+export function useMoveGoal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status }: { id: string } & MoveGoalInput) => api.patch<GoalRow>(`/goals/${id}/status`, { status }),
+    onMutate: async ({ id, status }) => {
+      await qc.cancelQueries({ queryKey: qk.goals });
+      const prev = qc.getQueryData<GoalRow[]>(qk.goals);
+      if (prev) {
+        qc.setQueryData(
+          qk.goals,
+          prev.map((g) => (g.id === id ? { ...g, status } : g)),
+        );
+      }
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(qk.goals, ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.goals }),
+  });
+}
+export function useAddResource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ goalId, input }: { goalId: string; input: AddResourceInput }) =>
+      api.post<GoalResourceRow>(`/goals/${goalId}/resources`, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.goals }),
+  });
+}
+export function useRemoveResource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ goalId, resourceId }: { goalId: string; resourceId: string }) =>
+      api.del<{ ok: true }>(`/goals/${goalId}/resources/${resourceId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.goals }),
+  });
+}
+
+// ---- Todos ----
+export function useTodos() {
+  return useQuery({ queryKey: qk.todos, queryFn: () => api.get<TodoRow[]>('/todos') });
+}
+export function useCreateTodo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateTodoInput) => api.post<TodoRow>('/todos', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.todos }),
+  });
+}
+export function useUpdateTodo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateTodoInput }) => api.patch<TodoRow>(`/todos/${id}`, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.todos }),
+  });
+}
+export function useToggleTodo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<TodoRow>(`/todos/${id}/toggle`),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: qk.todos });
+      const prev = qc.getQueryData<TodoRow[]>(qk.todos);
+      if (prev) {
+        qc.setQueryData(
+          qk.todos,
+          prev.map((t) =>
+            t.id === id ? { ...t, status: t.status === 'done' ? 'open' : 'done' } : t,
+          ),
+        );
+      }
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(qk.todos, ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.todos }),
+  });
+}
+export function useDeleteTodo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del<{ ok: true }>(`/todos/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.todos }),
+  });
+}
+
+// ---- Entries / Timer ----
+export function useEntries() {
+  return useQuery({ queryKey: qk.entries(), queryFn: () => api.get<EntryRow[]>('/entries') });
+}
+export function useActiveTimers() {
+  return useQuery({ queryKey: qk.timers, queryFn: () => api.get<TimerPayload[]>('/entries/timers') });
+}
+export function useStartTimer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: StartTimerInput) => api.post('/entries/timer/start', input),
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.timers }),
+  });
+}
+export function useStopTimer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post('/entries/timer/stop'),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: qk.timers });
+      qc.invalidateQueries({ queryKey: ['entries'] });
+    },
+  });
+}
+export function useAddManualEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ManualEntryInput) => api.post<EntryRow>('/entries', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['entries'] }),
+  });
+}
+export function useUpdateEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Partial<ManualEntryInput> }) =>
+      api.patch<EntryRow>(`/entries/${id}`, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['entries'] }),
+  });
+}
+export function useDeleteEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del<{ ok: true }>(`/entries/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['entries'] }),
+  });
+}
+export function useSubmitEntries() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => api.post<{ count: number }>('/entries/submit', { ids }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['entries'] }),
+  });
+}
+export function useApproveEntries() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => api.post<{ count: number }>('/entries/approve', { ids }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['entries'] }),
+  });
+}
+export function useRejectEntries() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ids, note }: { ids: string[]; note: string }) =>
+      api.post<{ count: number }>('/entries/reject', { ids, note }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['entries'] }),
+  });
+}
+export function useReopenEntries() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => api.post<{ count: number }>('/entries/reopen', { ids }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['entries'] }),
+  });
+}
+
+// ---- Pay periods + config ----
+export function usePayPeriods() {
+  return useQuery({ queryKey: qk.payPeriods, queryFn: () => api.get<PayPeriodRow[]>('/pay-periods') });
+}
+export function usePayConfig() {
+  return useQuery({ queryKey: qk.payConfig, queryFn: () => api.get<PayConfigRow>('/pay-config') });
+}
+export function useUpdatePayConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: Partial<PayConfigInput>) => api.patch<PayConfigRow>('/pay-config', patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.payConfig }),
+  });
+}
+export function useGeneratePeriods() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: GeneratePeriodsInput) => api.post<{ inserted: number }>('/pay-periods/generate', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.payPeriods }),
+  });
+}
+export function useClosePeriod() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<{ autoApproved: number }>(`/pay-periods/${id}/close`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.payPeriods });
+      qc.invalidateQueries({ queryKey: ['entries'] });
+    },
+  });
+}
+export function useReopenPeriod() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/pay-periods/${id}/reopen`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.payPeriods }),
+  });
+}
+export function useMovePeriodToReview() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/pay-periods/${id}/review`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.payPeriods }),
+  });
+}
+
+// ---- Integrations + Drive ----
+export function useIntegrations() {
+  return useQuery({ queryKey: qk.integrations, queryFn: () => api.get<IntegrationRow[]>('/integrations') });
+}
+export function useConnectIntegration() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ kind, input }: { kind: string; input: ConnectIntegrationInput }) =>
+      api.post<IntegrationRow>(`/integrations/${kind}/connect`, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.integrations }),
+  });
+}
+export function useDisconnectIntegration() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (kind: string) => api.post<IntegrationRow>(`/integrations/${kind}/disconnect`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.integrations }),
+  });
+}
+export function useUpdateIntegration() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ kind, patch }: { kind: string; patch: ConnectIntegrationInput }) =>
+      api.patch<IntegrationRow>(`/integrations/${kind}`, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.integrations }),
+  });
+}
+export function useSyncDrive() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<IntegrationRow>('/integrations/drive/sync'),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.integrations }),
+  });
+}
+export function useDriveFolders() {
+  return useQuery({ queryKey: qk.driveFolders, queryFn: () => api.get<DriveFolderRow[]>('/integrations/drive/folders') });
+}
+export function useDriveItems() {
+  return useQuery({ queryKey: qk.driveItems(), queryFn: () => api.get<DriveItemRow[]>('/integrations/drive/items') });
+}
+export function useLinkDriveFolder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: LinkFolderInput) => api.post<DriveFolderRow>('/integrations/drive/folders', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.driveFolders }),
+  });
+}
+export function useUnlinkDriveFolder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del<{ ok: true }>(`/integrations/drive/folders/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.driveFolders }),
+  });
+}
+
+// ---- Activity ----
+export function useActivity() {
+  return useQuery({ queryKey: qk.activity, queryFn: () => api.get<ActivityPayload[]>('/activity?limit=30') });
+}

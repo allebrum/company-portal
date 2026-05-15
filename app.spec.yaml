@@ -1,0 +1,64 @@
+name: allebrum-portal
+region: nyc
+
+services:
+  - name: api
+    source_dir: /
+    github:
+      branch: main
+      deploy_on_push: true
+      repo: allebrum/company-portal
+    build_command: |
+      corepack enable
+      pnpm install --frozen-lockfile
+      pnpm --filter @allebrum/shared build
+      pnpm --filter @allebrum/api build
+    run_command: pnpm --filter @allebrum/api start
+    instance_size_slug: basic-xs
+    instance_count: 1
+    http_port: 8080
+    health_check:
+      http_path: /api/health
+      initial_delay_seconds: 10
+    envs:
+      - { key: NODE_ENV, value: production }
+      - { key: API_PORT, value: "8080" }
+      - { key: DATABASE_URL, scope: RUN_TIME, type: SECRET }
+      - { key: REDIS_URL, scope: RUN_TIME, type: SECRET }
+      - { key: SESSION_SECRET, scope: RUN_TIME, type: SECRET }
+      - { key: WEB_ORIGIN, value: ${APP_URL} }
+
+static_sites:
+  - name: web
+    source_dir: /
+    github:
+      branch: main
+      deploy_on_push: true
+      repo: allebrum/company-portal
+    build_command: |
+      corepack enable
+      pnpm install --frozen-lockfile
+      pnpm --filter @allebrum/shared build
+      NEXT_PUBLIC_API_URL=${APP_URL} pnpm --filter @allebrum/web build
+    output_dir: apps/web/out
+    envs:
+      - { key: NEXT_PUBLIC_API_URL, value: ${APP_URL} }
+
+databases:
+  - name: db
+    engine: PG
+    version: "16"
+    production: true
+  - name: redis
+    engine: REDIS
+    version: "7"
+    production: true
+
+ingress:
+  rules:
+    - match: { path: { prefix: /api } }
+      component: { name: api }
+    - match: { path: { prefix: /socket.io } }
+      component: { name: api }
+    - match: { path: { prefix: / } }
+      component: { name: web }

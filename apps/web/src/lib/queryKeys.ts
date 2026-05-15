@@ -1,0 +1,17 @@
+export const qk = {
+  me: ['me'] as const,
+  bootstrap: ['bootstrap'] as const,
+  users: ['users'] as const,
+  clients: ['clients'] as const,
+  projects: ['projects'] as const,
+  goals: ['goals'] as const,
+  todos: ['todos'] as const,
+  entries: (params?: Record<string, unknown>) => (params ? (['entries', params] as const) : (['entries'] as const)),
+  timers: ['timers'] as const,
+  payPeriods: ['payPeriods'] as const,
+  payConfig: ['payConfig'] as const,
+  integrations: ['integrations'] as const,
+  driveFolders: ['driveFolders'] as const,
+  driveItems: (folderId?: string) => (folderId ? (['driveItems', folderId] as const) : (['driveItems'] as const)),
+  activity: ['activity'] as const,
+};

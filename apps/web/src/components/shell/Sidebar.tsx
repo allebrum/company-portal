@@ -1,0 +1,97 @@
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { Home, Clock, CheckSquare, Target, Shield, BarChart3, Settings } from 'lucide-react';
+import { useEntries } from '@/hooks/useResources';
+import { useAuth } from '@/hooks/useAuth';
+import { Avatar } from '../ui/Avatar';
+import { Button } from '../ui/Button';
+import { cn } from '@/lib/utils';
+
+const NAV = [
+  { id: 'dashboard', href: '/dashboard', label: 'Dashboard', Icon: Home },
+  { id: 'time', href: '/time', label: 'Time tracking', Icon: Clock },
+  { id: 'todos', href: '/todos', label: 'To-dos', Icon: CheckSquare },
+  { id: 'roadmap', href: '/roadmap', label: 'Roadmap', Icon: Target },
+  { id: 'approvals', href: '/approvals', label: 'Approvals', Icon: Shield },
+  { id: 'reports', href: '/reports', label: 'Reports', Icon: BarChart3 },
+  { id: 'admin', href: '/admin', label: 'Admin', Icon: Settings },
+];
+
+export function Sidebar() {
+  const pathname = usePathname();
+  const { me, logout } = useAuth();
+  const { data: entries } = useEntries();
+  const pending = (entries ?? []).filter((e) => e.status === 'submitted').length;
+
+  return (
+    <aside className="w-60 shrink-0 bg-white border-r border-gray-200 text-gray-700 flex flex-col">
+      <div className="px-5 pt-5 pb-4 flex items-center gap-2.5">
+        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-600 to-brand-700 flex items-center justify-center shadow-md">
+          <span className="text-white text-base font-bold">A</span>
+        </div>
+        <div className="leading-tight">
+          <div className="font-bold text-base tracking-tight text-gray-900">Allebrum</div>
+          <div className="text-[10px] uppercase tracking-widest text-brand-600 font-semibold">Company portal</div>
+        </div>
+      </div>
+
+      <nav className="px-2 pt-2 pb-4 flex-1 overflow-y-auto">
+        {NAV.map((item) => {
+          const active = pathname?.startsWith(item.href);
+          const showBadge = item.id === 'approvals' && pending > 0 && (me?.role === 'owner' || me?.role === 'admin');
+          return (
+            <Link
+              key={item.id}
+              href={item.href}
+              className={cn(
+                'group w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-semibold transition-colors mb-0.5',
+                active
+                  ? 'bg-brand-600 text-white shadow-md'
+                  : 'text-gray-700 hover:bg-brand-50 hover:text-brand-700',
+              )}
+            >
+              <item.Icon className={cn('w-4 h-4', active ? 'text-white' : 'text-gray-400 group-hover:text-brand-600')} />
+              <span className="flex-1">{item.label}</span>
+              {showBadge && (
+                <span
+                  className={cn(
+                    'text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-full min-w-[20px] text-center',
+                    active ? 'bg-white/25 text-white' : 'bg-brand-600 text-white',
+                  )}
+                >
+                  {pending}
+                </span>
+              )}
+            </Link>
+          );
+        })}
+        <div className="mt-6 px-3">
+          <div className="text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-2">Shortcuts</div>
+          <div className="space-y-2 text-xs text-gray-500">
+            <div className="flex items-center justify-between">
+              <span>Start timer</span>
+              <kbd className="kbd">T</kbd>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>New to-do</span>
+              <kbd className="kbd">N</kbd>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <div className="border-t border-gray-200 p-3 flex items-center gap-2">
+        <Avatar user={me ?? undefined} size={32} />
+        <div className="flex-1 min-w-0 leading-tight">
+          <div className="text-sm font-semibold text-gray-900 truncate">{me?.name ?? '—'}</div>
+          <div className="text-[11px] text-gray-500 truncate capitalize">{me?.role}</div>
+        </div>
+        <Button variant="ghost" size="sm" onClick={() => logout()} title="Sign out">
+          Sign out
+        </Button>
+      </div>
+    </aside>
+  );
+}
