@@ -17,11 +17,8 @@ authRouter.post('/login', rateLimit({ key: 'login', max: 10, windowSec: 60 }), v
       res.status(401).json({ error: 'invalid_credentials' });
       return;
     }
-    req.session.regenerate((err) => {
-      if (err) return next(err);
-      req.session.user = { userId: user.id };
-      req.session.save(async (saveErr) => {
-        if (saveErr) return next(saveErr);
+    const finishLogin = async (): Promise<void> => {
+      try {
         const permissions = [...(await getEffectivePermissions(user.id))];
         res.json({
           user: {
@@ -34,6 +31,17 @@ authRouter.post('/login', rateLimit({ key: 'login', max: 10, windowSec: 60 }), v
             permissions,
           },
         });
+      } catch (e) {
+        next(e);
+      }
+    };
+
+    req.session.regenerate((err) => {
+      if (err) return next(err);
+      req.session.user = { userId: user.id };
+      req.session.save((saveErr) => {
+        if (saveErr) return next(saveErr);
+        void finishLogin();
       });
     });
   } catch (e) {
