@@ -55,7 +55,8 @@ export default function MediaPage() {
     else if (p === 'error') toast.error('Drive connection failed');
   }, [toast]);
 
-  if (!can('media.manage')) {
+  const canUseDrive = can('media.manage') || can('integrations.manage');
+  if (!canUseDrive) {
     return <Empty title="No access" description="You don't have permission to use the media manager." />;
   }
 
@@ -90,7 +91,7 @@ export default function MediaPage() {
           <h1 className="text-2xl font-bold text-gray-900">Media manager</h1>
           <p className="text-sm text-gray-500">The shared Allebrum Portal Drive folder.</p>
         </div>
-        {connected && can('integrations.manage') && (
+        {connected && canUseDrive && (
           <Button
             variant="ghost"
             onClick={async () => {
@@ -119,7 +120,7 @@ export default function MediaPage() {
       ) : !connected ? (
         <Card className="p-8 text-center space-y-4">
           <Empty title="Google Drive not connected" description="Connect a Google account to browse and manage the shared portal folder." />
-          {can('integrations.manage') ? (
+          {canUseDrive ? (
             <a href={driveConnectUrl} className="inline-block">
               <Button variant="primary" size="lg">
                 <Plug className="w-4 h-4" /> Connect Google Drive

@@ -9,7 +9,7 @@ import {
 } from '@allebrum/shared';
 import type { IntegrationKind } from '@allebrum/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
-import { requirePermission } from '../auth/permissions.js';
+import { requirePermission, requireAnyPermission } from '../auth/permissions.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { env } from '../env.js';
@@ -37,6 +37,9 @@ import {
 } from '../services/drive.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
+
+// Drive/Media is reachable by anyone holding EITHER permission.
+const driveAccess = requireAnyPermission('integrations.manage', 'media.manage');
 
 export const integrationsRouter = Router();
 
@@ -111,7 +114,7 @@ integrationsRouter.get('/drive/status', async (_req, res, next) => {
   }
 });
 
-integrationsRouter.get('/drive/connect', requirePermission('integrations.manage'), async (req, res, next) => {
+integrationsRouter.get('/drive/connect', driveAccess, async (req, res, next) => {
   try {
     if (!driveConfigured()) {
       res.status(404).json({ error: 'drive_oauth_not_configured' });
@@ -146,7 +149,7 @@ integrationsRouter.get('/drive/callback', async (req, res, next) => {
   }
 });
 
-integrationsRouter.post('/drive/disconnect', requirePermission('integrations.manage'), async (_req, res, next) => {
+integrationsRouter.post('/drive/disconnect', driveAccess, async (_req, res, next) => {
   try {
     await disconnectDrive();
     res.json({ ok: true });
@@ -158,7 +161,7 @@ integrationsRouter.post('/drive/disconnect', requirePermission('integrations.man
 const ListQuery = z.object({ folderId: z.string().optional() });
 integrationsRouter.get(
   '/drive/list',
-  requirePermission('media.manage'),
+  driveAccess,
   validate(ListQuery, 'query'),
   async (req, res, next) => {
     try {
@@ -175,7 +178,7 @@ integrationsRouter.get(
 const CreateFolderSchema = z.object({ parentId: z.string().min(1), name: z.string().min(1).max(200) });
 integrationsRouter.post(
   '/drive/folders',
-  requirePermission('media.manage'),
+  driveAccess,
   validate(CreateFolderSchema),
   async (req, res, next) => {
     try {
@@ -189,7 +192,7 @@ integrationsRouter.post(
 
 integrationsRouter.post(
   '/drive/upload',
-  requirePermission('media.manage'),
+  driveAccess,
   upload.single('file'),
   async (req, res, next) => {
     try {
