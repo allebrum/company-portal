@@ -4,6 +4,7 @@ export * from './schemas/auth';
 export * from './schemas/user';
 export * from './schemas/rbac';
 export * from './schemas/settings';
+export * from './schemas/twofa';
 export * from './schemas/client';
 export * from './schemas/project';
 export * from './schemas/goal';

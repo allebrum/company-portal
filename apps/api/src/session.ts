@@ -6,6 +6,11 @@ import { redisSession } from './redis.js';
 declare module 'express-session' {
   interface SessionData {
     user?: { userId: string };
+    // Primary auth passed but a second factor is still required.
+    pending?: { userId: string };
+    // Transient WebAuthn challenge for register/authenticate ceremonies.
+    webauthnChallenge?: string;
+    oauthState?: string;
   }
 }
 

@@ -20,7 +20,7 @@ type AuthState = {
   loading: boolean;
   error: string | null;
   can: (perm: Permission) => boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<{ mfaRequired: boolean }>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
 };
@@ -54,10 +54,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   const login = useCallback(
-    async (email: string, password: string): Promise<void> => {
-      const { user } = await api.post<{ user: Me }>('/auth/login', { email, password });
-      setMe(user);
+    async (email: string, password: string): Promise<{ mfaRequired: boolean }> => {
+      const res = await api.post<{ user?: Me; mfaRequired?: boolean }>('/auth/login', { email, password });
+      if (res.mfaRequired) return { mfaRequired: true };
+      if (res.user) setMe(res.user);
       setError(null);
+      return { mfaRequired: false };
     },
     [],
   );
