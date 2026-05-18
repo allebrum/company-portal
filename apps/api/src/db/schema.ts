@@ -84,6 +84,39 @@ export const oauthTokens = pgTable('oauth_tokens', {
   pk: primaryKey({ columns: [t.userId, t.provider] }),
 }));
 
+// ---- 2FA: TOTP, recovery codes, WebAuthn passkeys ----
+export const userTotp = pgTable('user_totp', {
+  userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  secret: text('secret').notNull(),
+  enabled: boolean('enabled').notNull().default(false),
+  verifiedAt: timestamp('verified_at', { withTimezone: true, mode: 'string' }),
+  createdAt: ts(),
+});
+
+export const userRecoveryCodes = pgTable('user_recovery_codes', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  codeHash: text('code_hash').notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true, mode: 'string' }),
+  createdAt: ts(),
+}, (t) => ({
+  userIdx: index('recovery_codes_user_idx').on(t.userId),
+}));
+
+export const webauthnCredentials = pgTable('webauthn_credentials', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  credentialId: text('credential_id').notNull(),
+  publicKey: text('public_key').notNull(),
+  counter: integer('counter').notNull().default(0),
+  transports: text('transports').array().notNull().default(sql`'{}'::text[]`),
+  name: text('name').notNull().default('Passkey'),
+  createdAt: ts(),
+}, (t) => ({
+  credIdx: uniqueIndex('webauthn_cred_id_idx').on(t.credentialId),
+  userIdx: index('webauthn_user_idx').on(t.userId),
+}));
+
 // ---- RBAC: permissions catalog, groups, membership, overrides ----
 export const permissions = pgTable('permissions', {
   key: text('key').primaryKey(),
@@ -316,6 +349,8 @@ export const driveItems = pgTable('drive_items', {
 export type User = typeof users.$inferSelect;
 export type AppSettingsRow = typeof appSettings.$inferSelect;
 export type OAuthToken = typeof oauthTokens.$inferSelect;
+export type UserTotp = typeof userTotp.$inferSelect;
+export type WebauthnCredential = typeof webauthnCredentials.$inferSelect;
 export type Group = typeof groups.$inferSelect;
 export type Permission = typeof permissions.$inferSelect;
 export type Client = typeof clients.$inferSelect;

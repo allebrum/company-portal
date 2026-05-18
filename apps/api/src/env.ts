@@ -18,6 +18,9 @@ const EnvSchema = z.object({
   GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
   GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
   OAUTH_REDIRECT_URL: z.string().url().optional(),
+  // WebAuthn relying-party (defaults derived from WEB_ORIGIN)
+  WEBAUTHN_RP_ID: z.string().optional(),
+  WEBAUTHN_ORIGIN: z.string().url().optional(),
 });
 
 export const env = EnvSchema.parse(process.env);
@@ -27,3 +30,6 @@ export const googleOAuthConfigured = !!(
   env.GOOGLE_OAUTH_CLIENT_SECRET &&
   env.OAUTH_REDIRECT_URL
 );
+
+export const webauthnOrigin = env.WEBAUTHN_ORIGIN ?? env.WEB_ORIGIN;
+export const webauthnRpId = env.WEBAUTHN_RP_ID ?? new URL(webauthnOrigin).hostname;

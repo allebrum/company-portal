@@ -10,17 +10,12 @@ import { getEffectivePermissions } from '../auth/permissions.js';
 import { getUserGroupIds } from '../services/rbac.js';
 import { getSettings } from '../services/settings.js';
 import { buildConsentUrl, exchangeCodeForProfile } from '../auth/google.js';
+import { needsSecondFactor } from '../services/twofa.js';
 import { db } from '../db/client.js';
 import { oauthTokens } from '../db/schema.js';
 import { env, googleOAuthConfigured } from '../env.js';
 
 export const authRouter = Router();
-
-declare module 'express-session' {
-  interface SessionData {
-    oauthState?: string;
-  }
-}
 
 // Public: lets the login page decide which methods to show.
 authRouter.get('/config', async (_req, res, next) => {
@@ -49,6 +44,20 @@ authRouter.post('/login', rateLimit({ key: 'login', max: 10, windowSec: 60 }), v
       res.status(401).json({ error: 'invalid_credentials' });
       return;
     }
+
+    // Primary auth OK — gate on a second factor if required/enrolled.
+    if (await needsSecondFactor(user.id)) {
+      req.session.regenerate((err) => {
+        if (err) return next(err);
+        req.session.pending = { userId: user.id };
+        req.session.save((saveErr) => {
+          if (saveErr) return next(saveErr);
+          res.json({ mfaRequired: true });
+        });
+      });
+      return;
+    }
+
     const finishLogin = async (): Promise<void> => {
       try {
         const permissions = [...(await getEffectivePermissions(user.id))];
@@ -143,6 +152,18 @@ authRouter.get('/google/callback', async (req, res, next) => {
           updatedAt: new Date().toISOString(),
         },
       });
+
+    if (await needsSecondFactor(user.id)) {
+      req.session.regenerate((err) => {
+        if (err) return next(err);
+        req.session.pending = { userId: user.id };
+        req.session.save((saveErr) => {
+          if (saveErr) return next(saveErr);
+          res.redirect(`${env.WEB_ORIGIN}/login?mfa=1`);
+        });
+      });
+      return;
+    }
 
     req.session.regenerate((err) => {
       if (err) return next(err);

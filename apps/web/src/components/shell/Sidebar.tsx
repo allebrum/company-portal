@@ -83,11 +83,17 @@ export function Sidebar() {
       </nav>
 
       <div className="border-t border-gray-200 p-3 flex items-center gap-2">
-        <Avatar user={me ?? undefined} size={32} />
-        <div className="flex-1 min-w-0 leading-tight">
-          <div className="text-sm font-semibold text-gray-900 truncate">{me?.name ?? '—'}</div>
-          <div className="text-[11px] text-gray-500 truncate">{me?.email}</div>
-        </div>
+        <Link
+          href="/security"
+          className="flex items-center gap-2 flex-1 min-w-0 rounded-lg p-1 -m-1 hover:bg-gray-50"
+          title="Account security"
+        >
+          <Avatar user={me ?? undefined} size={32} />
+          <div className="flex-1 min-w-0 leading-tight">
+            <div className="text-sm font-semibold text-gray-900 truncate">{me?.name ?? '—'}</div>
+            <div className="text-[11px] text-gray-500 truncate">{me?.email}</div>
+          </div>
+        </Link>
         <Button variant="ghost" size="sm" onClick={() => logout()} title="Sign out">
           Sign out
         </Button>

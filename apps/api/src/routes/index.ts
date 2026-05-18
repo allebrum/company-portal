@@ -13,6 +13,7 @@ import { integrationsRouter } from './integrations.js';
 import { bootstrapRouter } from './bootstrap.js';
 import { rbacRouter } from './rbac.js';
 import { settingsRouter } from './settings.js';
+import { twofaRouter } from './twofa.js';
 
 export const apiRouter = Router();
 
@@ -21,6 +22,7 @@ apiRouter.get('/health', (_req, res) => {
 });
 
 apiRouter.use('/auth', authRouter);
+apiRouter.use('/auth', twofaRouter);
 apiRouter.use('/users', usersRouter);
 apiRouter.use('/clients', clientsRouter);
 apiRouter.use('/projects', projectsRouter);
