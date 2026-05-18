@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { randomBytes } from 'node:crypto';
+import multer from 'multer';
 import {
   ConnectIntegrationSchema,
   IntegrationKindParam,
-  LinkFolderSchema,
   INTEGRATION_KINDS,
 } from '@allebrum/shared';
 import type { IntegrationKind } from '@allebrum/shared';
@@ -11,17 +12,31 @@ import { requireAuth } from '../middleware/requireAuth.js';
 import { requirePermission } from '../auth/permissions.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import { HttpError } from '../middleware/errorHandler.js';
+import { env } from '../env.js';
 import {
   listIntegrations,
   connect,
   disconnect,
   update,
-  syncDrive,
-  listDriveFolders,
-  linkDriveFolder,
-  unlinkDriveFolder,
-  listDriveItems,
 } from '../services/integrations.js';
+import {
+  getDriveStatus,
+  buildDriveConsentUrl,
+  exchangeDriveCode,
+  saveDriveToken,
+  disconnectDrive,
+  ensureSharedFolder,
+  listFolder,
+  folderPath,
+  createFolder,
+  uploadFile,
+  getFileMeta,
+  downloadFile,
+  deleteEntry,
+  driveConfigured,
+} from '../services/drive.js';
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
 
 export const integrationsRouter = Router();
 
@@ -87,54 +102,131 @@ integrationsRouter.patch(
   },
 );
 
-// Drive-specific
-integrationsRouter.post('/drive/sync', requirePermission('integrations.manage'), async (req, res, next) => {
+// ---- Google Drive (real) ----
+integrationsRouter.get('/drive/status', async (_req, res, next) => {
   try {
-    const me = req.session.user!;
-    res.json(await syncDrive(me.userId));
+    res.json(await getDriveStatus());
   } catch (e) {
     next(e);
   }
 });
 
-integrationsRouter.get('/drive/folders', async (_req, res, next) => {
+integrationsRouter.get('/drive/connect', requirePermission('integrations.manage'), async (req, res, next) => {
   try {
-    res.json(await listDriveFolders());
-  } catch (e) {
-    next(e);
-  }
-});
-
-integrationsRouter.post(
-  '/drive/folders',
-  requirePermission('integrations.manage'),
-  validate(LinkFolderSchema),
-  async (req, res, next) => {
-    try {
-      const me = req.session.user!;
-      const row = await linkDriveFolder(getValidated<typeof LinkFolderSchema._type>(req), me.userId);
-      res.status(201).json(row);
-    } catch (e) {
-      next(e);
+    if (!driveConfigured()) {
+      res.status(404).json({ error: 'drive_oauth_not_configured' });
+      return;
     }
-  },
-);
+    const state = randomBytes(16).toString('hex');
+    req.session.oauthState = state;
+    req.session.save((err) => {
+      if (err) return next(err);
+      res.redirect(buildDriveConsentUrl(state));
+    });
+  } catch (e) {
+    next(e);
+  }
+});
 
-integrationsRouter.delete('/drive/folders/:id', requirePermission('integrations.manage'), async (req, res, next) => {
+integrationsRouter.get('/drive/callback', async (req, res, next) => {
+  const back = (q: string) => res.redirect(`${env.WEB_ORIGIN}/media?drive=${q}`);
   try {
-    const me = req.session.user!;
-    await unlinkDriveFolder(req.params.id!, me.userId);
+    const me = req.session.user;
+    if (!me) return back('error');
+    const code = typeof req.query.code === 'string' ? req.query.code : '';
+    const state = typeof req.query.state === 'string' ? req.query.state : '';
+    if (!code || !state || state !== req.session.oauthState) return back('bad_state');
+    delete req.session.oauthState;
+    const tokens = await exchangeDriveCode(code);
+    await saveDriveToken(me.userId, tokens);
+    await ensureSharedFolder();
+    return back('connected');
+  } catch {
+    return back('error');
+  }
+});
+
+integrationsRouter.post('/drive/disconnect', requirePermission('integrations.manage'), async (_req, res, next) => {
+  try {
+    await disconnectDrive();
     res.json({ ok: true });
   } catch (e) {
     next(e);
   }
 });
 
-const ItemsQuery = z.object({ folderId: z.string().uuid().optional() });
-integrationsRouter.get('/drive/items', validate(ItemsQuery, 'query'), async (req, res, next) => {
+const ListQuery = z.object({ folderId: z.string().optional() });
+integrationsRouter.get(
+  '/drive/list',
+  requirePermission('media.manage'),
+  validate(ListQuery, 'query'),
+  async (req, res, next) => {
+    try {
+      const q = getValidated<typeof ListQuery._type>(req, 'query');
+      const folderId = q.folderId || (await ensureSharedFolder());
+      const [entries, path] = await Promise.all([listFolder(folderId), folderPath(folderId)]);
+      res.json({ folderId, path, entries });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+const CreateFolderSchema = z.object({ parentId: z.string().min(1), name: z.string().min(1).max(200) });
+integrationsRouter.post(
+  '/drive/folders',
+  requirePermission('media.manage'),
+  validate(CreateFolderSchema),
+  async (req, res, next) => {
+    try {
+      const { parentId, name } = getValidated<typeof CreateFolderSchema._type>(req);
+      res.status(201).json(await createFolder(parentId, name));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+integrationsRouter.post(
+  '/drive/upload',
+  requirePermission('media.manage'),
+  upload.single('file'),
+  async (req, res, next) => {
+    try {
+      const file = (req as unknown as { file?: Express.Multer.File }).file;
+      const parentId = typeof req.body?.parentId === 'string' ? req.body.parentId : '';
+      if (!file || !parentId) {
+        res.status(400).json({ error: 'file_and_parent_required' });
+        return;
+      }
+      const entry = await uploadFile(parentId, file.originalname, file.mimetype, file.buffer);
+      res.status(201).json(entry);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+integrationsRouter.get('/drive/file/:id/download', requirePermission('media.manage'), async (req, res, next) => {
   try {
-    const q = getValidated<typeof ItemsQuery._type>(req, 'query');
-    res.json(await listDriveItems(q.folderId));
+    const id = req.params.id!;
+    const meta = await getFileMeta(id);
+    const stream = await downloadFile(id);
+    res.setHeader('Content-Type', meta.mimeType || 'application/octet-stream');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(meta.name ?? 'download')}"`,
+    );
+    stream.pipe(res);
+  } catch (e) {
+    next(e);
+  }
+});
+
+integrationsRouter.delete('/drive/file/:id', requirePermission('media.manage'), async (req, res, next) => {
+  try {
+    await deleteEntry(req.params.id!);
+    res.json({ ok: true });
   } catch (e) {
     next(e);
   }

@@ -21,6 +21,9 @@ const EnvSchema = z.object({
   // WebAuthn relying-party (defaults derived from WEB_ORIGIN)
   WEBAUTHN_RP_ID: z.string().optional(),
   WEBAUTHN_ORIGIN: z.string().url().optional(),
+  // Google Drive media manager (reuses the Google OAuth client; redirect
+  // defaults to the API origin's drive callback path)
+  DRIVE_OAUTH_REDIRECT_URL: z.string().url().optional(),
 });
 
 export const env = EnvSchema.parse(process.env);
@@ -33,3 +36,15 @@ export const googleOAuthConfigured = !!(
 
 export const webauthnOrigin = env.WEBAUTHN_ORIGIN ?? env.WEB_ORIGIN;
 export const webauthnRpId = env.WEBAUTHN_RP_ID ?? new URL(webauthnOrigin).hostname;
+
+// Drive uses the same Google OAuth app; just a distinct redirect path.
+export const driveRedirectUrl =
+  env.DRIVE_OAUTH_REDIRECT_URL ??
+  (env.OAUTH_REDIRECT_URL
+    ? env.OAUTH_REDIRECT_URL.replace(/\/api\/auth\/google\/callback$/, '/api/integrations/drive/callback')
+    : undefined);
+export const driveOAuthConfigured = !!(
+  env.GOOGLE_OAUTH_CLIENT_ID &&
+  env.GOOGLE_OAUTH_CLIENT_SECRET &&
+  driveRedirectUrl
+);

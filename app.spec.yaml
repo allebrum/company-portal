@@ -31,6 +31,7 @@ services:
       - { key: GOOGLE_OAUTH_CLIENT_ID, scope: RUN_TIME, type: SECRET }
       - { key: GOOGLE_OAUTH_CLIENT_SECRET, scope: RUN_TIME, type: SECRET }
       - { key: OAUTH_REDIRECT_URL, value: ${APP_URL}/api/auth/google/callback }
+      - { key: DRIVE_OAUTH_REDIRECT_URL, value: ${APP_URL}/api/integrations/drive/callback }
 
 static_sites:
   - name: web
