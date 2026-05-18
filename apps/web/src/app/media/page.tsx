@@ -47,12 +47,20 @@ export default function MediaPage() {
   const [newFolder, setNewFolder] = useState('');
   const [preview, setPreview] = useState<DriveEntry | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const handledDriveParam = useRef(false);
 
   useEffect(() => {
-    const p = new URLSearchParams(window.location.search).get('drive');
+    if (handledDriveParam.current) return;
+    const url = new URL(window.location.href);
+    const p = url.searchParams.get('drive');
+    if (!p) return;
+    handledDriveParam.current = true;
     if (p === 'connected') toast.success('Google Drive connected');
     else if (p === 'bad_state') toast.error('Drive connection expired — try again');
     else if (p === 'error') toast.error('Drive connection failed');
+    // Remove the param so a refresh/remount can't re-fire the toast.
+    url.searchParams.delete('drive');
+    window.history.replaceState({}, '', url.pathname + url.search);
   }, [toast]);
 
   const canUseDrive = can('media.manage') || can('integrations.manage');

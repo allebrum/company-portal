@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, XCircle, X } from 'lucide-react';
 
 type ToastKind = 'success' | 'error';
@@ -30,10 +30,15 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     [remove],
   );
 
-  const api: ToastApi = {
-    success: (m) => push('success', m),
-    error: (m) => push('error', m),
-  };
+  // Stable reference — must not change identity on every render, or
+  // effects that depend on the toast API will loop.
+  const api = useMemo<ToastApi>(
+    () => ({
+      success: (m: string) => push('success', m),
+      error: (m: string) => push('error', m),
+    }),
+    [push],
+  );
 
   return (
     <ToastContext.Provider value={api}>
