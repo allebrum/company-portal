@@ -68,7 +68,7 @@ export default function AdminPage() {
         <h1 className="text-2xl font-bold text-gray-900">Workspace settings</h1>
       </div>
 
-      <div className="flex items-center gap-2 border-b border-gray-200">
+      <div className="flex items-center gap-2 border-b border-gray-200 overflow-x-auto whitespace-nowrap">
         {(
           [
             { id: 'users', label: 'Team' },
@@ -82,7 +82,7 @@ export default function AdminPage() {
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`px-3 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${
+            className={`shrink-0 px-3 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${
               tab === t.id ? 'border-brand-600 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-900'
             }`}
           >
@@ -388,7 +388,7 @@ function WorkspaceTab() {
 
       <Section title="Projects" action={<Button variant="outline" onClick={() => { setPEditing(null); setPOpen(true); }}>Add project</Button>}>
         <Card>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto"><table className="w-full text-sm min-w-[640px]">
             <thead className="text-left text-[11px] uppercase text-gray-400 border-b border-gray-100">
               <tr>
                 <th className="px-4 py-3">Project</th>
@@ -413,7 +413,7 @@ function WorkspaceTab() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </Card>
       </Section>
 

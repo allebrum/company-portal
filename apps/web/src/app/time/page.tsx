@@ -138,7 +138,7 @@ export default function TimePage() {
           <Empty title="No entries match" />
         ) : (
           <Card>
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto"><table className="w-full text-sm min-w-[640px]">
               <thead className="text-left text-[11px] uppercase text-gray-400 border-b border-gray-100">
                 <tr>
                   <th className="px-4 py-3 w-10"></th>
@@ -210,7 +210,7 @@ export default function TimePage() {
                   );
                 })}
               </tbody>
-            </table>
+            </table></div>
           </Card>
         )}
       </Section>

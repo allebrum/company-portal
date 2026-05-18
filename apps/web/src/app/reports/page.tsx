@@ -102,7 +102,7 @@ export default function ReportsPage() {
 
       <Section title="Team utilization">
         <Card>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto"><table className="w-full text-sm min-w-[560px]">
             <thead className="text-left text-[11px] uppercase text-gray-400 border-b border-gray-100">
               <tr>
                 <th className="px-4 py-3">Member</th>
@@ -123,7 +123,7 @@ export default function ReportsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </Card>
       </Section>
 
@@ -157,7 +157,7 @@ export default function ReportsPage() {
 
       <Section title="Client revenue">
         <Card>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto"><table className="w-full text-sm min-w-[560px]">
             <thead className="text-left text-[11px] uppercase text-gray-400 border-b border-gray-100">
               <tr>
                 <th className="px-4 py-3">Client</th>
@@ -175,7 +175,7 @@ export default function ReportsPage() {
                 <tr><td colSpan={2} className="px-4 py-6 text-center text-gray-500">No billable revenue in this range.</td></tr>
               )}
             </tbody>
-          </table>
+          </table></div>
         </Card>
       </Section>
     </div>

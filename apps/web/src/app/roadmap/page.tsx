@@ -268,7 +268,7 @@ function ListView({ goals, openEdit, ...ctx }: Ctx & { goals: GoalRow[]; openEdi
 
   return (
     <Card>
-      <table className="w-full text-sm">
+      <div className="overflow-x-auto"><table className="w-full text-sm min-w-[640px]">
         <thead className="text-left text-[11px] uppercase text-gray-400 border-b border-gray-100">
           <tr>
             {head('title', 'Goal')}
@@ -311,7 +311,7 @@ function ListView({ goals, openEdit, ...ctx }: Ctx & { goals: GoalRow[]; openEdi
             <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No goals yet.</td></tr>
           )}
         </tbody>
-      </table>
+      </table></div>
     </Card>
   );
 }
