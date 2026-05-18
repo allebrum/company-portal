@@ -46,7 +46,9 @@ export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull(),
   email: text('email').notNull(),
-  passwordHash: text('password_hash').notNull(),
+  passwordHash: text('password_hash'),
+  googleSub: text('google_sub'),
+  authProvider: text('auth_provider').notNull().default('password'),
   initials: text('initials').notNull().default(''),
   color: text('color').notNull().default('#6b7280'),
   billable: numeric('billable', { precision: 10, scale: 2 }).notNull().default('150'),
@@ -55,6 +57,31 @@ export const users = pgTable('users', {
   updatedAt: updTs(),
 }, (t) => ({
   emailIdx: uniqueIndex('users_email_lower_idx').on(sql`lower(${t.email})`),
+  googleSubIdx: uniqueIndex('users_google_sub_idx').on(t.googleSub),
+}));
+
+// ---- App settings (singleton) ----
+export const appSettings = pgTable('app_settings', {
+  id: text('id').primaryKey().default('singleton'),
+  passwordLoginEnabled: boolean('password_login_enabled').notNull().default(true),
+  googleLoginEnabled: boolean('google_login_enabled').notNull().default(true),
+  allowedEmailDomains: text('allowed_email_domains').array().notNull().default(sql`'{}'::text[]`),
+  bookkeeperEmail: text('bookkeeper_email'),
+  sendToBookkeeperOn: text('send_to_bookkeeper_on').notNull().default('never'),
+  updatedAt: updTs(),
+});
+
+// ---- OAuth tokens (per user/provider; reused by later Drive/Gmail scopes) ----
+export const oauthTokens = pgTable('oauth_tokens', {
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  provider: text('provider').notNull(),
+  scopes: text('scopes').array().notNull().default(sql`'{}'::text[]`),
+  accessToken: text('access_token'),
+  refreshToken: text('refresh_token'),
+  expiry: timestamp('expiry', { withTimezone: true, mode: 'string' }),
+  updatedAt: updTs(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.userId, t.provider] }),
 }));
 
 // ---- RBAC: permissions catalog, groups, membership, overrides ----
@@ -287,6 +314,8 @@ export const driveItems = pgTable('drive_items', {
 
 // ---- Type exports ----
 export type User = typeof users.$inferSelect;
+export type AppSettingsRow = typeof appSettings.$inferSelect;
+export type OAuthToken = typeof oauthTokens.$inferSelect;
 export type Group = typeof groups.$inferSelect;
 export type Permission = typeof permissions.$inferSelect;
 export type Client = typeof clients.$inferSelect;

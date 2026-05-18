@@ -3,8 +3,9 @@ export const EV = {
   USER_CREATED: 'user:created',
   USER_UPDATED: 'user:updated',
   USER_DELETED: 'user:deleted',
-  // rbac
+  // rbac + settings
   GROUP_UPDATED: 'group:updated',
+  SETTINGS_UPDATED: 'settings:updated',
   // clients / projects
   CLIENT_CREATED: 'client:created',
   CLIENT_UPDATED: 'client:updated',
@@ -77,6 +78,7 @@ export interface ServerToClientEvents {
   [EV.USER_UPDATED]: (p: IdPayload) => void;
   [EV.USER_DELETED]: (p: IdPayload) => void;
   [EV.GROUP_UPDATED]: (p: IdPayload) => void;
+  [EV.SETTINGS_UPDATED]: (p: IdPayload) => void;
   [EV.CLIENT_CREATED]: (p: IdPayload) => void;
   [EV.CLIENT_UPDATED]: (p: IdPayload) => void;
   [EV.PROJECT_CREATED]: (p: IdPayload) => void;

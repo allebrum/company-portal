@@ -27,6 +27,9 @@ import type {
   CreateGroupInput,
   UpdateGroupInput,
   Permission,
+  AuthConfig,
+  AppSettings,
+  UpdateAppSettingsInput,
 } from '@allebrum/shared';
 
 // ---- Types (matching API row shapes; permissive to avoid double-maintaining schema) ----
@@ -554,6 +557,28 @@ export function useUnlinkDriveFolder() {
 // ---- Activity ----
 export function useActivity() {
   return useQuery({ queryKey: qk.activity, queryFn: () => api.get<ActivityPayload[]>('/activity?limit=30') });
+}
+
+// ---- Auth config (public) + workspace settings ----
+export function useAuthConfig() {
+  return useQuery({
+    queryKey: ['authConfig'] as const,
+    queryFn: () => api.get<AuthConfig>('/auth/config'),
+    staleTime: 60_000,
+  });
+}
+export function useSettings() {
+  return useQuery({ queryKey: ['settings'] as const, queryFn: () => api.get<AppSettings>('/settings') });
+}
+export function useUpdateSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: UpdateAppSettingsInput) => api.patch<AppSettings>('/settings', patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings'] });
+      qc.invalidateQueries({ queryKey: ['authConfig'] });
+    },
+  });
 }
 
 // ---- RBAC ----

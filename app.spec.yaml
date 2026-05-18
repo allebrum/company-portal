@@ -27,6 +27,10 @@ services:
       - { key: REDIS_URL, scope: RUN_TIME, type: SECRET }
       - { key: SESSION_SECRET, scope: RUN_TIME, type: SECRET }
       - { key: WEB_ORIGIN, value: ${APP_URL} }
+      # Google OAuth (optional — set these to enable "Continue with Google")
+      - { key: GOOGLE_OAUTH_CLIENT_ID, scope: RUN_TIME, type: SECRET }
+      - { key: GOOGLE_OAUTH_CLIENT_SECRET, scope: RUN_TIME, type: SECRET }
+      - { key: OAUTH_REDIRECT_URL, value: ${APP_URL}/api/auth/google/callback }
 
 static_sites:
   - name: web

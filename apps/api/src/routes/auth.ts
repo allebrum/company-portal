@@ -1,16 +1,48 @@
 import { Router } from 'express';
+import { randomBytes } from 'node:crypto';
 import { LoginSchema } from '@allebrum/shared';
+import type { AuthConfig } from '@allebrum/shared';
 import { validate, getValidated } from '../middleware/validate.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
-import { verifyLogin, getUser } from '../services/users.js';
+import { verifyLogin, getUser, findOrCreateGoogleUser } from '../services/users.js';
 import { getEffectivePermissions } from '../auth/permissions.js';
 import { getUserGroupIds } from '../services/rbac.js';
+import { getSettings } from '../services/settings.js';
+import { buildConsentUrl, exchangeCodeForProfile } from '../auth/google.js';
+import { db } from '../db/client.js';
+import { oauthTokens } from '../db/schema.js';
+import { env, googleOAuthConfigured } from '../env.js';
 
 export const authRouter = Router();
 
+declare module 'express-session' {
+  interface SessionData {
+    oauthState?: string;
+  }
+}
+
+// Public: lets the login page decide which methods to show.
+authRouter.get('/config', async (_req, res, next) => {
+  try {
+    const s = await getSettings();
+    const cfg: AuthConfig = {
+      passwordLoginEnabled: s.passwordLoginEnabled,
+      googleLoginEnabled: s.googleLoginEnabled && googleOAuthConfigured,
+    };
+    res.json(cfg);
+  } catch (e) {
+    next(e);
+  }
+});
+
 authRouter.post('/login', rateLimit({ key: 'login', max: 10, windowSec: 60 }), validate(LoginSchema), async (req, res, next) => {
   try {
+    const settings = await getSettings();
+    if (!settings.passwordLoginEnabled) {
+      res.status(403).json({ error: 'password_login_disabled' });
+      return;
+    }
     const { email, password } = getValidated<typeof LoginSchema._type>(req);
     const user = await verifyLogin(email, password);
     if (!user) {
@@ -46,6 +78,82 @@ authRouter.post('/login', rateLimit({ key: 'login', max: 10, windowSec: 60 }), v
     });
   } catch (e) {
     next(e);
+  }
+});
+
+// ---- Google OAuth ----
+authRouter.get('/google', async (req, res, next) => {
+  try {
+    const settings = await getSettings();
+    if (!settings.googleLoginEnabled || !googleOAuthConfigured) {
+      res.status(404).json({ error: 'google_login_unavailable' });
+      return;
+    }
+    const state = randomBytes(16).toString('hex');
+    req.session.oauthState = state;
+    req.session.save((err) => {
+      if (err) return next(err);
+      res.redirect(buildConsentUrl(state));
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+authRouter.get('/google/callback', async (req, res, next) => {
+  const fail = (reason: string) =>
+    res.redirect(`${env.WEB_ORIGIN}/login?error=${encodeURIComponent(reason)}`);
+  try {
+    const settings = await getSettings();
+    if (!settings.googleLoginEnabled || !googleOAuthConfigured) return fail('google_unavailable');
+
+    const code = typeof req.query.code === 'string' ? req.query.code : '';
+    const state = typeof req.query.state === 'string' ? req.query.state : '';
+    if (!code || !state || state !== req.session.oauthState) return fail('bad_state');
+    delete req.session.oauthState;
+
+    const { profile, tokens } = await exchangeCodeForProfile(code);
+    if (!profile.emailVerified) return fail('email_unverified');
+
+    if (settings.allowedEmailDomains.length > 0) {
+      const domain = profile.email.split('@')[1]?.toLowerCase() ?? '';
+      if (!settings.allowedEmailDomains.map((d) => d.toLowerCase()).includes(domain)) {
+        return fail('domain_not_allowed');
+      }
+    }
+
+    const user = await findOrCreateGoogleUser(profile);
+
+    await db
+      .insert(oauthTokens)
+      .values({
+        userId: user.id,
+        provider: 'google',
+        scopes: ['openid', 'email', 'profile'],
+        accessToken: tokens.access_token ?? null,
+        refreshToken: tokens.refresh_token ?? null,
+        expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+      })
+      .onConflictDoUpdate({
+        target: [oauthTokens.userId, oauthTokens.provider],
+        set: {
+          accessToken: tokens.access_token ?? null,
+          refreshToken: tokens.refresh_token ?? null,
+          expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+          updatedAt: new Date().toISOString(),
+        },
+      });
+
+    req.session.regenerate((err) => {
+      if (err) return next(err);
+      req.session.user = { userId: user.id };
+      req.session.save((saveErr) => {
+        if (saveErr) return next(saveErr);
+        res.redirect(`${env.WEB_ORIGIN}/dashboard`);
+      });
+    });
+  } catch {
+    return fail('oauth_failed');
   }
 });
 

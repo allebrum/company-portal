@@ -8,6 +8,8 @@ import {
   permissions,
   groupPermissions,
   userGroups,
+  appSettings,
+  oauthTokens,
   clients,
   projects,
   goals,
@@ -60,6 +62,8 @@ async function clearAll(): Promise<void> {
       ${goals},
       ${projects},
       ${clients},
+      ${oauthTokens},
+      ${appSettings},
       ${groupPermissions},
       ${userGroups},
       ${groups},
@@ -132,6 +136,9 @@ async function main(): Promise<void> {
   for (const u of userSeeds) {
     await db.insert(userGroups).values({ userId: userIds[u.key]!, groupId: groupIds[u.group]! });
   }
+
+  // ---- App settings (singleton) ----
+  await db.insert(appSettings).values({ id: 'singleton' });
 
   // ---- Clients ----
   const clientSeeds = [

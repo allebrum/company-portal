@@ -33,6 +33,8 @@ import {
   useDeleteGroup,
   useSetGroupPermissions,
   type UserRow,
+  useSettings,
+  useUpdateSettings,
   type ClientRow,
   type ProjectRow,
   type GroupRow,
@@ -41,7 +43,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { PAY_PERIOD_STATUS_LABEL, PAY_PERIOD_STATUS_PILL } from '@/lib/formatters';
 import type { Permission } from '@allebrum/shared';
 
-type Tab = 'users' | 'groups' | 'workspace' | 'pay' | 'integrations';
+type Tab = 'users' | 'groups' | 'auth' | 'workspace' | 'pay' | 'integrations';
 
 export default function AdminPage() {
   const { can } = useAuth();
@@ -71,6 +73,7 @@ export default function AdminPage() {
           [
             { id: 'users', label: 'Team' },
             { id: 'groups', label: 'Groups & Permissions' },
+            { id: 'auth', label: 'Authentication' },
             { id: 'workspace', label: 'Clients & Projects' },
             { id: 'pay', label: 'Pay periods' },
             { id: 'integrations', label: 'Integrations' },
@@ -90,6 +93,7 @@ export default function AdminPage() {
 
       {tab === 'users' && <UsersTab />}
       {tab === 'groups' && <GroupsTab />}
+      {tab === 'auth' && <AuthSettingsTab />}
       {tab === 'workspace' && <WorkspaceTab />}
       {tab === 'pay' && <PayTab />}
       {tab === 'integrations' && <IntegrationsTab />}
@@ -263,6 +267,91 @@ function GroupsTab() {
         ))}
         {groups.length === 0 && <Empty title="No groups yet" description="Create a group to start assigning permissions." />}
       </div>
+    </Section>
+  );
+}
+
+function AuthSettingsTab() {
+  const { can } = useAuth();
+  const toast = useToast();
+  const { data: settings } = useSettings();
+  const upd = useUpdateSettings();
+  const canManage = can('groups.manage');
+  const [domains, setDomains] = useState('');
+
+  if (!canManage) {
+    return <Empty title="Permission required" description="You need the 'Manage groups & permissions' permission." />;
+  }
+  if (!settings) return null;
+
+  const save = async (patch: Parameters<typeof upd.mutateAsync>[0], ok: string) => {
+    try {
+      await upd.mutateAsync(patch);
+      toast.success(ok);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Update failed');
+    }
+  };
+
+  return (
+    <Section title="Authentication">
+      <Card className="p-5 space-y-5 max-w-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-sm font-semibold text-gray-900">Email &amp; password sign-in</div>
+            <div className="text-[12px] text-gray-500">When off, only Google sign-in is allowed (server-enforced).</div>
+          </div>
+          <Checkbox
+            label=""
+            checked={settings.passwordLoginEnabled}
+            onChange={(v) => save({ passwordLoginEnabled: v }, 'Settings updated')}
+          />
+        </div>
+        <div className="flex items-start justify-between gap-4 border-t border-gray-100 pt-4">
+          <div>
+            <div className="text-sm font-semibold text-gray-900">Google sign-in</div>
+            <div className="text-[12px] text-gray-500">
+              Requires GOOGLE_OAUTH_CLIENT_ID / SECRET / OAUTH_REDIRECT_URL on the API.
+            </div>
+          </div>
+          <Checkbox
+            label=""
+            checked={settings.googleLoginEnabled}
+            onChange={(v) => save({ googleLoginEnabled: v }, 'Settings updated')}
+          />
+        </div>
+        <div className="border-t border-gray-100 pt-4">
+          <Field
+            label="Allowed Google email domains"
+            hint="Comma-separated (e.g. allebrum.com). Empty = any verified Google account."
+          >
+            <Input
+              defaultValue={settings.allowedEmailDomains.join(', ')}
+              onChange={(e) => setDomains(e.target.value)}
+              placeholder="allebrum.com"
+            />
+          </Field>
+          <div className="mt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                save(
+                  {
+                    allowedEmailDomains: domains
+                      .split(',')
+                      .map((d) => d.trim().toLowerCase())
+                      .filter(Boolean),
+                  },
+                  'Allowed domains updated',
+                )
+              }
+            >
+              Save domains
+            </Button>
+          </div>
+        </div>
+      </Card>
     </Section>
   );
 }
