@@ -14,7 +14,16 @@ const EnvSchema = z.object({
   SESSION_SECRET: z.string().min(16, 'SESSION_SECRET must be at least 16 characters'),
   WEB_ORIGIN: z.string().url().default('http://localhost:3000'),
   COOKIE_DOMAIN: z.string().optional(),
+  // Google OAuth (optional — the feature stays dormant until all three are set)
+  GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
+  GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
+  OAUTH_REDIRECT_URL: z.string().url().optional(),
 });
 
 export const env = EnvSchema.parse(process.env);
 export const isProd = env.NODE_ENV === 'production';
+export const googleOAuthConfigured = !!(
+  env.GOOGLE_OAUTH_CLIENT_ID &&
+  env.GOOGLE_OAUTH_CLIENT_SECRET &&
+  env.OAUTH_REDIRECT_URL
+);

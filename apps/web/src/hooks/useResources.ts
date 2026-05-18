@@ -24,7 +24,12 @@ import type {
   UpdateUserInput,
   ActivityPayload,
   TimerPayload,
-  Role,
+  CreateGroupInput,
+  UpdateGroupInput,
+  Permission,
+  AuthConfig,
+  AppSettings,
+  UpdateAppSettingsInput,
 } from '@allebrum/shared';
 
 // ---- Types (matching API row shapes; permissive to avoid double-maintaining schema) ----
@@ -32,7 +37,6 @@ export type UserRow = {
   id: string;
   name: string;
   email: string;
-  role: Role;
   initials: string;
   color: string;
   billable: string;
@@ -94,6 +98,7 @@ export type EntryRow = {
   projectId: string;
   note: string;
   startIso: string;
+  endIso: string | null;
   durationMin: number;
   payPeriodId: string | null;
   status: 'draft' | 'submitted' | 'approved' | 'rejected';
@@ -151,9 +156,19 @@ export type DriveItemRow = {
   modified: string | null;
 };
 
+export type GroupRow = {
+  id: string;
+  name: string;
+  description: string;
+  isSystem: boolean;
+  require2fa: boolean;
+  permissions: string[];
+};
+export type PermissionRow = { key: string; label: string; category: string };
+
 // ---- Bootstrap ----
 export type BootstrapData = {
-  me: UserRow;
+  me: (UserRow & { permissions: Permission[]; groupIds: string[] }) | null;
   users: UserRow[];
   clients: ClientRow[];
   projects: ProjectRow[];
@@ -542,4 +557,104 @@ export function useUnlinkDriveFolder() {
 // ---- Activity ----
 export function useActivity() {
   return useQuery({ queryKey: qk.activity, queryFn: () => api.get<ActivityPayload[]>('/activity?limit=30') });
+}
+
+// ---- Auth config (public) + workspace settings ----
+export function useAuthConfig() {
+  return useQuery({
+    queryKey: ['authConfig'] as const,
+    queryFn: () => api.get<AuthConfig>('/auth/config'),
+    staleTime: 60_000,
+  });
+}
+export function useSettings() {
+  return useQuery({ queryKey: ['settings'] as const, queryFn: () => api.get<AppSettings>('/settings') });
+}
+export function useUpdateSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: UpdateAppSettingsInput) => api.patch<AppSettings>('/settings', patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings'] });
+      qc.invalidateQueries({ queryKey: ['authConfig'] });
+    },
+  });
+}
+
+// ---- RBAC ----
+export function usePermissionsCatalog() {
+  return useQuery({
+    queryKey: qk.permissionsCatalog,
+    queryFn: () => api.get<PermissionRow[]>('/rbac/permissions'),
+  });
+}
+export function useGroups() {
+  return useQuery({ queryKey: qk.groups, queryFn: () => api.get<GroupRow[]>('/rbac/groups') });
+}
+export function useCreateGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateGroupInput) => api.post<GroupRow>('/rbac/groups', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.groups }),
+  });
+}
+export function useUpdateGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateGroupInput }) =>
+      api.patch<GroupRow>(`/rbac/groups/${id}`, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.groups }),
+  });
+}
+export function useDeleteGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del<{ ok: true }>(`/rbac/groups/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.groups }),
+  });
+}
+export function useSetGroupPermissions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, permissions }: { id: string; permissions: Permission[] }) =>
+      api.put<{ ok: true }>(`/rbac/groups/${id}/permissions`, { permissions }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.groups });
+      qc.invalidateQueries({ queryKey: qk.bootstrap });
+    },
+  });
+}
+export function useSetUserGroups() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, groupIds }: { id: string; groupIds: string[] }) =>
+      api.put<{ ok: true }>(`/rbac/users/${id}/groups`, { groupIds }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.users });
+      qc.invalidateQueries({ queryKey: qk.bootstrap });
+    },
+  });
+}
+export function useUserOverrides(userId: string | null) {
+  return useQuery({
+    queryKey: ['userOverrides', userId] as const,
+    enabled: !!userId,
+    queryFn: () => api.get<{ permission: string; effect: 'grant' | 'deny' }[]>(`/rbac/users/${userId}/overrides`),
+  });
+}
+export function useSetUserOverrides() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      overrides,
+    }: {
+      id: string;
+      overrides: { permission: Permission; effect: 'grant' | 'deny' }[];
+    }) => api.put<{ ok: true }>(`/rbac/users/${id}/overrides`, { overrides }),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['userOverrides', v.id] });
+      qc.invalidateQueries({ queryKey: qk.bootstrap });
+    },
+  });
 }

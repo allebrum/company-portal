@@ -33,6 +33,17 @@ export function isoDate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/** "9:00 AM" local time from an ISO string. */
+export function fmtClock(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
+/** "9:00 AM – 11:30 AM" (or just start if no end). */
+export function fmtTimeRange(startIso: string, endIso: string | null | undefined): string {
+  if (!endIso) return fmtClock(startIso);
+  return `${fmtClock(startIso)} – ${fmtClock(endIso)}`;
+}
+
 export function relativeFromIso(iso: string | null | undefined): string {
   if (!iso) return '';
   const d = new Date(iso);

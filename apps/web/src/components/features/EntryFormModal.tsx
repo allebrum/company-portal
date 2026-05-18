@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Field, Input, Select } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
+import { fmtMins } from '@/lib/formatters';
 import {
   useAddManualEntry,
   useUpdateEntry,
@@ -13,6 +14,27 @@ import {
   useProjects,
   type EntryRow,
 } from '@/hooks/useResources';
+
+// ISO (UTC) -> value for <input type="datetime-local"> (local wall time, no tz)
+function isoToLocalInput(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+// datetime-local value (local wall time) -> ISO string
+function localInputToIso(local: string): string {
+  return new Date(local).toISOString();
+}
+function defaultStart(): string {
+  const d = new Date();
+  d.setMinutes(0, 0, 0);
+  return isoToLocalInput(d.toISOString());
+}
+function plusHours(local: string, hours: number): string {
+  const d = new Date(local);
+  d.setHours(d.getHours() + hours);
+  return isoToLocalInput(d.toISOString());
+}
 
 export function EntryFormModal({
   open,
@@ -33,8 +55,8 @@ export function EntryFormModal({
 
   const [clientId, setClientId] = useState('');
   const [projectId, setProjectId] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [durationMin, setDurationMin] = useState(60);
+  const [start, setStart] = useState(defaultStart());
+  const [end, setEnd] = useState(plusHours(defaultStart(), 1));
   const [note, setNote] = useState('');
 
   useEffect(() => {
@@ -43,14 +65,20 @@ export function EntryFormModal({
       const proj = projects.find((p) => p.id === entry.projectId);
       setClientId(proj?.clientId ?? '');
       setProjectId(entry.projectId);
-      setDate(entry.startIso.slice(0, 10));
-      setDurationMin(entry.durationMin);
+      const s = isoToLocalInput(entry.startIso);
+      setStart(s);
+      setEnd(
+        entry.endIso
+          ? isoToLocalInput(entry.endIso)
+          : isoToLocalInput(new Date(new Date(entry.startIso).getTime() + entry.durationMin * 60000).toISOString()),
+      );
       setNote(entry.note);
     } else {
+      const s = defaultStart();
       setClientId('');
       setProjectId('');
-      setDate(new Date().toISOString().slice(0, 10));
-      setDurationMin(60);
+      setStart(s);
+      setEnd(plusHours(s, 1));
       setNote('');
     }
   }, [open, entry, projects]);
@@ -58,21 +86,29 @@ export function EntryFormModal({
   const projectsForClient = projects.filter((p) => p.clientId === clientId);
   const isDraft = entry?.status === 'draft';
 
+  const durationMin = useMemo(() => {
+    const ms = new Date(end).getTime() - new Date(start).getTime();
+    return Math.round(ms / 60000);
+  }, [start, end]);
+  const durationValid = durationMin > 0 && durationMin <= 24 * 60;
+
   const onSave = async () => {
     if (!projectId) {
       toast.error('Pick a project');
       return;
     }
-    const startIso = new Date(`${date}T09:00:00`).toISOString();
+    if (!durationValid) {
+      toast.error(durationMin <= 0 ? 'End must be after start' : 'Entry cannot exceed 24 hours');
+      return;
+    }
+    const startIso = localInputToIso(start);
+    const endIso = localInputToIso(end);
     try {
       if (isEdit && entry) {
-        await update.mutateAsync({
-          id: entry.id,
-          patch: { projectId, note, startIso, durationMin },
-        });
+        await update.mutateAsync({ id: entry.id, patch: { projectId, note, startIso, endIso } });
         toast.success('Entry updated');
       } else {
-        await add.mutateAsync({ projectId, note: note || 'Manual entry', startIso, durationMin, todoId: null });
+        await add.mutateAsync({ projectId, note: note || 'Manual entry', startIso, endIso, todoId: null });
         toast.success('Entry added');
       }
       onClose();
@@ -108,7 +144,7 @@ export function EntryFormModal({
             </Button>
           )}
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={onSave} disabled={!projectId || busy}>
+          <Button variant="primary" onClick={onSave} disabled={!projectId || !durationValid || busy}>
             {isEdit ? 'Save changes' : 'Add entry'}
           </Button>
         </>
@@ -134,8 +170,26 @@ export function EntryFormModal({
           </Select>
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-          <Field label="Duration (min)"><Input type="number" min={1} value={durationMin} onChange={(e) => setDurationMin(Number(e.target.value) || 0)} /></Field>
+          <Field label="Start">
+            <Input
+              type="datetime-local"
+              value={start}
+              onChange={(e) => {
+                const v = e.target.value;
+                setStart(v);
+                if (new Date(end).getTime() <= new Date(v).getTime()) setEnd(plusHours(v, 1));
+              }}
+            />
+          </Field>
+          <Field label="End">
+            <Input type="datetime-local" value={end} min={start} onChange={(e) => setEnd(e.target.value)} />
+          </Field>
+        </div>
+        <div className={`text-sm ${durationValid ? 'text-gray-600' : 'text-red-600'}`}>
+          Duration:{' '}
+          <span className="font-semibold tabular-nums">
+            {durationValid ? fmtMins(durationMin) : durationMin <= 0 ? 'end must be after start' : 'exceeds 24h'}
+          </span>
         </div>
         <Field label="Note"><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="What did you do?" /></Field>
       </div>

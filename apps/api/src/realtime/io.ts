@@ -4,7 +4,8 @@ import { createAdapter } from '@socket.io/redis-adapter';
 import type { RequestHandler } from 'express';
 import { redisPub, redisSub } from '../redis.js';
 import { env } from '../env.js';
-import { ORG_ROOM, APPROVERS_ROOM, roomForUser, isApprover } from './rooms.js';
+import { ORG_ROOM, APPROVERS_ROOM, roomForUser } from './rooms.js';
+import { getEffectivePermissions } from '../auth/permissions.js';
 import type { ServerToClientEvents, ClientToServerEvents } from '@allebrum/shared';
 
 let _io: Server<ClientToServerEvents, ServerToClientEvents> | null = null;
@@ -27,7 +28,7 @@ export function initIO(httpServer: HttpServer, sessionMiddleware: RequestHandler
   io.engine.use(sessionMiddleware as unknown as (req: unknown, res: unknown, next: () => void) => void);
 
   io.use((socket, next) => {
-    const req = socket.request as unknown as { session?: { user?: { userId: string; role: 'owner' | 'admin' | 'member' | 'bookkeeper' } } };
+    const req = socket.request as unknown as { session?: { user?: { userId: string } } };
     const user = req.session?.user;
     if (!user) return next(new Error('unauthorized'));
     socket.data.user = user;
@@ -35,14 +36,18 @@ export function initIO(httpServer: HttpServer, sessionMiddleware: RequestHandler
   });
 
   io.on('connection', (socket) => {
-    const user = socket.data.user as { userId: string; role: 'owner' | 'admin' | 'member' | 'bookkeeper' } | undefined;
+    const user = socket.data.user as { userId: string } | undefined;
     if (!user) {
       socket.disconnect(true);
       return;
     }
     socket.join(ORG_ROOM);
     socket.join(roomForUser(user.userId));
-    if (isApprover(user.role)) socket.join(APPROVERS_ROOM);
+    void getEffectivePermissions(user.userId)
+      .then((perms) => {
+        if (perms.has('time_entry.approve')) socket.join(APPROVERS_ROOM);
+      })
+      .catch(() => undefined);
   });
 
   _io = io;

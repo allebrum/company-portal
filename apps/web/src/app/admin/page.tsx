@@ -26,21 +26,39 @@ import {
   useSyncDrive,
   useDriveFolders,
   useUnlinkDriveFolder,
+  useGroups,
+  usePermissionsCatalog,
+  useCreateGroup,
+  useUpdateGroup,
+  useDeleteGroup,
+  useSetGroupPermissions,
   type UserRow,
+  useSettings,
+  useUpdateSettings,
   type ClientRow,
   type ProjectRow,
+  type GroupRow,
 } from '@/hooks/useResources';
 import { useAuth } from '@/hooks/useAuth';
 import { PAY_PERIOD_STATUS_LABEL, PAY_PERIOD_STATUS_PILL } from '@/lib/formatters';
+import type { Permission } from '@allebrum/shared';
 
-type Tab = 'users' | 'workspace' | 'pay' | 'integrations';
+type Tab = 'users' | 'groups' | 'auth' | 'workspace' | 'pay' | 'integrations';
 
 export default function AdminPage() {
-  const { me } = useAuth();
+  const { can } = useAuth();
   const [tab, setTab] = useState<Tab>('users');
 
-  if (!(me?.role === 'owner' || me?.role === 'admin' || me?.role === 'bookkeeper')) {
-    return <Empty title="Admin access only" description="This page is limited to Owners, Admins, and Bookkeepers." />;
+  const hasAnyAdmin =
+    can('users.manage') ||
+    can('groups.manage') ||
+    can('pay.manage') ||
+    can('clients.manage') ||
+    can('projects.manage') ||
+    can('integrations.manage');
+
+  if (!hasAnyAdmin) {
+    return <Empty title="Admin access only" description="You don't have permission to manage workspace settings." />;
   }
 
   return (
@@ -50,10 +68,12 @@ export default function AdminPage() {
         <h1 className="text-2xl font-bold text-gray-900">Workspace settings</h1>
       </div>
 
-      <div className="flex items-center gap-2 border-b border-gray-200">
+      <div className="flex items-center gap-2 border-b border-gray-200 overflow-x-auto whitespace-nowrap">
         {(
           [
             { id: 'users', label: 'Team' },
+            { id: 'groups', label: 'Groups & Permissions' },
+            { id: 'auth', label: 'Authentication' },
             { id: 'workspace', label: 'Clients & Projects' },
             { id: 'pay', label: 'Pay periods' },
             { id: 'integrations', label: 'Integrations' },
@@ -62,7 +82,7 @@ export default function AdminPage() {
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`px-3 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${
+            className={`shrink-0 px-3 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${
               tab === t.id ? 'border-brand-600 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-900'
             }`}
           >
@@ -72,6 +92,8 @@ export default function AdminPage() {
       </div>
 
       {tab === 'users' && <UsersTab />}
+      {tab === 'groups' && <GroupsTab />}
+      {tab === 'auth' && <AuthSettingsTab />}
       {tab === 'workspace' && <WorkspaceTab />}
       {tab === 'pay' && <PayTab />}
       {tab === 'integrations' && <IntegrationsTab />}
@@ -80,13 +102,13 @@ export default function AdminPage() {
 }
 
 function UsersTab() {
-  const { me } = useAuth();
+  const { me, can } = useAuth();
   const toast = useToast();
   const { data: users = [] } = useUsers();
   const remove = useDeleteUser();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<UserRow | null>(null);
-  const canManage = me?.role === 'owner' || me?.role === 'admin';
+  const canManage = can('users.manage');
 
   return (
     <Section
@@ -106,9 +128,9 @@ function UsersTab() {
                 <div className="text-sm font-semibold text-gray-900">{u.name}</div>
                 <div className="text-[12px] text-gray-500">{u.email}</div>
               </div>
-              <Pill tone="purple">{u.role}</Pill>
+              <Pill tone={u.status === 'invited' ? 'yellow' : 'gray'}>{u.status}</Pill>
               <span className="text-xs text-gray-500 tabular-nums">${u.billable}/hr</span>
-              {me?.role === 'owner' && me.id !== u.id && (
+              {canManage && me?.id !== u.id && (
                 <button
                   onClick={async (e) => {
                     e.stopPropagation();
@@ -130,6 +152,206 @@ function UsersTab() {
         </ul>
       </Card>
       <UserFormModal open={modalOpen} onClose={() => setModalOpen(false)} user={editing} />
+    </Section>
+  );
+}
+
+function GroupsTab() {
+  const { can } = useAuth();
+  const toast = useToast();
+  const { data: groups = [] } = useGroups();
+  const { data: catalog = [] } = usePermissionsCatalog();
+  const createGroup = useCreateGroup();
+  const updateGroup = useUpdateGroup();
+  const deleteGroup = useDeleteGroup();
+  const setPerms = useSetGroupPermissions();
+  const canManage = can('groups.manage');
+  const [newName, setNewName] = useState('');
+
+  const byCategory = catalog.reduce<Record<string, typeof catalog>>((acc, p) => {
+    (acc[p.category || 'Other'] ||= []).push(p);
+    return acc;
+  }, {});
+
+  const run = async (fn: () => Promise<unknown>, ok: string) => {
+    try {
+      await fn();
+      toast.success(ok);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Action failed');
+    }
+  };
+
+  if (!canManage) {
+    return <Empty title="Permission required" description="You need the 'Manage groups & permissions' permission." />;
+  }
+
+  const togglePerm = (g: GroupRow, perm: string, on: boolean) => {
+    const next = on ? [...g.permissions, perm] : g.permissions.filter((p) => p !== perm);
+    return run(
+      () => setPerms.mutateAsync({ id: g.id, permissions: next as Permission[] }),
+      'Permissions updated',
+    );
+  };
+
+  return (
+    <Section
+      title="Groups & Permissions"
+      action={
+        <div className="flex items-center gap-2">
+          <Input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="New group name"
+            className="w-48"
+          />
+          <Button
+            variant="primary"
+            disabled={!newName.trim() || createGroup.isPending}
+            onClick={async () => {
+              await run(() => createGroup.mutateAsync({ name: newName.trim(), description: '', require2fa: false }), 'Group created');
+              setNewName('');
+            }}
+          >
+            Add group
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        {groups.map((g) => (
+          <Card key={g.id} className="p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-gray-900">{g.name}</span>
+                  {g.isSystem && <Pill tone="gray">system</Pill>}
+                </div>
+                <div className="text-[12px] text-gray-500">{g.description || '—'}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  label="Require 2FA"
+                  checked={g.require2fa}
+                  onChange={(v) => run(() => updateGroup.mutateAsync({ id: g.id, patch: { require2fa: v } }), 'Group updated')}
+                />
+                {!g.isSystem && (
+                  <button
+                    onClick={() => run(() => deleteGroup.mutateAsync(g.id), 'Group deleted')}
+                    className="text-gray-300 hover:text-red-600"
+                    title="Delete group"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
+              {Object.entries(byCategory).map(([cat, perms]) => (
+                <div key={cat}>
+                  <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold mb-1.5">{cat}</div>
+                  <div className="space-y-1">
+                    {perms.map((p) => (
+                      <Checkbox
+                        key={p.key}
+                        label={p.label}
+                        checked={g.permissions.includes(p.key)}
+                        onChange={(on) => togglePerm(g, p.key, on)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        ))}
+        {groups.length === 0 && <Empty title="No groups yet" description="Create a group to start assigning permissions." />}
+      </div>
+    </Section>
+  );
+}
+
+function AuthSettingsTab() {
+  const { can } = useAuth();
+  const toast = useToast();
+  const { data: settings } = useSettings();
+  const upd = useUpdateSettings();
+  const canManage = can('groups.manage');
+  const [domains, setDomains] = useState('');
+
+  if (!canManage) {
+    return <Empty title="Permission required" description="You need the 'Manage groups & permissions' permission." />;
+  }
+  if (!settings) return null;
+
+  const save = async (patch: Parameters<typeof upd.mutateAsync>[0], ok: string) => {
+    try {
+      await upd.mutateAsync(patch);
+      toast.success(ok);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Update failed');
+    }
+  };
+
+  return (
+    <Section title="Authentication">
+      <Card className="p-5 space-y-5 max-w-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-sm font-semibold text-gray-900">Email &amp; password sign-in</div>
+            <div className="text-[12px] text-gray-500">When off, only Google sign-in is allowed (server-enforced).</div>
+          </div>
+          <Checkbox
+            label=""
+            checked={settings.passwordLoginEnabled}
+            onChange={(v) => save({ passwordLoginEnabled: v }, 'Settings updated')}
+          />
+        </div>
+        <div className="flex items-start justify-between gap-4 border-t border-gray-100 pt-4">
+          <div>
+            <div className="text-sm font-semibold text-gray-900">Google sign-in</div>
+            <div className="text-[12px] text-gray-500">
+              Requires GOOGLE_OAUTH_CLIENT_ID / SECRET / OAUTH_REDIRECT_URL on the API.
+            </div>
+          </div>
+          <Checkbox
+            label=""
+            checked={settings.googleLoginEnabled}
+            onChange={(v) => save({ googleLoginEnabled: v }, 'Settings updated')}
+          />
+        </div>
+        <div className="border-t border-gray-100 pt-4">
+          <Field
+            label="Allowed Google email domains"
+            hint="Comma-separated (e.g. allebrum.com). Empty = any verified Google account."
+          >
+            <Input
+              defaultValue={settings.allowedEmailDomains.join(', ')}
+              onChange={(e) => setDomains(e.target.value)}
+              placeholder="allebrum.com"
+            />
+          </Field>
+          <div className="mt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                save(
+                  {
+                    allowedEmailDomains: domains
+                      .split(',')
+                      .map((d) => d.trim().toLowerCase())
+                      .filter(Boolean),
+                  },
+                  'Allowed domains updated',
+                )
+              }
+            >
+              Save domains
+            </Button>
+          </div>
+        </div>
+      </Card>
     </Section>
   );
 }
@@ -166,7 +388,7 @@ function WorkspaceTab() {
 
       <Section title="Projects" action={<Button variant="outline" onClick={() => { setPEditing(null); setPOpen(true); }}>Add project</Button>}>
         <Card>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto"><table className="w-full text-sm min-w-[640px]">
             <thead className="text-left text-[11px] uppercase text-gray-400 border-b border-gray-100">
               <tr>
                 <th className="px-4 py-3">Project</th>
@@ -191,7 +413,7 @@ function WorkspaceTab() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </Card>
       </Section>
 

@@ -1,5 +1,66 @@
-export const ROLES = ['owner', 'admin', 'member', 'bookkeeper'] as const;
-export type Role = (typeof ROLES)[number];
+// ---- RBAC: granular permission catalog (replaces the old role enum) ----
+export const PERMISSIONS = [
+  'time_entry.create',
+  'time_entry.view_own',
+  'time_entry.view_all',
+  'time_entry.edit',
+  'time_entry.delete',
+  'time_entry.submit',
+  'time_entry.approve',
+  'pay.manage',
+  'users.manage',
+  'groups.manage',
+  'clients.manage',
+  'projects.manage',
+  'goals.manage',
+  'integrations.manage',
+  'media.manage',
+] as const;
+export type Permission = (typeof PERMISSIONS)[number];
+
+export const PERMISSION_CATEGORIES: Record<string, Permission[]> = {
+  'Time entries': [
+    'time_entry.create',
+    'time_entry.view_own',
+    'time_entry.view_all',
+    'time_entry.edit',
+    'time_entry.delete',
+    'time_entry.submit',
+    'time_entry.approve',
+  ],
+  Payroll: ['pay.manage'],
+  People: ['users.manage', 'groups.manage'],
+  Workspace: ['clients.manage', 'projects.manage', 'goals.manage', 'integrations.manage', 'media.manage'],
+};
+
+export const PERMISSION_LABELS: Record<Permission, string> = {
+  'time_entry.create': 'Create time entries',
+  'time_entry.view_own': 'View own time entries',
+  'time_entry.view_all': "View everyone's time entries",
+  'time_entry.edit': 'Edit any time entry',
+  'time_entry.delete': 'Delete any time entry',
+  'time_entry.submit': 'Submit time for approval',
+  'time_entry.approve': 'Approve / reject / reopen time',
+  'pay.manage': 'Manage pay periods & pay config',
+  'users.manage': 'Invite, edit, remove users',
+  'groups.manage': 'Manage groups & permissions',
+  'clients.manage': 'Create / edit clients',
+  'projects.manage': 'Create / edit projects',
+  'goals.manage': 'Manage roadmap goals',
+  'integrations.manage': 'Manage integrations',
+  'media.manage': 'Manage media / Drive',
+};
+
+// Built-in starter groups (seeded; users get mapped onto these).
+export const SYSTEM_GROUPS = ['Owner', 'Admin', 'Bookkeeper', 'Member'] as const;
+export type SystemGroup = (typeof SYSTEM_GROUPS)[number];
+
+export const SYSTEM_GROUP_PERMISSIONS: Record<SystemGroup, Permission[]> = {
+  Owner: [...PERMISSIONS],
+  Admin: PERMISSIONS.filter((p) => p !== 'groups.manage'),
+  Bookkeeper: ['time_entry.view_all', 'pay.manage'],
+  Member: ['time_entry.create', 'time_entry.view_own', 'time_entry.submit', 'goals.manage'],
+};
 
 export const ENTRY_STATUSES = ['draft', 'submitted', 'approved', 'rejected'] as const;
 export type EntryStatus = (typeof ENTRY_STATUSES)[number];

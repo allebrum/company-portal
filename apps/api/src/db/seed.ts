@@ -4,6 +4,12 @@ import { sql } from 'drizzle-orm';
 import { db, sqlClient } from './client.js';
 import {
   users,
+  groups,
+  permissions,
+  groupPermissions,
+  userGroups,
+  appSettings,
+  oauthTokens,
   clients,
   projects,
   goals,
@@ -17,6 +23,13 @@ import {
   driveItems,
   activityLog,
 } from './schema.js';
+import {
+  PERMISSIONS,
+  PERMISSION_LABELS,
+  PERMISSION_CATEGORIES,
+  SYSTEM_GROUPS,
+  SYSTEM_GROUP_PERMISSIONS,
+} from '@allebrum/shared';
 
 const DEFAULT_PASSWORD = 'Allebrum2026!';
 
@@ -49,6 +62,12 @@ async function clearAll(): Promise<void> {
       ${goals},
       ${projects},
       ${clients},
+      ${oauthTokens},
+      ${appSettings},
+      ${groupPermissions},
+      ${userGroups},
+      ${groups},
+      ${permissions},
       ${users}
     restart identity cascade
   `);
@@ -65,12 +84,12 @@ async function main(): Promise<void> {
 
   // ---- Users ----
   const userSeeds = [
-    { key: 'senica', name: 'Senica Gonzalez', initials: 'SG', role: 'owner' as const, color: '#9333ea', email: 'senica@allebrum.com', billable: '225' },
-    { key: 'marcus', name: 'Marcus Lee', initials: 'ML', role: 'member' as const, color: '#2563eb', email: 'marcus@allebrum.com', billable: '185' },
-    { key: 'priya', name: 'Priya Patel', initials: 'PP', role: 'member' as const, color: '#0d9488', email: 'priya@allebrum.com', billable: '165' },
-    { key: 'jordan', name: 'Jordan Reyes', initials: 'JR', role: 'member' as const, color: '#db2777', email: 'jordan@allebrum.com', billable: '145' },
-    { key: 'avery', name: 'Avery Chen', initials: 'AC', role: 'member' as const, color: '#f97316', email: 'avery@allebrum.com', billable: '155' },
-    { key: 'sam', name: 'Sam Okafor', initials: 'SO', role: 'member' as const, color: '#22c55e', email: 'sam@allebrum.com', billable: '175' },
+    { key: 'senica', name: 'Senica Gonzalez', initials: 'SG', group: 'Owner' as const, color: '#9333ea', email: 'senica@allebrum.com', billable: '225' },
+    { key: 'marcus', name: 'Marcus Lee', initials: 'ML', group: 'Member' as const, color: '#2563eb', email: 'marcus@allebrum.com', billable: '185' },
+    { key: 'priya', name: 'Priya Patel', initials: 'PP', group: 'Member' as const, color: '#0d9488', email: 'priya@allebrum.com', billable: '165' },
+    { key: 'jordan', name: 'Jordan Reyes', initials: 'JR', group: 'Member' as const, color: '#db2777', email: 'jordan@allebrum.com', billable: '145' },
+    { key: 'avery', name: 'Avery Chen', initials: 'AC', group: 'Member' as const, color: '#f97316', email: 'avery@allebrum.com', billable: '155' },
+    { key: 'sam', name: 'Sam Okafor', initials: 'SO', group: 'Member' as const, color: '#22c55e', email: 'sam@allebrum.com', billable: '175' },
   ];
   const userIds: Record<string, string> = {};
   for (const u of userSeeds) {
@@ -81,13 +100,45 @@ async function main(): Promise<void> {
       name: u.name,
       email: u.email,
       passwordHash,
-      role: u.role,
       initials: u.initials,
       color: u.color,
       billable: u.billable,
       status: 'active',
     });
   }
+
+  // ---- RBAC: permission catalog, system groups, membership ----
+  const categoryOf = (perm: string): string => {
+    for (const [cat, perms] of Object.entries(PERMISSION_CATEGORIES)) {
+      if ((perms as readonly string[]).includes(perm)) return cat;
+    }
+    return '';
+  };
+  await db.insert(permissions).values(
+    PERMISSIONS.map((p) => ({ key: p, label: PERMISSION_LABELS[p], category: categoryOf(p) })),
+  );
+  const groupIds: Record<string, string> = {};
+  for (const gname of SYSTEM_GROUPS) {
+    const id = randomUUID();
+    groupIds[gname] = id;
+    await db.insert(groups).values({
+      id,
+      name: gname,
+      description: `${gname} (system group)`,
+      isSystem: true,
+      require2fa: false,
+    });
+    const perms = SYSTEM_GROUP_PERMISSIONS[gname];
+    if (perms.length > 0) {
+      await db.insert(groupPermissions).values(perms.map((p) => ({ groupId: id, permissionKey: p })));
+    }
+  }
+  for (const u of userSeeds) {
+    await db.insert(userGroups).values({ userId: userIds[u.key]!, groupId: groupIds[u.group]! });
+  }
+
+  // ---- App settings (singleton) ----
+  await db.insert(appSettings).values({ id: 'singleton' });
 
   // ---- Clients ----
   const clientSeeds = [
@@ -320,6 +371,7 @@ async function main(): Promise<void> {
         const duration = 30 + ((entryCounter * 17 + i * 23) % 7) * 25;
         const hour = 9 + i * 2;
         const startIso = `${iso}T${String(hour).padStart(2, '0')}:00:00Z`;
+        const endIso = new Date(new Date(startIso).getTime() + duration * 60000).toISOString();
         let status: 'draft' | 'submitted' | 'approved';
         let submittedAt: string | null = null;
         let approvedAt: string | null = null;
@@ -347,6 +399,7 @@ async function main(): Promise<void> {
           projectId: projectIds[projKey]!,
           note: task,
           startIso,
+          endIso,
           durationMin: duration,
           payPeriodId: ppId,
           status,
@@ -445,7 +498,7 @@ async function main(): Promise<void> {
   console.log('  Logins:');
   for (const u of userSeeds) {
     // eslint-disable-next-line no-console
-    console.log(`    ${u.email}  (${u.role})`);
+    console.log(`    ${u.email}  (${u.group})`);
   }
   // eslint-disable-next-line no-console
   console.log('');

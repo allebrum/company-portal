@@ -8,7 +8,7 @@ import {
 } from '@allebrum/shared';
 import type { IntegrationKind } from '@allebrum/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
-import { requireRole } from '../middleware/requireRole.js';
+import { requirePermission } from '../auth/permissions.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import {
@@ -46,7 +46,7 @@ function kindFromParam(raw: string): IntegrationKind {
 
 integrationsRouter.post(
   '/:kind/connect',
-  requireRole('owner', 'admin'),
+  requirePermission('integrations.manage'),
   validate(ConnectIntegrationSchema),
   async (req, res, next) => {
     try {
@@ -60,7 +60,7 @@ integrationsRouter.post(
   },
 );
 
-integrationsRouter.post('/:kind/disconnect', requireRole('owner', 'admin'), async (req, res, next) => {
+integrationsRouter.post('/:kind/disconnect', requirePermission('integrations.manage'), async (req, res, next) => {
   try {
     const me = req.session.user!;
     const kind = kindFromParam(req.params.kind!);
@@ -73,7 +73,7 @@ integrationsRouter.post('/:kind/disconnect', requireRole('owner', 'admin'), asyn
 
 integrationsRouter.patch(
   '/:kind',
-  requireRole('owner', 'admin'),
+  requirePermission('integrations.manage'),
   validate(ConnectIntegrationSchema),
   async (req, res, next) => {
     try {
@@ -88,7 +88,7 @@ integrationsRouter.patch(
 );
 
 // Drive-specific
-integrationsRouter.post('/drive/sync', requireRole('owner', 'admin'), async (req, res, next) => {
+integrationsRouter.post('/drive/sync', requirePermission('integrations.manage'), async (req, res, next) => {
   try {
     const me = req.session.user!;
     res.json(await syncDrive(me.userId));
@@ -107,7 +107,7 @@ integrationsRouter.get('/drive/folders', async (_req, res, next) => {
 
 integrationsRouter.post(
   '/drive/folders',
-  requireRole('owner', 'admin'),
+  requirePermission('integrations.manage'),
   validate(LinkFolderSchema),
   async (req, res, next) => {
     try {
@@ -120,7 +120,7 @@ integrationsRouter.post(
   },
 );
 
-integrationsRouter.delete('/drive/folders/:id', requireRole('owner', 'admin'), async (req, res, next) => {
+integrationsRouter.delete('/drive/folders/:id', requirePermission('integrations.manage'), async (req, res, next) => {
   try {
     const me = req.session.user!;
     await unlinkDriveFolder(req.params.id!, me.userId);

@@ -5,7 +5,7 @@ import { users, type User } from '../db/schema.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { appendActivity } from './activity.js';
 import { emit } from '../realtime/emit.js';
-import { EV, type Role } from '@allebrum/shared';
+import { EV } from '@allebrum/shared';
 
 function initialsFrom(name: string): string {
   return name
@@ -38,7 +38,6 @@ export async function findByEmail(email: string): Promise<User | undefined> {
 export async function inviteUser(args: {
   name: string;
   email: string;
-  role: Role;
   password?: string;
   billable?: number;
   color?: string;
@@ -54,7 +53,6 @@ export async function inviteUser(args: {
       name: args.name,
       email: args.email,
       passwordHash,
-      role: args.role,
       initials: initialsFrom(args.name),
       color: args.color ?? '#6b7280',
       billable: String(args.billable ?? 150),
@@ -66,7 +64,7 @@ export async function inviteUser(args: {
   await appendActivity({
     whoId: args.whoId,
     kind: 'user.invite',
-    target: `${row.email} invited as ${row.role}`,
+    target: `${row.email} invited`,
   });
   return row;
 }
@@ -76,7 +74,6 @@ export async function updateUser(
   patch: Partial<{
     name: string;
     email: string;
-    role: Role;
     billable: number;
     color: string;
     initials: string;
@@ -90,7 +87,6 @@ export async function updateUser(
     if (patch.initials === undefined) upd.initials = initialsFrom(patch.name);
   }
   if (patch.email !== undefined) upd.email = patch.email;
-  if (patch.role !== undefined) upd.role = patch.role;
   if (patch.billable !== undefined) upd.billable = String(patch.billable);
   if (patch.color !== undefined) upd.color = patch.color;
   if (patch.initials !== undefined) upd.initials = patch.initials;
@@ -111,10 +107,65 @@ export async function deleteUser(id: string, whoId: string): Promise<void> {
 export async function verifyLogin(email: string, password: string): Promise<User | null> {
   const user = await findByEmail(email);
   if (!user) return null;
+  if (!user.passwordHash) return null; // Google-only account: no password login
   const ok = await argon2.verify(user.passwordHash, password);
   if (!ok) return null;
   if (user.status === 'invited') {
     await db.update(users).set({ status: 'active' }).where(eq(users.id, user.id));
   }
   return user;
+}
+
+export async function findByGoogleSub(sub: string): Promise<User | undefined> {
+  const rows = await db.select().from(users).where(eq(users.googleSub, sub)).limit(1);
+  return rows[0];
+}
+
+/**
+ * Resolve a Google identity to a local user: match by google_sub, else link
+ * by verified email, else create a new account (no password, member-less —
+ * an admin assigns groups afterward).
+ */
+export async function findOrCreateGoogleUser(profile: {
+  sub: string;
+  email: string;
+  name: string;
+  picture?: string;
+}): Promise<User> {
+  const bySub = await findByGoogleSub(profile.sub);
+  if (bySub) return bySub;
+
+  const byEmail = await findByEmail(profile.email);
+  if (byEmail) {
+    const [linked] = await db
+      .update(users)
+      .set({ googleSub: profile.sub, status: 'active', updatedAt: new Date().toISOString() })
+      .where(eq(users.id, byEmail.id))
+      .returning();
+    return linked ?? byEmail;
+  }
+
+  const initials = (profile.name || profile.email)
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]!)
+    .join('')
+    .toUpperCase();
+  const [created] = await db
+    .insert(users)
+    .values({
+      name: profile.name || profile.email,
+      email: profile.email,
+      passwordHash: null,
+      googleSub: profile.sub,
+      authProvider: 'google',
+      initials,
+      color: '#6b7280',
+      billable: '150',
+      status: 'active',
+    })
+    .returning();
+  if (!created) throw new Error('google user creation failed');
+  return created;
 }

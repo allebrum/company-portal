@@ -2,11 +2,10 @@ import session from 'express-session';
 import RedisStore from 'connect-redis';
 import { env, isProd } from './env.js';
 import { redisSession } from './redis.js';
-import type { Role } from '@allebrum/shared';
 
 declare module 'express-session' {
   interface SessionData {
-    user?: { userId: string; role: Role };
+    user?: { userId: string };
   }
 }
 

@@ -15,7 +15,6 @@ import {
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import {
-  ROLES,
   ENTRY_STATUSES,
   PERIOD_STATUSES,
   GOAL_STATUSES,
@@ -28,7 +27,6 @@ import {
 } from '@allebrum/shared';
 
 // ---- Enums ----
-export const roleEnum = pgEnum('role', ROLES);
 export const entryStatusEnum = pgEnum('entry_status', ENTRY_STATUSES);
 export const periodStatusEnum = pgEnum('period_status', PERIOD_STATUSES);
 export const goalStatusEnum = pgEnum('goal_status', GOAL_STATUSES);
@@ -38,6 +36,7 @@ export const clientKindEnum = pgEnum('client_kind', CLIENT_KINDS);
 export const resourceKindEnum = pgEnum('resource_kind', RESOURCE_KINDS);
 export const cadenceEnum = pgEnum('cadence', CADENCES);
 export const weekendRuleEnum = pgEnum('weekend_rule', WEEKEND_RULES);
+export const overrideEffectEnum = pgEnum('override_effect', ['grant', 'deny']);
 
 const ts = () => timestamp('created_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull();
 const updTs = () => timestamp('updated_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull();
@@ -47,8 +46,9 @@ export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull(),
   email: text('email').notNull(),
-  passwordHash: text('password_hash').notNull(),
-  role: roleEnum('role').notNull().default('member'),
+  passwordHash: text('password_hash'),
+  googleSub: text('google_sub'),
+  authProvider: text('auth_provider').notNull().default('password'),
   initials: text('initials').notNull().default(''),
   color: text('color').notNull().default('#6b7280'),
   billable: numeric('billable', { precision: 10, scale: 2 }).notNull().default('150'),
@@ -57,6 +57,72 @@ export const users = pgTable('users', {
   updatedAt: updTs(),
 }, (t) => ({
   emailIdx: uniqueIndex('users_email_lower_idx').on(sql`lower(${t.email})`),
+  googleSubIdx: uniqueIndex('users_google_sub_idx').on(t.googleSub),
+}));
+
+// ---- App settings (singleton) ----
+export const appSettings = pgTable('app_settings', {
+  id: text('id').primaryKey().default('singleton'),
+  passwordLoginEnabled: boolean('password_login_enabled').notNull().default(true),
+  googleLoginEnabled: boolean('google_login_enabled').notNull().default(true),
+  allowedEmailDomains: text('allowed_email_domains').array().notNull().default(sql`'{}'::text[]`),
+  bookkeeperEmail: text('bookkeeper_email'),
+  sendToBookkeeperOn: text('send_to_bookkeeper_on').notNull().default('never'),
+  updatedAt: updTs(),
+});
+
+// ---- OAuth tokens (per user/provider; reused by later Drive/Gmail scopes) ----
+export const oauthTokens = pgTable('oauth_tokens', {
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  provider: text('provider').notNull(),
+  scopes: text('scopes').array().notNull().default(sql`'{}'::text[]`),
+  accessToken: text('access_token'),
+  refreshToken: text('refresh_token'),
+  expiry: timestamp('expiry', { withTimezone: true, mode: 'string' }),
+  updatedAt: updTs(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.userId, t.provider] }),
+}));
+
+// ---- RBAC: permissions catalog, groups, membership, overrides ----
+export const permissions = pgTable('permissions', {
+  key: text('key').primaryKey(),
+  label: text('label').notNull(),
+  category: text('category').notNull().default(''),
+});
+
+export const groups = pgTable('groups', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+  description: text('description').notNull().default(''),
+  isSystem: boolean('is_system').notNull().default(false),
+  require2fa: boolean('require_2fa').notNull().default(false),
+  createdAt: ts(),
+  updatedAt: updTs(),
+}, (t) => ({
+  nameIdx: uniqueIndex('groups_name_lower_idx').on(sql`lower(${t.name})`),
+}));
+
+export const groupPermissions = pgTable('group_permissions', {
+  groupId: uuid('group_id').notNull().references(() => groups.id, { onDelete: 'cascade' }),
+  permissionKey: text('permission_key').notNull().references(() => permissions.key, { onDelete: 'cascade' }),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.groupId, t.permissionKey] }),
+}));
+
+export const userGroups = pgTable('user_groups', {
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  groupId: uuid('group_id').notNull().references(() => groups.id, { onDelete: 'cascade' }),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.userId, t.groupId] }),
+}));
+
+export const userPermissionOverrides = pgTable('user_permission_overrides', {
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  permissionKey: text('permission_key').notNull().references(() => permissions.key, { onDelete: 'cascade' }),
+  effect: overrideEffectEnum('effect').notNull(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.userId, t.permissionKey] }),
 }));
 
 // ---- Clients ----
@@ -176,6 +242,7 @@ export const timeEntries = pgTable('time_entries', {
   projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
   note: text('note').notNull().default(''),
   startIso: timestamp('start_iso', { withTimezone: true, mode: 'string' }).notNull(),
+  endIso: timestamp('end_iso', { withTimezone: true, mode: 'string' }),
   durationMin: integer('duration_min').notNull(),
   payPeriodId: uuid('pay_period_id').references(() => payPeriods.id, { onDelete: 'set null' }),
   status: entryStatusEnum('status').notNull().default('draft'),
@@ -247,6 +314,10 @@ export const driveItems = pgTable('drive_items', {
 
 // ---- Type exports ----
 export type User = typeof users.$inferSelect;
+export type AppSettingsRow = typeof appSettings.$inferSelect;
+export type OAuthToken = typeof oauthTokens.$inferSelect;
+export type Group = typeof groups.$inferSelect;
+export type Permission = typeof permissions.$inferSelect;
 export type Client = typeof clients.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export type Goal = typeof goals.$inferSelect;

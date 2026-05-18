@@ -23,7 +23,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { fmtMins, PRIORITY_DOT } from '@/lib/formatters';
 
 export default function TodosPage() {
-  const { me } = useAuth();
+  const { me, can } = useAuth();
   const toast = useToast();
   const { data: todos = [] } = useTodos();
   const { data: users = [] } = useUsers();
@@ -99,7 +99,7 @@ export default function TodosPage() {
                 const cli = proj ? clients.find((c) => c.id === proj.clientId) : null;
                 const goal = goals.find((g) => g.id === t.goalId);
                 const pri = PRIORITY_DOT[t.priority];
-                const canDelete = t.assigneeId === me?.id || me?.role === 'owner' || me?.role === 'admin';
+                const canDelete = t.assigneeId === me?.id || can('goals.manage');
                 return (
                   <li key={t.id} className="px-5 py-3 flex items-center gap-3 hover:bg-gray-50">
                     <input
