@@ -3,7 +3,9 @@ import { LoginSchema } from '@allebrum/shared';
 import { validate, getValidated } from '../middleware/validate.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
-import { findByEmail, verifyLogin, getUser } from '../services/users.js';
+import { verifyLogin, getUser } from '../services/users.js';
+import { getEffectivePermissions } from '../auth/permissions.js';
+import { getUserGroupIds } from '../services/rbac.js';
 
 export const authRouter = Router();
 
@@ -17,17 +19,19 @@ authRouter.post('/login', rateLimit({ key: 'login', max: 10, windowSec: 60 }), v
     }
     req.session.regenerate((err) => {
       if (err) return next(err);
-      req.session.user = { userId: user.id, role: user.role };
-      req.session.save((saveErr) => {
+      req.session.user = { userId: user.id };
+      req.session.save(async (saveErr) => {
         if (saveErr) return next(saveErr);
+        const permissions = [...(await getEffectivePermissions(user.id))];
         res.json({
           user: {
             id: user.id,
             name: user.name,
             email: user.email,
-            role: user.role,
             initials: user.initials,
             color: user.color,
+            billable: Number(user.billable),
+            permissions,
           },
         });
       });
@@ -52,19 +56,21 @@ authRouter.get('/me', requireAuth, async (req, res, next) => {
       res.status(401).json({ error: 'unauthorized' });
       return;
     }
+    const [permissions, groupIds] = await Promise.all([
+      getEffectivePermissions(u.id),
+      getUserGroupIds(u.id),
+    ]);
     res.json({
       id: u.id,
       name: u.name,
       email: u.email,
-      role: u.role,
       initials: u.initials,
       color: u.color,
       billable: Number(u.billable),
+      permissions: [...permissions],
+      groupIds,
     });
   } catch (e) {
     next(e);
   }
 });
-
-// expose findByEmail to keep tree-shaking happy
-void findByEmail;

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { GeneratePeriodsSchema } from '@allebrum/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
-import { requireRole } from '../middleware/requireRole.js';
+import { requirePermission } from '../auth/permissions.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import {
   listPeriods,
@@ -25,7 +25,7 @@ payPeriodsRouter.get('/', async (_req, res, next) => {
 
 payPeriodsRouter.post(
   '/generate',
-  requireRole('owner', 'admin', 'bookkeeper'),
+  requirePermission('pay.manage'),
   validate(GeneratePeriodsSchema),
   async (req, res, next) => {
     try {
@@ -39,7 +39,7 @@ payPeriodsRouter.post(
   },
 );
 
-payPeriodsRouter.post('/:id/review', requireRole('owner', 'admin'), async (req, res, next) => {
+payPeriodsRouter.post('/:id/review', requirePermission('pay.manage'), async (req, res, next) => {
   try {
     const me = req.session.user!;
     await moveToReview(req.params.id!, me.userId);
@@ -49,7 +49,7 @@ payPeriodsRouter.post('/:id/review', requireRole('owner', 'admin'), async (req, 
   }
 });
 
-payPeriodsRouter.post('/:id/close', requireRole('owner', 'admin', 'bookkeeper'), async (req, res, next) => {
+payPeriodsRouter.post('/:id/close', requirePermission('pay.manage'), async (req, res, next) => {
   try {
     const me = req.session.user!;
     const result = await closePeriod(req.params.id!, me.userId);
@@ -59,7 +59,7 @@ payPeriodsRouter.post('/:id/close', requireRole('owner', 'admin', 'bookkeeper'),
   }
 });
 
-payPeriodsRouter.post('/:id/reopen', requireRole('owner'), async (req, res, next) => {
+payPeriodsRouter.post('/:id/reopen', requirePermission('pay.manage'), async (req, res, next) => {
   try {
     const me = req.session.user!;
     await reopenPeriod(req.params.id!, me.userId);

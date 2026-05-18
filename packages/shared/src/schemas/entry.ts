@@ -8,14 +8,37 @@ export const StartTimerSchema = z.object({
 });
 export type StartTimerInput = z.infer<typeof StartTimerSchema>;
 
-export const ManualEntrySchema = z.object({
-  projectId: z.string().uuid(),
-  note: z.string().max(500).default(''),
-  startIso: z.string().datetime({ offset: true }),
-  durationMin: z.number().int().min(1).max(24 * 60),
-  todoId: z.string().uuid().nullable().optional(),
-});
+export const ManualEntrySchema = z
+  .object({
+    projectId: z.string().uuid(),
+    note: z.string().max(500).default(''),
+    startIso: z.string().datetime({ offset: true }),
+    endIso: z.string().datetime({ offset: true }),
+    todoId: z.string().uuid().nullable().optional(),
+  })
+  .refine((v) => new Date(v.endIso).getTime() > new Date(v.startIso).getTime(), {
+    message: 'End must be after start',
+    path: ['endIso'],
+  })
+  .refine(
+    (v) => new Date(v.endIso).getTime() - new Date(v.startIso).getTime() <= 24 * 60 * 60 * 1000,
+    { message: 'Entry cannot exceed 24 hours', path: ['endIso'] },
+  );
 export type ManualEntryInput = z.infer<typeof ManualEntrySchema>;
+
+export const UpdateManualEntrySchema = z
+  .object({
+    projectId: z.string().uuid().optional(),
+    note: z.string().max(500).optional(),
+    startIso: z.string().datetime({ offset: true }).optional(),
+    endIso: z.string().datetime({ offset: true }).optional(),
+    todoId: z.string().uuid().nullable().optional(),
+  })
+  .refine(
+    (v) => !(v.startIso && v.endIso) || new Date(v.endIso).getTime() > new Date(v.startIso).getTime(),
+    { message: 'End must be after start', path: ['endIso'] },
+  );
+export type UpdateManualEntryInput = z.infer<typeof UpdateManualEntrySchema>;
 
 export const BulkIdsSchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(1000),

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { CreateProjectSchema, UpdateProjectSchema } from '@allebrum/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
-import { requireRole } from '../middleware/requireRole.js';
+import { requirePermission } from '../auth/permissions.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import { listProjects, createProject, updateProject } from '../services/projects.js';
 
@@ -17,7 +17,7 @@ projectsRouter.get('/', async (_req, res, next) => {
   }
 });
 
-projectsRouter.post('/', requireRole('owner', 'admin'), validate(CreateProjectSchema), async (req, res, next) => {
+projectsRouter.post('/', requirePermission('projects.manage'), validate(CreateProjectSchema), async (req, res, next) => {
   try {
     const me = req.session.user!;
     const row = await createProject(getValidated<typeof CreateProjectSchema._type>(req), me.userId);
@@ -27,7 +27,7 @@ projectsRouter.post('/', requireRole('owner', 'admin'), validate(CreateProjectSc
   }
 });
 
-projectsRouter.patch('/:id', requireRole('owner', 'admin'), validate(UpdateProjectSchema), async (req, res, next) => {
+projectsRouter.patch('/:id', requirePermission('projects.manage'), validate(UpdateProjectSchema), async (req, res, next) => {
   try {
     const me = req.session.user!;
     const row = await updateProject(req.params.id!, getValidated<typeof UpdateProjectSchema._type>(req), me.userId);

@@ -5,7 +5,7 @@ import { users, type User } from '../db/schema.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { appendActivity } from './activity.js';
 import { emit } from '../realtime/emit.js';
-import { EV, type Role } from '@allebrum/shared';
+import { EV } from '@allebrum/shared';
 
 function initialsFrom(name: string): string {
   return name
@@ -38,7 +38,6 @@ export async function findByEmail(email: string): Promise<User | undefined> {
 export async function inviteUser(args: {
   name: string;
   email: string;
-  role: Role;
   password?: string;
   billable?: number;
   color?: string;
@@ -54,7 +53,6 @@ export async function inviteUser(args: {
       name: args.name,
       email: args.email,
       passwordHash,
-      role: args.role,
       initials: initialsFrom(args.name),
       color: args.color ?? '#6b7280',
       billable: String(args.billable ?? 150),
@@ -66,7 +64,7 @@ export async function inviteUser(args: {
   await appendActivity({
     whoId: args.whoId,
     kind: 'user.invite',
-    target: `${row.email} invited as ${row.role}`,
+    target: `${row.email} invited`,
   });
   return row;
 }
@@ -76,7 +74,6 @@ export async function updateUser(
   patch: Partial<{
     name: string;
     email: string;
-    role: Role;
     billable: number;
     color: string;
     initials: string;
@@ -90,7 +87,6 @@ export async function updateUser(
     if (patch.initials === undefined) upd.initials = initialsFrom(patch.name);
   }
   if (patch.email !== undefined) upd.email = patch.email;
-  if (patch.role !== undefined) upd.role = patch.role;
   if (patch.billable !== undefined) upd.billable = String(patch.billable);
   if (patch.color !== undefined) upd.color = patch.color;
   if (patch.initials !== undefined) upd.initials = patch.initials;

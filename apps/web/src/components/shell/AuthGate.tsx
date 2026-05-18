@@ -68,11 +68,13 @@ function ShellWithBootstrap({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen flex bg-gray-50">
+    <div className="h-screen overflow-hidden flex bg-gray-50">
       <Sidebar />
-      <main className="flex-1 min-w-0 flex flex-col">
+      <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
         <TimerBar />
-        <div className="px-6 py-6 max-w-7xl w-full mx-auto">{children}</div>
+        <div className="flex-1 overflow-y-auto">
+          <div className="px-6 py-6 max-w-7xl w-full mx-auto">{children}</div>
+        </div>
       </main>
     </div>
   );

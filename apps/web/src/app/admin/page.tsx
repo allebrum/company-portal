@@ -26,21 +26,37 @@ import {
   useSyncDrive,
   useDriveFolders,
   useUnlinkDriveFolder,
+  useGroups,
+  usePermissionsCatalog,
+  useCreateGroup,
+  useUpdateGroup,
+  useDeleteGroup,
+  useSetGroupPermissions,
   type UserRow,
   type ClientRow,
   type ProjectRow,
+  type GroupRow,
 } from '@/hooks/useResources';
 import { useAuth } from '@/hooks/useAuth';
 import { PAY_PERIOD_STATUS_LABEL, PAY_PERIOD_STATUS_PILL } from '@/lib/formatters';
+import type { Permission } from '@allebrum/shared';
 
-type Tab = 'users' | 'workspace' | 'pay' | 'integrations';
+type Tab = 'users' | 'groups' | 'workspace' | 'pay' | 'integrations';
 
 export default function AdminPage() {
-  const { me } = useAuth();
+  const { can } = useAuth();
   const [tab, setTab] = useState<Tab>('users');
 
-  if (!(me?.role === 'owner' || me?.role === 'admin' || me?.role === 'bookkeeper')) {
-    return <Empty title="Admin access only" description="This page is limited to Owners, Admins, and Bookkeepers." />;
+  const hasAnyAdmin =
+    can('users.manage') ||
+    can('groups.manage') ||
+    can('pay.manage') ||
+    can('clients.manage') ||
+    can('projects.manage') ||
+    can('integrations.manage');
+
+  if (!hasAnyAdmin) {
+    return <Empty title="Admin access only" description="You don't have permission to manage workspace settings." />;
   }
 
   return (
@@ -54,6 +70,7 @@ export default function AdminPage() {
         {(
           [
             { id: 'users', label: 'Team' },
+            { id: 'groups', label: 'Groups & Permissions' },
             { id: 'workspace', label: 'Clients & Projects' },
             { id: 'pay', label: 'Pay periods' },
             { id: 'integrations', label: 'Integrations' },
@@ -72,6 +89,7 @@ export default function AdminPage() {
       </div>
 
       {tab === 'users' && <UsersTab />}
+      {tab === 'groups' && <GroupsTab />}
       {tab === 'workspace' && <WorkspaceTab />}
       {tab === 'pay' && <PayTab />}
       {tab === 'integrations' && <IntegrationsTab />}
@@ -80,13 +98,13 @@ export default function AdminPage() {
 }
 
 function UsersTab() {
-  const { me } = useAuth();
+  const { me, can } = useAuth();
   const toast = useToast();
   const { data: users = [] } = useUsers();
   const remove = useDeleteUser();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<UserRow | null>(null);
-  const canManage = me?.role === 'owner' || me?.role === 'admin';
+  const canManage = can('users.manage');
 
   return (
     <Section
@@ -106,9 +124,9 @@ function UsersTab() {
                 <div className="text-sm font-semibold text-gray-900">{u.name}</div>
                 <div className="text-[12px] text-gray-500">{u.email}</div>
               </div>
-              <Pill tone="purple">{u.role}</Pill>
+              <Pill tone={u.status === 'invited' ? 'yellow' : 'gray'}>{u.status}</Pill>
               <span className="text-xs text-gray-500 tabular-nums">${u.billable}/hr</span>
-              {me?.role === 'owner' && me.id !== u.id && (
+              {canManage && me?.id !== u.id && (
                 <button
                   onClick={async (e) => {
                     e.stopPropagation();
@@ -130,6 +148,121 @@ function UsersTab() {
         </ul>
       </Card>
       <UserFormModal open={modalOpen} onClose={() => setModalOpen(false)} user={editing} />
+    </Section>
+  );
+}
+
+function GroupsTab() {
+  const { can } = useAuth();
+  const toast = useToast();
+  const { data: groups = [] } = useGroups();
+  const { data: catalog = [] } = usePermissionsCatalog();
+  const createGroup = useCreateGroup();
+  const updateGroup = useUpdateGroup();
+  const deleteGroup = useDeleteGroup();
+  const setPerms = useSetGroupPermissions();
+  const canManage = can('groups.manage');
+  const [newName, setNewName] = useState('');
+
+  const byCategory = catalog.reduce<Record<string, typeof catalog>>((acc, p) => {
+    (acc[p.category || 'Other'] ||= []).push(p);
+    return acc;
+  }, {});
+
+  const run = async (fn: () => Promise<unknown>, ok: string) => {
+    try {
+      await fn();
+      toast.success(ok);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Action failed');
+    }
+  };
+
+  if (!canManage) {
+    return <Empty title="Permission required" description="You need the 'Manage groups & permissions' permission." />;
+  }
+
+  const togglePerm = (g: GroupRow, perm: string, on: boolean) => {
+    const next = on ? [...g.permissions, perm] : g.permissions.filter((p) => p !== perm);
+    return run(
+      () => setPerms.mutateAsync({ id: g.id, permissions: next as Permission[] }),
+      'Permissions updated',
+    );
+  };
+
+  return (
+    <Section
+      title="Groups & Permissions"
+      action={
+        <div className="flex items-center gap-2">
+          <Input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="New group name"
+            className="w-48"
+          />
+          <Button
+            variant="primary"
+            disabled={!newName.trim() || createGroup.isPending}
+            onClick={async () => {
+              await run(() => createGroup.mutateAsync({ name: newName.trim(), description: '', require2fa: false }), 'Group created');
+              setNewName('');
+            }}
+          >
+            Add group
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        {groups.map((g) => (
+          <Card key={g.id} className="p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-gray-900">{g.name}</span>
+                  {g.isSystem && <Pill tone="gray">system</Pill>}
+                </div>
+                <div className="text-[12px] text-gray-500">{g.description || '—'}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  label="Require 2FA"
+                  checked={g.require2fa}
+                  onChange={(v) => run(() => updateGroup.mutateAsync({ id: g.id, patch: { require2fa: v } }), 'Group updated')}
+                />
+                {!g.isSystem && (
+                  <button
+                    onClick={() => run(() => deleteGroup.mutateAsync(g.id), 'Group deleted')}
+                    className="text-gray-300 hover:text-red-600"
+                    title="Delete group"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
+              {Object.entries(byCategory).map(([cat, perms]) => (
+                <div key={cat}>
+                  <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold mb-1.5">{cat}</div>
+                  <div className="space-y-1">
+                    {perms.map((p) => (
+                      <Checkbox
+                        key={p.key}
+                        label={p.label}
+                        checked={g.permissions.includes(p.key)}
+                        onChange={(on) => togglePerm(g, p.key, on)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        ))}
+        {groups.length === 0 && <Empty title="No groups yet" description="Create a group to start assigning permissions." />}
+      </div>
     </Section>
   );
 }

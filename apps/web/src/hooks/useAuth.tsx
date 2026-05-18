@@ -2,22 +2,24 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
-import type { Role } from '@allebrum/shared';
+import type { Permission } from '@allebrum/shared';
 
 export type Me = {
   id: string;
   name: string;
   email: string;
-  role: Role;
   initials: string;
   color: string;
   billable: number;
+  permissions: Permission[];
+  groupIds: string[];
 };
 
 type AuthState = {
   me: Me | null;
   loading: boolean;
   error: string | null;
+  can: (perm: Permission) => boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -68,7 +70,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const value = useMemo<AuthState>(() => ({ me, loading, error, login, logout, refresh }), [me, loading, error, login, logout, refresh]);
+  const can = useCallback(
+    (perm: Permission) => !!me?.permissions?.includes(perm),
+    [me],
+  );
+
+  const value = useMemo<AuthState>(
+    () => ({ me, loading, error, can, login, logout, refresh }),
+    [me, loading, error, can, login, logout, refresh],
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

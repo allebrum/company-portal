@@ -14,4 +14,6 @@ export const qk = {
   driveFolders: ['driveFolders'] as const,
   driveItems: (folderId?: string) => (folderId ? (['driveItems', folderId] as const) : (['driveItems'] as const)),
   activity: ['activity'] as const,
+  groups: ['groups'] as const,
+  permissionsCatalog: ['permissionsCatalog'] as const,
 };

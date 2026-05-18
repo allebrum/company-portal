@@ -21,12 +21,12 @@ const NAV = [
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { me, logout } = useAuth();
+  const { me, can, logout } = useAuth();
   const { data: entries } = useEntries();
   const pending = (entries ?? []).filter((e) => e.status === 'submitted').length;
 
   return (
-    <aside className="w-60 shrink-0 bg-white border-r border-gray-200 text-gray-700 flex flex-col">
+    <aside className="w-60 shrink-0 h-full bg-white border-r border-gray-200 text-gray-700 flex flex-col">
       <div className="px-5 pt-5 pb-4 flex items-center gap-2.5">
         <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-600 to-brand-700 flex items-center justify-center shadow-md">
           <span className="text-white text-base font-bold">A</span>
@@ -40,7 +40,7 @@ export function Sidebar() {
       <nav className="px-2 pt-2 pb-4 flex-1 overflow-y-auto">
         {NAV.map((item) => {
           const active = pathname?.startsWith(item.href);
-          const showBadge = item.id === 'approvals' && pending > 0 && (me?.role === 'owner' || me?.role === 'admin');
+          const showBadge = item.id === 'approvals' && pending > 0 && can('time_entry.approve');
           return (
             <Link
               key={item.id}
@@ -86,7 +86,7 @@ export function Sidebar() {
         <Avatar user={me ?? undefined} size={32} />
         <div className="flex-1 min-w-0 leading-tight">
           <div className="text-sm font-semibold text-gray-900 truncate">{me?.name ?? '—'}</div>
-          <div className="text-[11px] text-gray-500 truncate capitalize">{me?.role}</div>
+          <div className="text-[11px] text-gray-500 truncate">{me?.email}</div>
         </div>
         <Button variant="ghost" size="sm" onClick={() => logout()} title="Sign out">
           Sign out

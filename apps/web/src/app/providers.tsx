@@ -18,8 +18,9 @@ function LiveEventBindings(): null {
     };
 
     s.on(EV.USER_CREATED, () => invalidate([qk.users]));
-    s.on(EV.USER_UPDATED, () => invalidate([qk.users]));
+    s.on(EV.USER_UPDATED, () => invalidate([qk.users, qk.bootstrap]));
     s.on(EV.USER_DELETED, () => invalidate([qk.users]));
+    s.on(EV.GROUP_UPDATED, () => invalidate([qk.groups, qk.bootstrap]));
 
     s.on(EV.CLIENT_CREATED, () => invalidate([qk.clients]));
     s.on(EV.CLIENT_UPDATED, () => invalidate([qk.clients]));

@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { ROLES } from '../enums';
 
 export const LoginSchema = z.object({
   email: z.string().email(),
@@ -7,8 +6,9 @@ export const LoginSchema = z.object({
 });
 export type LoginInput = z.infer<typeof LoginSchema>;
 
+// Session now stores only the user id; permissions are resolved per-request
+// from group membership + overrides.
 export const SessionUserSchema = z.object({
   userId: z.string().uuid(),
-  role: z.enum(ROLES),
 });
 export type SessionUser = z.infer<typeof SessionUserSchema>;

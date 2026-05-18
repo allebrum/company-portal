@@ -23,6 +23,7 @@ import { useAuth } from '@/hooks/useAuth';
 import {
   fmtMins,
   fmtMoney,
+  fmtTimeRange,
   ENTRY_STATUS_LABEL,
   ENTRY_STATUS_PILL,
   PAY_PERIOD_STATUS_LABEL,
@@ -30,7 +31,7 @@ import {
 } from '@/lib/formatters';
 
 export default function ApprovalsPage() {
-  const { me } = useAuth();
+  const { me, can } = useAuth();
   const toast = useToast();
   const { data: entries = [] } = useEntries();
   const { data: users = [] } = useUsers();
@@ -49,7 +50,7 @@ export default function ApprovalsPage() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState('Please double-check duration and resubmit.');
 
-  const isPrivileged = me?.role === 'owner' || me?.role === 'admin';
+  const isPrivileged = can('time_entry.approve');
 
   const period = periods.find((p) => p.id === periodId);
   const periodEntries = useMemo(
@@ -119,7 +120,7 @@ export default function ApprovalsPage() {
               <Button variant="outline" size="sm" onClick={() => { setPeriodId(p.id); setSelected(new Set()); }}>Review</Button>
               {p.status === 'open' && <Button variant="ghost" size="sm" onClick={() => run(() => toReview.mutateAsync(p.id), 'Moved to review')}>Move to review</Button>}
               {p.status === 'review' && <Button variant="primary" size="sm" onClick={() => run(() => closeP.mutateAsync(p.id), 'Period closed')}>Close &amp; auto-approve</Button>}
-              {p.status === 'closed' && me?.role === 'owner' && <Button variant="ghost" size="sm" onClick={() => run(() => reopenP.mutateAsync(p.id), 'Period reopened')}>Reopen</Button>}
+              {p.status === 'closed' && can('pay.manage') && <Button variant="ghost" size="sm" onClick={() => run(() => reopenP.mutateAsync(p.id), 'Period reopened')}>Reopen</Button>}
             </div>
           </Card>
         ))}
@@ -192,7 +193,10 @@ export default function ApprovalsPage() {
                           />
                         )}
                       </td>
-                      <td className="px-4 py-3 text-gray-700 tabular-nums">{e.startIso.slice(0, 10)}</td>
+                      <td className="px-4 py-3 text-gray-700 tabular-nums">
+                        <div>{e.startIso.slice(0, 10)}</div>
+                        <div className="text-[11px] text-gray-500">{fmtTimeRange(e.startIso, e.endIso)}</div>
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <Avatar user={u} size={20} />

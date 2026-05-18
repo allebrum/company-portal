@@ -17,10 +17,10 @@ import {
   type EntryRow,
 } from '@/hooks/useResources';
 import { useAuth } from '@/hooks/useAuth';
-import { fmtMins, fmtMoney, ENTRY_STATUS_LABEL, ENTRY_STATUS_PILL } from '@/lib/formatters';
+import { fmtMins, fmtMoney, fmtTimeRange, ENTRY_STATUS_LABEL, ENTRY_STATUS_PILL } from '@/lib/formatters';
 
 export default function TimePage() {
-  const { me } = useAuth();
+  const { me, can } = useAuth();
   const toast = useToast();
   const { data: entries = [] } = useEntries();
   const { data: users = [] } = useUsers();
@@ -36,7 +36,7 @@ export default function TimePage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<EntryRow | null>(null);
 
-  const isAdmin = me?.role === 'owner' || me?.role === 'admin';
+  const isAdmin = can('time_entry.edit');
 
   const filtered = useMemo(() => {
     let list = entries;
@@ -177,7 +177,10 @@ export default function TimePage() {
                           className="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
                         />
                       </td>
-                      <td className="px-4 py-3 text-gray-700 tabular-nums">{e.startIso.slice(0, 10)}</td>
+                      <td className="px-4 py-3 text-gray-700 tabular-nums">
+                        <div>{e.startIso.slice(0, 10)}</div>
+                        <div className="text-[11px] text-gray-500">{fmtTimeRange(e.startIso, e.endIso)}</div>
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <Avatar user={u} size={20} />

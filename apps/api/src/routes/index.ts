@@ -11,6 +11,7 @@ import { payConfigRouter } from './payConfig.js';
 import { activityRouter } from './activity.js';
 import { integrationsRouter } from './integrations.js';
 import { bootstrapRouter } from './bootstrap.js';
+import { rbacRouter } from './rbac.js';
 
 export const apiRouter = Router();
 
@@ -30,3 +31,4 @@ apiRouter.use('/pay-config', payConfigRouter);
 apiRouter.use('/activity', activityRouter);
 apiRouter.use('/integrations', integrationsRouter);
 apiRouter.use('/bootstrap', bootstrapRouter);
+apiRouter.use('/rbac', rbacRouter);

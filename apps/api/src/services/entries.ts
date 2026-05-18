@@ -10,7 +10,6 @@ import type {
   StartTimerInput,
   ManualEntryInput,
   EntryListQuery,
-  Role,
 } from '@allebrum/shared';
 import { EV } from '@allebrum/shared';
 import { emit } from '../realtime/emit.js';
@@ -18,6 +17,10 @@ import { appendActivity } from './activity.js';
 import { logTimeToTodo } from './todos.js';
 import { periodForDate } from './payPeriods.js';
 import { HttpError } from '../middleware/errorHandler.js';
+
+function minutesBetween(startIso: string, endIso: string): number {
+  return Math.max(1, Math.round((new Date(endIso).getTime() - new Date(startIso).getTime()) / 60000));
+}
 
 // ---- Timer ----
 export async function getActiveTimer(userId: string): Promise<ActiveTimer | undefined> {
@@ -60,8 +63,8 @@ export async function startTimer(userId: string, input: StartTimerInput): Promis
 export async function stopTimer(userId: string): Promise<TimeEntry | null> {
   const t = await getActiveTimer(userId);
   if (!t) return null;
-  const startedMs = new Date(t.startedAt).getTime();
-  const durationMin = Math.max(1, Math.round((Date.now() - startedMs) / 60000));
+  const endIso = new Date().toISOString();
+  const durationMin = minutesBetween(t.startedAt, endIso);
   const period = await periodForDate(t.startedAt);
   const [entry] = await db
     .insert(timeEntries)
@@ -70,6 +73,7 @@ export async function stopTimer(userId: string): Promise<TimeEntry | null> {
       projectId: t.projectId,
       note: t.note,
       startIso: t.startedAt,
+      endIso,
       durationMin,
       payPeriodId: period?.id ?? null,
       status: 'draft',
@@ -101,12 +105,12 @@ export async function stopTimer(userId: string): Promise<TimeEntry | null> {
 // ---- Entries CRUD ----
 export async function listEntries(
   viewerId: string,
-  viewerRole: Role,
+  canViewAll: boolean,
   q: EntryListQuery,
 ): Promise<TimeEntry[]> {
   const conds = [];
-  // Members can only see their own entries
-  if (viewerRole === 'member') {
+  // Without time_entry.view_all, a user only sees their own entries.
+  if (!canViewAll) {
     conds.push(eq(timeEntries.userId, viewerId));
   } else if (q.userId) {
     conds.push(eq(timeEntries.userId, q.userId));
@@ -123,6 +127,7 @@ export async function listEntries(
 
 export async function createManualEntry(userId: string, input: ManualEntryInput): Promise<TimeEntry> {
   const period = await periodForDate(input.startIso);
+  const durationMin = minutesBetween(input.startIso, input.endIso);
   const [row] = await db
     .insert(timeEntries)
     .values({
@@ -130,14 +135,15 @@ export async function createManualEntry(userId: string, input: ManualEntryInput)
       projectId: input.projectId,
       note: input.note,
       startIso: input.startIso,
-      durationMin: input.durationMin,
+      endIso: input.endIso,
+      durationMin,
       payPeriodId: period?.id ?? null,
       status: 'draft',
       todoId: input.todoId ?? null,
     })
     .returning();
   if (!row) throw new Error('entry insert failed');
-  if (input.todoId) await logTimeToTodo(input.todoId, input.durationMin);
+  if (input.todoId) await logTimeToTodo(input.todoId, durationMin);
   emit.toUser(userId, EV.ENTRY_CREATED, { id: row.id, by: userId, at: new Date().toISOString() });
   return row;
 }
@@ -145,25 +151,29 @@ export async function createManualEntry(userId: string, input: ManualEntryInput)
 export async function updateEntry(
   id: string,
   viewerId: string,
-  viewerRole: Role,
+  canManageAll: boolean,
   patch: Partial<ManualEntryInput>,
 ): Promise<TimeEntry> {
   const rows = await db.select().from(timeEntries).where(eq(timeEntries.id, id)).limit(1);
   const row = rows[0];
   if (!row) throw new HttpError(404, 'entry_not_found');
   const canEdit = row.userId === viewerId && row.status === 'draft';
-  const adminEdit = viewerRole === 'owner' || viewerRole === 'admin';
-  if (!canEdit && !adminEdit) throw new HttpError(403, 'forbidden');
+  if (!canEdit && !canManageAll) throw new HttpError(403, 'forbidden');
 
   const upd: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   if (patch.projectId !== undefined) upd.projectId = patch.projectId;
   if (patch.note !== undefined) upd.note = patch.note;
+  const nextStart = patch.startIso ?? row.startIso;
+  const nextEnd = patch.endIso ?? row.endIso ?? undefined;
   if (patch.startIso !== undefined) {
     upd.startIso = patch.startIso;
     const p = await periodForDate(patch.startIso);
     upd.payPeriodId = p?.id ?? null;
   }
-  if (patch.durationMin !== undefined) upd.durationMin = patch.durationMin;
+  if (patch.endIso !== undefined) upd.endIso = patch.endIso;
+  if ((patch.startIso !== undefined || patch.endIso !== undefined) && nextEnd) {
+    upd.durationMin = minutesBetween(nextStart, nextEnd);
+  }
   if (patch.todoId !== undefined) upd.todoId = patch.todoId;
   const [updated] = await db.update(timeEntries).set(upd).where(eq(timeEntries.id, id)).returning();
   if (!updated) throw new HttpError(404, 'entry_not_found');
@@ -171,13 +181,12 @@ export async function updateEntry(
   return updated;
 }
 
-export async function deleteEntry(id: string, viewerId: string, viewerRole: Role): Promise<void> {
+export async function deleteEntry(id: string, viewerId: string, canManageAll: boolean): Promise<void> {
   const rows = await db.select().from(timeEntries).where(eq(timeEntries.id, id)).limit(1);
   const row = rows[0];
   if (!row) throw new HttpError(404, 'entry_not_found');
   const canDel = row.userId === viewerId && row.status === 'draft';
-  const adminDel = viewerRole === 'owner' || viewerRole === 'admin';
-  if (!canDel && !adminDel) throw new HttpError(403, 'forbidden');
+  if (!canDel && !canManageAll) throw new HttpError(403, 'forbidden');
   await db.delete(timeEntries).where(eq(timeEntries.id, id));
   emit.toUser(row.userId, EV.ENTRY_DELETED, { id: row.id, by: viewerId, at: new Date().toISOString() });
 }
