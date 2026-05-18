@@ -45,6 +45,7 @@ export default function MediaPage() {
   const disconnect = useDisconnectDrive();
 
   const [newFolder, setNewFolder] = useState('');
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [preview, setPreview] = useState<DriveEntry | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const handledDriveParam = useRef(false);
@@ -71,10 +72,16 @@ export default function MediaPage() {
   const currentParent = listing?.folderId ?? null;
 
   const onCreateFolder = async () => {
-    if (!newFolder.trim() || !currentParent) return;
+    const name = newFolder.trim();
+    if (!name) return;
+    if (!currentParent) {
+      toast.error('Folder list is still loading — try again in a moment');
+      return;
+    }
     try {
-      await createFolder.mutateAsync({ parentId: currentParent, name: newFolder.trim() });
+      await createFolder.mutateAsync({ parentId: currentParent, name });
       setNewFolder('');
+      setNewFolderOpen(false);
       toast.success('Folder created');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not create folder');
@@ -158,14 +165,15 @@ export default function MediaPage() {
               ))}
             </div>
             <div className="flex items-center gap-2">
-              <Input
-                className="w-40"
-                value={newFolder}
-                onChange={(e) => setNewFolder(e.target.value)}
-                placeholder="New folder"
-              />
-              <Button variant="outline" size="sm" onClick={onCreateFolder} disabled={!newFolder.trim() || createFolder.isPending}>
-                <FolderPlus className="w-4 h-4" /> Create
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setNewFolder('');
+                  setNewFolderOpen(true);
+                }}
+              >
+                <FolderPlus className="w-4 h-4" /> New folder
               </Button>
               <input
                 ref={fileRef}
@@ -260,6 +268,38 @@ export default function MediaPage() {
           </Section>
         </>
       )}
+
+      <Modal
+        open={newFolderOpen}
+        onClose={() => setNewFolderOpen(false)}
+        title="New folder"
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" size="sm" onClick={() => setNewFolderOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={onCreateFolder}
+              disabled={!newFolder.trim() || createFolder.isPending}
+            >
+              {createFolder.isPending ? 'Creating…' : 'Create folder'}
+            </Button>
+          </>
+        }
+      >
+        <Input
+          autoFocus
+          value={newFolder}
+          onChange={(e) => setNewFolder(e.target.value)}
+          placeholder="Folder name"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void onCreateFolder();
+          }}
+        />
+      </Modal>
 
       <Modal open={!!preview} onClose={() => setPreview(null)} title={preview?.name} size="xl">
         {preview && (
