@@ -68,6 +68,7 @@ export const appSettings = pgTable('app_settings', {
   allowedEmailDomains: text('allowed_email_domains').array().notNull().default(sql`'{}'::text[]`),
   bookkeeperEmail: text('bookkeeper_email'),
   sendToBookkeeperOn: text('send_to_bookkeeper_on').notNull().default('never'),
+  portalSharedFolderId: text('portal_shared_folder_id'),
   updatedAt: updTs(),
 });
 

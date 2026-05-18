@@ -2,18 +2,20 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Clock, CheckSquare, Target, Shield, BarChart3, Settings } from 'lucide-react';
+import { Home, Clock, CheckSquare, Target, Shield, BarChart3, Settings, FolderOpen } from 'lucide-react';
+import type { Permission } from '@allebrum/shared';
 import { useEntries } from '@/hooks/useResources';
 import { useAuth } from '@/hooks/useAuth';
 import { Avatar } from '../ui/Avatar';
 import { Button } from '../ui/Button';
 import { cn } from '@/lib/utils';
 
-const NAV = [
+const NAV: { id: string; href: string; label: string; Icon: typeof Home; anyPerm?: Permission[] }[] = [
   { id: 'dashboard', href: '/dashboard', label: 'Dashboard', Icon: Home },
   { id: 'time', href: '/time', label: 'Time tracking', Icon: Clock },
   { id: 'todos', href: '/todos', label: 'To-dos', Icon: CheckSquare },
   { id: 'roadmap', href: '/roadmap', label: 'Roadmap', Icon: Target },
+  { id: 'media', href: '/media', label: 'Media', Icon: FolderOpen, anyPerm: ['media.manage', 'integrations.manage'] },
   { id: 'approvals', href: '/approvals', label: 'Approvals', Icon: Shield },
   { id: 'reports', href: '/reports', label: 'Reports', Icon: BarChart3 },
   { id: 'admin', href: '/admin', label: 'Admin', Icon: Settings },
@@ -38,7 +40,7 @@ export function Sidebar() {
       </div>
 
       <nav className="px-2 pt-2 pb-4 flex-1 overflow-y-auto">
-        {NAV.map((item) => {
+        {NAV.filter((item) => !item.anyPerm || item.anyPerm.some((p) => can(p))).map((item) => {
           const active = pathname?.startsWith(item.href);
           const showBadge = item.id === 'approvals' && pending > 0 && can('time_entry.approve');
           return (

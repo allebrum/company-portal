@@ -72,3 +72,23 @@ export function requirePermission(...needed: Permission[]) {
     }
   };
 }
+
+/** Middleware: require ANY of the listed permissions (mount after requireAuth). */
+export function requireAnyPermission(...needed: Permission[]) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.session?.user) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    try {
+      const perms = await loadPermissions(req);
+      if (!needed.some((p) => perms.has(p))) {
+        res.status(403).json({ error: 'forbidden', anyOf: needed });
+        return;
+      }
+      next();
+    } catch (e) {
+      next(e);
+    }
+  };
+}
