@@ -25,8 +25,8 @@ export default function LoginPage() {
   const router = useRouter();
   const { data: cfg } = useAuthConfig();
 
-  const [email, setEmail] = useState('senica@allebrum.com');
-  const [password, setPassword] = useState('Allebrum2026!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);

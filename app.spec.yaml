@@ -33,6 +33,35 @@ services:
       - { key: OAUTH_REDIRECT_URL, value: ${APP_URL}/api/auth/google/callback }
       - { key: DRIVE_OAUTH_REDIRECT_URL, value: ${APP_URL}/api/integrations/drive/callback }
 
+jobs:
+  # Runs once before each deploy, before the API serves traffic: applies
+  # committed Drizzle migrations, then the idempotent production bootstrap
+  # (permission catalog, system groups, app-settings singleton, break-glass
+  # admin). Both steps are safe to re-run.
+  - name: migrate
+    kind: PRE_DEPLOY
+    source_dir: /
+    github:
+      branch: main
+      deploy_on_push: true
+      repo: allebrum/company-portal
+    build_command: |
+      corepack enable
+      pnpm install --frozen-lockfile
+      pnpm --filter @allebrum/shared build
+    run_command: pnpm --filter @allebrum/api db:migrate && pnpm --filter @allebrum/api db:init
+    instance_size_slug: basic-xs
+    envs:
+      - { key: NODE_ENV, value: production }
+      # init.ts imports env.ts, which validates these even though the job
+      # itself does not open Redis — they must be present or it won't boot.
+      - { key: DATABASE_URL, scope: RUN_TIME, type: SECRET }
+      - { key: REDIS_URL, scope: RUN_TIME, type: SECRET }
+      - { key: SESSION_SECRET, scope: RUN_TIME, type: SECRET }
+      - { key: ADMIN_EMAIL, scope: RUN_TIME, type: SECRET }
+      - { key: ADMIN_PASSWORD, scope: RUN_TIME, type: SECRET }
+      - { key: ALLOWED_EMAIL_DOMAINS, value: allebrum.com }
+
 static_sites:
   - name: web
     source_dir: /

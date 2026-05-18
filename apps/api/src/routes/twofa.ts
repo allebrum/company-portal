@@ -8,6 +8,7 @@ import {
 } from '@allebrum/shared';
 import type { TwoFactorChallenge } from '@allebrum/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { rateLimit } from '../middleware/rateLimit.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import { getUser } from '../services/users.js';
 import { getEffectivePermissions } from '../auth/permissions.js';
@@ -81,7 +82,7 @@ twofaRouter.get('/2fa/challenge', async (req, res, next) => {
   }
 });
 
-twofaRouter.post('/2fa/totp', validate(TotpVerifySchema), async (req, res, next) => {
+twofaRouter.post('/2fa/totp', rateLimit({ key: '2fa', max: 10, windowSec: 60 }), validate(TotpVerifySchema), async (req, res, next) => {
   try {
     const pending = req.session.pending;
     if (!pending) {
@@ -118,7 +119,7 @@ twofaRouter.get('/2fa/webauthn/options', async (req, res, next) => {
   }
 });
 
-twofaRouter.post('/2fa/webauthn/verify', validate(WebAuthnResponseSchema), async (req, res, next) => {
+twofaRouter.post('/2fa/webauthn/verify', rateLimit({ key: '2fa', max: 10, windowSec: 60 }), validate(WebAuthnResponseSchema), async (req, res, next) => {
   try {
     const pending = req.session.pending;
     const challenge = req.session.webauthnChallenge;
