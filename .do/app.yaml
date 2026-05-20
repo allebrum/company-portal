@@ -7,57 +7,40 @@ services:
     github:
       branch: main
       deploy_on_push: true
-      repo: allebrum/company-portal
+      repo: sedale-ctrl/company-portal
     build_command: |
       corepack enable
       pnpm install --frozen-lockfile
       pnpm --filter @allebrum/shared build
       pnpm --filter @allebrum/api build
-    run_command: pnpm --filter @allebrum/api start
+    # Migrations + idempotent production bootstrap run inline at api start.
+    # Both steps are safe to re-run (drizzle-kit tracks applied migrations
+    # in __drizzle_migrations; init.ts upserts the permission catalog and
+    # only creates the admin if absent). This replaces a previous PRE_DEPLOY
+    # job, which DO monitoring kept flagging as "0/1 instances running"
+    # after it completed — a cosmetic but persistent degradation warning.
+    run_command: pnpm --filter @allebrum/api db:migrate && pnpm --filter @allebrum/api db:init && pnpm --filter @allebrum/api start
     instance_size_slug: basic-xs
     instance_count: 1
     http_port: 8080
     health_check:
       http_path: /api/health
-      initial_delay_seconds: 10
+      # Higher delay: api startup now includes migrate + init (~10-15s cold)
+      initial_delay_seconds: 30
     envs:
       - { key: NODE_ENV, value: production }
       - { key: API_PORT, value: "8080" }
-      - { key: DATABASE_URL, scope: RUN_TIME, type: SECRET }
-      - { key: REDIS_URL, scope: RUN_TIME, type: SECRET }
+      - { key: DATABASE_URL, scope: RUN_TIME, value: ${db.DATABASE_URL} }
+      - { key: REDIS_URL, scope: RUN_TIME, value: ${redis.DATABASE_URL} }
       - { key: SESSION_SECRET, scope: RUN_TIME, type: SECRET }
       - { key: WEB_ORIGIN, value: ${APP_URL} }
-      # Google OAuth (optional — set these to enable "Continue with Google")
+      # Google OAuth (set these to enable "Continue with Google")
       - { key: GOOGLE_OAUTH_CLIENT_ID, scope: RUN_TIME, type: SECRET }
       - { key: GOOGLE_OAUTH_CLIENT_SECRET, scope: RUN_TIME, type: SECRET }
       - { key: OAUTH_REDIRECT_URL, value: ${APP_URL}/api/auth/google/callback }
       - { key: DRIVE_OAUTH_REDIRECT_URL, value: ${APP_URL}/api/integrations/drive/callback }
-
-jobs:
-  # Runs once before each deploy, before the API serves traffic: applies
-  # committed Drizzle migrations, then the idempotent production bootstrap
-  # (permission catalog, system groups, app-settings singleton, break-glass
-  # admin). Both steps are safe to re-run.
-  - name: migrate
-    kind: PRE_DEPLOY
-    source_dir: /
-    github:
-      branch: main
-      deploy_on_push: true
-      repo: allebrum/company-portal
-    build_command: |
-      corepack enable
-      pnpm install --frozen-lockfile
-      pnpm --filter @allebrum/shared build
-    run_command: pnpm --filter @allebrum/api db:migrate && pnpm --filter @allebrum/api db:init
-    instance_size_slug: basic-xs
-    envs:
-      - { key: NODE_ENV, value: production }
-      # init.ts imports env.ts, which validates these even though the job
-      # itself does not open Redis — they must be present or it won't boot.
-      - { key: DATABASE_URL, scope: RUN_TIME, type: SECRET }
-      - { key: REDIS_URL, scope: RUN_TIME, type: SECRET }
-      - { key: SESSION_SECRET, scope: RUN_TIME, type: SECRET }
+      # Consumed by db:init only (chained ahead of `start` in run_command).
+      # init.ts validates these and exits with a clear error if missing.
       - { key: ADMIN_EMAIL, scope: RUN_TIME, type: SECRET }
       - { key: ADMIN_PASSWORD, scope: RUN_TIME, type: SECRET }
       - { key: ALLOWED_EMAIL_DOMAINS, value: allebrum.com }
@@ -68,7 +51,7 @@ static_sites:
     github:
       branch: main
       deploy_on_push: true
-      repo: allebrum/company-portal
+      repo: sedale-ctrl/company-portal
     build_command: |
       corepack enable
       pnpm install --frozen-lockfile
@@ -81,13 +64,13 @@ static_sites:
 databases:
   # Both databases are production-tier managed clusters pre-created once
   # with doctl, then referenced here by cluster_name. App Platform's "dev"
-  # databases work for Postgres in services but were flaky for PRE_DEPLOY
+  # databases work for Postgres in services but were flaky for migration
   # jobs in our case (permission denied on the auto-bound URL), so we
   # standardised on managed clusters for predictable defaults.
   #
-  # One-time setup (run as the DO operator):
-  #   doctl databases create allebrum-portal-db    --engine pg     --region nyc1 --size db-s-1vcpu-1gb --num-nodes 1 --version 16 --wait
-  #   doctl databases create allebrum-portal-redis --engine valkey --region nyc1 --size db-amd-1vcpu-1gb --num-nodes 1            --wait
+  # One-time setup (run as the DO operator on a fresh team):
+  #   doctl databases create allebrum-portal-db    --engine pg     --region nyc1 --size db-s-1vcpu-1gb  --num-nodes 1 --version 16 --wait
+  #   doctl databases create allebrum-portal-redis --engine valkey --region nyc1 --size db-amd-1vcpu-1gb --num-nodes 1               --wait
   - name: db
     cluster_name: allebrum-portal-db
     db_name: defaultdb
