@@ -219,6 +219,12 @@ export const goalResources = pgTable('goal_resources', {
   title: text('title').notNull(),
   url: text('url').notNull().default(''),
   meta: text('meta').notNull().default(''),
+  // When the resource was uploaded directly into the portal (not a manual
+  // URL bookmark), these carry the Drive-side identity of the uploaded
+  // file. Stay null for URL-bookmark resources for backwards compatibility.
+  driveFileId: text('drive_file_id'),
+  mimeType: text('mime_type'),
+  sizeBytes: integer('size_bytes'),
   addedBy: uuid('added_by').references(() => users.id, { onDelete: 'set null' }),
   addedAt: date('added_at').notNull().defaultNow(),
 }, (t) => ({

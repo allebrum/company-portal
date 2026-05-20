@@ -3,9 +3,10 @@ import { google, type drive_v3 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { eq, desc } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { oauthTokens, appSettings } from '../db/schema.js';
+import { oauthTokens, appSettings, clients, projects } from '../db/schema.js';
 import { getSettings } from './settings.js';
 import { env, driveRedirectUrl, driveOAuthConfigured } from '../env.js';
+import { HttpError } from '../middleware/errorHandler.js';
 
 const PROVIDER = 'google_drive';
 export const DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive'];
@@ -234,4 +235,40 @@ export async function downloadFile(fileId: string): Promise<NodeJS.ReadableStrea
 export async function deleteEntry(fileId: string): Promise<void> {
   const drive = await driveApi();
   await drive.files.update({ fileId, requestBody: { trashed: true } });
+}
+
+/**
+ * Resolve the Drive folder ID that uploads for `projectId` should land in.
+ * If the project already has a `driveFolderId`, returns it. Otherwise lazily
+ * creates the (client folder if missing → project folder) chain inside the
+ * shared portal root and persists the IDs. Requires Drive to be connected;
+ * callers should check `isConnected()` first if they want a softer failure.
+ */
+export async function ensureProjectFolder(projectId: string): Promise<string> {
+  const [proj] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
+  if (!proj) throw new HttpError(404, 'project_not_found');
+  if (proj.driveFolderId) return proj.driveFolderId;
+
+  const [client] = await db.select().from(clients).where(eq(clients.id, proj.clientId)).limit(1);
+  if (!client) throw new HttpError(404, 'client_not_found');
+
+  // Lazy-backfill the client folder first if it's missing.
+  let clientFolderId = client.driveFolderId;
+  if (!clientFolderId) {
+    const rootId = await ensureSharedFolder();
+    const folder = await createFolder(rootId, client.name);
+    clientFolderId = folder.id;
+    await db
+      .update(clients)
+      .set({ driveFolderId: clientFolderId, updatedAt: new Date().toISOString() })
+      .where(eq(clients.id, client.id));
+  }
+
+  // Now create the project folder inside it.
+  const projectFolder = await createFolder(clientFolderId, proj.name);
+  await db
+    .update(projects)
+    .set({ driveFolderId: projectFolder.id, updatedAt: new Date().toISOString() })
+    .where(eq(projects.id, proj.id));
+  return projectFolder.id;
 }

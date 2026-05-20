@@ -17,6 +17,11 @@ import { EV } from '@allebrum/shared';
 import { emit } from '../realtime/emit.js';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';
+import {
+  isConnected as driveIsConnected,
+  uploadFile as driveUploadFile,
+  ensureProjectFolder,
+} from './drive.js';
 
 export async function listGoals(): Promise<(Goal & { resources: GoalResource[] })[]> {
   const allGoals = await db.select().from(goals).orderBy(asc(goals.createdAt));
@@ -107,4 +112,61 @@ export async function removeResource(goalId: string, resourceId: string, whoId: 
   const [row] = await db.delete(goalResources).where(eq(goalResources.id, resourceId)).returning({ id: goalResources.id });
   if (!row) throw new HttpError(404, 'resource_not_found');
   emit.toOrg(EV.GOAL_RESOURCE_REMOVED, { id: goalId, by: whoId, at: new Date().toISOString() });
+}
+
+/**
+ * Upload a user-provided file (drag-drop / file-picker in the goal modal)
+ * straight to Google Drive, into the project folder that this goal belongs
+ * to, and record the upload as a goal_resources row. Folders are lazily
+ * backfilled if the goal's client/project don't already have one.
+ */
+export async function uploadGoalResource(
+  goalId: string,
+  file: { originalname: string; mimetype: string; buffer: Buffer; size: number },
+  whoId: string,
+): Promise<GoalResource> {
+  const [goal] = await db.select().from(goals).where(eq(goals.id, goalId)).limit(1);
+  if (!goal) throw new HttpError(404, 'goal_not_found');
+
+  if (!(await driveIsConnected())) {
+    throw new HttpError(503, 'drive_not_connected');
+  }
+
+  // Lazy-backfills client + project folders as needed, returns project folder id.
+  const folderId = await ensureProjectFolder(goal.projectId);
+
+  // Push the file into the project folder.
+  const driveEntry = await driveUploadFile(folderId, file.originalname, file.mimetype, file.buffer);
+
+  // Use 'drive-sheet' for spreadsheets, otherwise 'drive-doc' — both are
+  // valid existing resource kinds so the icon picker keeps working.
+  const kind = file.mimetype.includes('spreadsheet') ? 'drive-sheet' : 'drive-doc';
+
+  const [row] = await db
+    .insert(goalResources)
+    .values({
+      goalId,
+      kind,
+      title: file.originalname,
+      url: driveEntry.webViewLink ?? '',
+      meta: humanFileSize(file.size),
+      driveFileId: driveEntry.id,
+      mimeType: file.mimetype,
+      sizeBytes: file.size,
+      addedBy: whoId,
+    })
+    .returning();
+  if (!row) throw new Error('resource insert failed');
+
+  emit.toOrg(EV.GOAL_RESOURCE_ADDED, { id: goalId, by: whoId, at: new Date().toISOString() });
+  await appendActivity({ whoId, kind: 'resource.add', target: `${row.title} uploaded` });
+  return row;
+}
+
+function humanFileSize(bytes: number): string {
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let u = 0;
+  let n = bytes;
+  while (n >= 1024 && u < units.length - 1) { n /= 1024; u++; }
+  return `${n.toFixed(n >= 10 ? 0 : 1)} ${units[u]}`;
 }

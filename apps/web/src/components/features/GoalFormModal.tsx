@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Trash2, Plus, Play, Square, ExternalLink, Link2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Trash2, Plus, Play, Square, ExternalLink, Link2, Upload } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Field, Input, Select } from '@/components/ui/Field';
@@ -11,6 +11,7 @@ import {
   useUpdateGoal,
   useAddResource,
   useRemoveResource,
+  useUploadGoalResource,
   useUsers,
   useClients,
   useProjects,
@@ -52,6 +53,9 @@ export function GoalFormModal({
   const update = useUpdateGoal();
   const addRes = useAddResource();
   const removeRes = useRemoveResource();
+  const uploadRes = useUploadGoalResource();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
   const { data: todos = [] } = useTodos();
   const createTodo = useCreateTodo();
   const updateTodo = useUpdateTodo();
@@ -169,6 +173,23 @@ export function GoalFormModal({
       setRMeta('');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to attach');
+    }
+  };
+
+  const onUploadFiles = async (files: File[]) => {
+    if (!goal) return;
+    for (const file of files) {
+      try {
+        await uploadRes.mutateAsync({ goalId: goal.id, file });
+        toast.success(`Uploaded ${file.name}`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Upload failed';
+        toast.error(
+          msg === 'drive_not_connected'
+            ? `Connect Google Drive first to upload ${file.name}`
+            : `${file.name}: ${msg}`,
+        );
+      }
     }
   };
 
@@ -402,6 +423,42 @@ export function GoalFormModal({
         {isEdit && goal && (
           <div className="pt-2 border-t border-gray-100">
             <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Resources</div>
+
+            {/* Drag-drop / click upload zone: pushes the file straight into
+                the goal's project Drive folder (lazily creates client +
+                project folders if missing). */}
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragging(false);
+                const files = Array.from(e.dataTransfer.files);
+                if (files.length) void onUploadFiles(files);
+              }}
+              onClick={() => fileRef.current?.click()}
+              className={`mb-3 border-2 border-dashed rounded-lg p-4 text-center text-sm cursor-pointer transition-colors ${
+                dragging
+                  ? 'border-brand-500 bg-brand-50 text-brand-700'
+                  : 'border-gray-200 text-gray-500 hover:border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              <Upload className="w-4 h-4 inline-block mr-1.5 -mt-0.5" />
+              {uploadRes.isPending ? 'Uploading…' : 'Drop files here, or click to upload'}
+              <div className="text-[11px] text-gray-400 mt-0.5">Goes straight to the project's Drive folder.</div>
+              <input
+                ref={fileRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  if (files.length) void onUploadFiles(files);
+                  e.target.value = '';
+                }}
+              />
+            </div>
+
             <ul className="space-y-1 mb-3">
               {goal.resources.length === 0 && <li className="text-sm text-gray-500">No resources yet.</li>}
               {goal.resources.map((r) => (

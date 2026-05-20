@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import multer from 'multer';
 import {
   CreateGoalSchema,
   UpdateGoalSchema,
@@ -14,7 +15,12 @@ import {
   moveGoal,
   addResource,
   removeResource,
+  uploadGoalResource,
 } from '../services/goals.js';
+
+// Same limit as the Drive media manager (100 MB). In-memory; we hand the
+// buffer straight to the Drive upload, no on-disk staging.
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
 
 export const goalsRouter = Router();
 
@@ -62,6 +68,24 @@ goalsRouter.post('/:id/resources', validate(AddResourceSchema), async (req, res,
   try {
     const me = req.session.user!;
     const row = await addResource(req.params.id!, getValidated<typeof AddResourceSchema._type>(req), me.userId);
+    res.status(201).json(row);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Multipart-upload variant: drag-drop / file-picker on the client uploads a
+// real file, the API pushes it into the goal's project Drive folder, then
+// records a resource row carrying the resulting Drive file metadata.
+goalsRouter.post('/:id/resources/upload', upload.single('file'), async (req, res, next) => {
+  try {
+    const me = req.session.user!;
+    const file = (req as unknown as { file?: Express.Multer.File }).file;
+    if (!file) {
+      res.status(400).json({ error: 'file_required' });
+      return;
+    }
+    const row = await uploadGoalResource(req.params.id!, file, me.userId);
     res.status(201).json(row);
   } catch (e) {
     next(e);
