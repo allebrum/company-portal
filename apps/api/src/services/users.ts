@@ -1,7 +1,7 @@
 import { eq, sql, asc } from 'drizzle-orm';
 import argon2 from 'argon2';
 import { db } from '../db/client.js';
-import { users, type User } from '../db/schema.js';
+import { users, groups, userGroups, type User } from '../db/schema.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { appendActivity } from './activity.js';
 import { emit } from '../realtime/emit.js';
@@ -167,5 +167,20 @@ export async function findOrCreateGoogleUser(profile: {
     })
     .returning();
   if (!created) throw new Error('google user creation failed');
+
+  // New domain-restricted Google sign-ups get the Member group so they land
+  // on a working app immediately; an admin can elevate them afterward. (The
+  // sub/email-link branches above intentionally preserve existing membership.)
+  const [memberGroup] = await db
+    .select({ id: groups.id })
+    .from(groups)
+    .where(eq(groups.name, 'Member'))
+    .limit(1);
+  if (memberGroup) {
+    await db
+      .insert(userGroups)
+      .values({ userId: created.id, groupId: memberGroup.id })
+      .onConflictDoNothing();
+  }
   return created;
 }

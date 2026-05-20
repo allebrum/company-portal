@@ -24,6 +24,11 @@ const EnvSchema = z.object({
   // Google Drive media manager (reuses the Google OAuth client; redirect
   // defaults to the API origin's drive callback path)
   DRIVE_OAUTH_REDIRECT_URL: z.string().url().optional(),
+  // Production bootstrap (consumed only by `db:init`; the API itself does
+  // not require these, so they stay optional here and are validated there).
+  ADMIN_EMAIL: z.string().email().optional(),
+  ADMIN_PASSWORD: z.string().min(8).optional(),
+  ALLOWED_EMAIL_DOMAINS: z.string().optional(),
 });
 
 export const env = EnvSchema.parse(process.env);
