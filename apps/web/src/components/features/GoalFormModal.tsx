@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Trash2, Plus } from 'lucide-react';
+import { Trash2, Plus, Play, Square, ExternalLink, Link2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Field, Input, Select } from '@/components/ui/Field';
@@ -14,8 +14,17 @@ import {
   useUsers,
   useClients,
   useProjects,
+  useTodos,
+  useCreateTodo,
+  useUpdateTodo,
+  useStartTimer,
+  useStopTimer,
   type GoalRow,
+  type TodoRow,
 } from '@/hooks/useResources';
+import { useMyTimer } from '@/hooks/useTimer';
+import { PRIORITY_DOT } from '@/lib/formatters';
+import { TodoFormModal } from '@/components/features/TodoFormModal';
 import type { ResourceKind } from '@allebrum/shared';
 
 const STATUSES: { value: GoalRow['status']; label: string }[] = [
@@ -43,6 +52,12 @@ export function GoalFormModal({
   const update = useUpdateGoal();
   const addRes = useAddResource();
   const removeRes = useRemoveResource();
+  const { data: todos = [] } = useTodos();
+  const createTodo = useCreateTodo();
+  const updateTodo = useUpdateTodo();
+  const startTimer = useStartTimer();
+  const stopTimer = useStopTimer();
+  const { timer: myTimer } = useMyTimer();
 
   const [title, setTitle] = useState('');
   const [clientId, setClientId] = useState('');
@@ -58,6 +73,10 @@ export function GoalFormModal({
   const [rTitle, setRTitle] = useState('');
   const [rUrl, setRUrl] = useState('');
   const [rMeta, setRMeta] = useState('');
+
+  const [newTodoTitle, setNewTodoTitle] = useState('');
+  const [pickedTodoId, setPickedTodoId] = useState('');
+  const [editingTodo, setEditingTodo] = useState<TodoRow | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -82,9 +101,33 @@ export function GoalFormModal({
       setStartDate('');
       setEndDate('');
     }
+    setNewTodoTitle('');
+    setPickedTodoId('');
+    setEditingTodo(null);
   }, [open, goal]);
 
   const projectsForClient = projects.filter((p) => p.clientId === clientId);
+
+  // Linked to-dos for this goal, sorted: open before done, then high→low
+  // priority, then earliest due date first.
+  const priorityRank = (p: 'low' | 'medium' | 'high') => (p === 'high' ? 0 : p === 'medium' ? 1 : 2);
+  const linkedTodos: TodoRow[] = goal
+    ? todos
+        .filter((t) => t.goalId === goal.id)
+        .slice()
+        .sort((a, b) => {
+          if (a.status !== b.status) return a.status === 'open' ? -1 : 1;
+          const pr = priorityRank(a.priority) - priorityRank(b.priority);
+          if (pr !== 0) return pr;
+          if (a.dueDate && b.dueDate) return a.dueDate.localeCompare(b.dueDate);
+          return 0;
+        })
+    : [];
+  // To-dos on the same project that haven't been linked to any goal yet —
+  // candidates for the "Attach existing" picker.
+  const attachableTodos: TodoRow[] = goal
+    ? todos.filter((t) => t.goalId == null && t.projectId === goal.projectId)
+    : [];
 
   const onSave = async () => {
     if (!title.trim() || !clientId || !projectId) {
@@ -129,9 +172,73 @@ export function GoalFormModal({
     }
   };
 
+  const onCreateLinkedTodo = async () => {
+    if (!goal || !newTodoTitle.trim()) return;
+    try {
+      await createTodo.mutateAsync({
+        title: newTodoTitle.trim(),
+        goalId: goal.id,
+        clientId: goal.clientId,
+        projectId: goal.projectId,
+        assigneeId: goal.ownerId,
+        priority: 'medium',
+        estimateMin: 60,
+        tags: [],
+        private: false,
+      });
+      setNewTodoTitle('');
+      toast.success('To-do added');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to add to-do');
+    }
+  };
+
+  const onAttachTodo = async () => {
+    if (!goal || !pickedTodoId) return;
+    try {
+      await updateTodo.mutateAsync({ id: pickedTodoId, patch: { goalId: goal.id } });
+      setPickedTodoId('');
+      toast.success('To-do attached');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to attach');
+    }
+  };
+
+  const onDetachTodo = async (t: TodoRow) => {
+    try {
+      await updateTodo.mutateAsync({ id: t.id, patch: { goalId: null } });
+      toast.success('Detached from goal');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to detach');
+    }
+  };
+
+  const onStartTodoTimer = async (t: TodoRow) => {
+    if (!t.projectId) {
+      toast.error('Add a project to this to-do first');
+      return;
+    }
+    try {
+      await startTimer.mutateAsync({ projectId: t.projectId, note: t.title, todoId: t.id });
+      toast.success(`Timer started — ${t.title}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Timer action failed');
+    }
+  };
+
+  const onStopTodoTimer = async () => {
+    try {
+      await stopTimer.mutateAsync();
+      toast.success('Timer stopped');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to stop');
+    }
+  };
+
   const busy = create.isPending || update.isPending;
 
   return (
+    <>
     <Modal
       open={open}
       onClose={onClose}
@@ -192,6 +299,108 @@ export function GoalFormModal({
 
         {isEdit && goal && (
           <div className="pt-2 border-t border-gray-100">
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">To-dos</div>
+            <ul className="space-y-1 mb-3">
+              {linkedTodos.length === 0 && <li className="text-sm text-gray-500">No to-dos attached yet.</li>}
+              {linkedTodos.map((t) => {
+                const pri = PRIORITY_DOT[t.priority];
+                const running = myTimer?.todoId === t.id;
+                return (
+                  <li key={t.id} className="flex items-center gap-2 text-sm py-1">
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: pri?.color ?? '#9ca3af' }}
+                      title={pri?.label ?? ''}
+                    />
+                    <span
+                      className={`flex-1 truncate ${t.status === 'done' ? 'line-through text-gray-400' : 'text-gray-800'}`}
+                    >
+                      {t.title}
+                    </span>
+                    {t.status === 'done' ? (
+                      <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">done</span>
+                    ) : running ? (
+                      <button
+                        onClick={() => void onStopTodoTimer()}
+                        title="Stop timer"
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <Square className="w-4 h-4" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => void onStartTodoTimer(t)}
+                        disabled={!t.projectId}
+                        title={t.projectId ? 'Start timer' : 'Add a project to track time'}
+                        className="text-gray-400 hover:text-brand-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <Play className="w-4 h-4" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setEditingTodo(t)}
+                      title="Open"
+                      className="text-gray-400 hover:text-brand-700"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => void onDetachTodo(t)}
+                      title="Detach from goal"
+                      className="text-gray-300 hover:text-red-600"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="flex items-center gap-2 mb-2">
+              <Input
+                value={newTodoTitle}
+                onChange={(e) => setNewTodoTitle(e.target.value)}
+                placeholder="New to-do title"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void onCreateLinkedTodo();
+                  }
+                }}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onCreateLinkedTodo}
+                disabled={!newTodoTitle.trim() || createTodo.isPending}
+              >
+                <Plus className="w-4 h-4" /> Add
+              </Button>
+            </div>
+            {attachableTodos.length > 0 && (
+              <div className="flex items-center gap-2">
+                <Select value={pickedTodoId} onChange={(e) => setPickedTodoId(e.target.value)}>
+                  <option value="">— Attach existing to-do —</option>
+                  {attachableTodos.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.title}
+                    </option>
+                  ))}
+                </Select>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onAttachTodo}
+                  disabled={!pickedTodoId || updateTodo.isPending}
+                >
+                  <Link2 className="w-4 h-4" /> Attach
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {isEdit && goal && (
+          <div className="pt-2 border-t border-gray-100">
             <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Resources</div>
             <ul className="space-y-1 mb-3">
               {goal.resources.length === 0 && <li className="text-sm text-gray-500">No resources yet.</li>}
@@ -239,5 +448,11 @@ export function GoalFormModal({
         )}
       </div>
     </Modal>
+    <TodoFormModal
+      open={!!editingTodo}
+      onClose={() => setEditingTodo(null)}
+      todo={editingTodo}
+    />
+    </>
   );
 }
