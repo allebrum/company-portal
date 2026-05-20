@@ -1,18 +1,19 @@
 import { asc, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { projects, type Project } from '../db/schema.js';
+import { projects, clients, type Project } from '../db/schema.js';
 import type { CreateProjectInput, UpdateProjectInput } from '@allebrum/shared';
 import { emit } from '../realtime/emit.js';
 import { EV } from '@allebrum/shared';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';
+import { isConnected as driveIsConnected, createFolder as driveCreateFolder } from './drive.js';
 
 export async function listProjects(): Promise<Project[]> {
   return db.select().from(projects).orderBy(asc(projects.name));
 }
 
 export async function createProject(input: CreateProjectInput, whoId: string): Promise<Project> {
-  const [row] = await db.insert(projects).values({
+  const [inserted] = await db.insert(projects).values({
     clientId: input.clientId,
     name: input.name,
     code: input.code ?? '',
@@ -20,7 +21,37 @@ export async function createProject(input: CreateProjectInput, whoId: string): P
     budgetHrs: input.budgetHrs,
     color: input.color,
   }).returning();
-  if (!row) throw new Error('project insert failed');
+  if (!inserted) throw new Error('project insert failed');
+  let row = inserted;
+
+  // Best-effort: if Drive is connected and the parent client has its own
+  // Drive folder, create a sub-folder for this project inside it. If the
+  // client has no driveFolderId (created when Drive was disconnected, or
+  // pre-feature), the project also gets no folder — same "going forward
+  // only" rule we apply at the client level.
+  try {
+    if (await driveIsConnected()) {
+      const [parent] = await db
+        .select({ driveFolderId: clients.driveFolderId })
+        .from(clients)
+        .where(eq(clients.id, row.clientId))
+        .limit(1);
+      const parentFolderId = parent?.driveFolderId;
+      if (parentFolderId) {
+        const folder = await driveCreateFolder(parentFolderId, row.name);
+        const [updated] = await db
+          .update(projects)
+          .set({ driveFolderId: folder.id, updatedAt: new Date().toISOString() })
+          .where(eq(projects.id, row.id))
+          .returning();
+        if (updated) row = updated;
+      }
+    }
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn(`[drive] failed to create folder for project "${row.name}":`, e instanceof Error ? e.message : e);
+  }
+
   emit.toOrg(EV.PROJECT_CREATED, { id: row.id, by: whoId, at: new Date().toISOString() });
   await appendActivity({ whoId, kind: 'project.create', target: `${row.name} added` });
   return row;

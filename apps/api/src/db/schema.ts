@@ -165,6 +165,10 @@ export const clients = pgTable('clients', {
   name: text('name').notNull(),
   kind: clientKindEnum('kind').notNull().default('agency'),
   color: text('color').notNull().default('#7e22ce'),
+  // Google Drive folder ID for this client (created automatically on
+  // client creation when Drive is connected; null otherwise). Sub-folders
+  // for the client's projects are created inside this folder.
+  driveFolderId: text('drive_folder_id'),
   createdAt: ts(),
   updatedAt: updTs(),
 });
@@ -178,6 +182,10 @@ export const projects = pgTable('projects', {
   billable: boolean('billable').notNull().default(true),
   budgetHrs: integer('budget_hrs').notNull().default(120),
   color: text('color').notNull().default('#9333ea'),
+  // Google Drive folder ID for this project (created inside the parent
+  // client's drive_folder_id when both Drive is connected and the client
+  // has its own folder; null otherwise).
+  driveFolderId: text('drive_folder_id'),
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
