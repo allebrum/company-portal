@@ -7,7 +7,7 @@ services:
     github:
       branch: main
       deploy_on_push: true
-      repo: sedale-ctrl/company-portal
+      repo: allebrum/company-portal
     build_command: |
       corepack enable
       pnpm install --frozen-lockfile
@@ -51,7 +51,7 @@ static_sites:
     github:
       branch: main
       deploy_on_push: true
-      repo: sedale-ctrl/company-portal
+      repo: allebrum/company-portal
     build_command: |
       corepack enable
       pnpm install --frozen-lockfile
