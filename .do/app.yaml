@@ -79,16 +79,22 @@ static_sites:
       - { key: NEXT_PUBLIC_API_URL, value: ${APP_URL} }
 
 databases:
-  # Postgres runs as an App Platform dev database (managed inline with the
-  # app — no separate cluster, ~$7/mo). Fine for an internal test round.
+  # Both databases are production-tier managed clusters pre-created once
+  # with doctl, then referenced here by cluster_name. App Platform's "dev"
+  # databases work for Postgres in services but were flaky for PRE_DEPLOY
+  # jobs in our case (permission denied on the auto-bound URL), so we
+  # standardised on managed clusters for predictable defaults.
+  #
+  # One-time setup (run as the DO operator):
+  #   doctl databases create allebrum-portal-db    --engine pg     --region nyc1 --size db-s-1vcpu-1gb --num-nodes 1 --version 16 --wait
+  #   doctl databases create allebrum-portal-redis --engine valkey --region nyc1 --size db-amd-1vcpu-1gb --num-nodes 1            --wait
   - name: db
+    cluster_name: allebrum-portal-db
+    db_name: defaultdb
+    db_user: doadmin
     engine: PG
     version: "16"
-  # Redis on App Platform must be a production-tier managed cluster
-  # (App Platform doesn't support dev-tier Redis). Pre-create the cluster
-  # once with: `doctl databases create allebrum-portal-redis --engine redis
-  # --region nyc1 --size db-s-1vcpu-1gb --num-nodes 1`. Then the app spec
-  # references it by cluster_name below.
+    production: true
   - name: redis
     cluster_name: allebrum-portal-redis
     engine: REDIS
