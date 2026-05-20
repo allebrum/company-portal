@@ -103,9 +103,12 @@ databases:
 
 ingress:
   rules:
+    # preserve_path_prefix is required because Express mounts routes at /api
+    # (and Socket.IO at /socket.io). Without it, DO strips the matched
+    # prefix and forwards a path Express doesn't have a handler for.
     - match: { path: { prefix: /api } }
-      component: { name: api }
+      component: { name: api, preserve_path_prefix: true }
     - match: { path: { prefix: /socket.io } }
-      component: { name: api }
+      component: { name: api, preserve_path_prefix: true }
     - match: { path: { prefix: / } }
       component: { name: web }
