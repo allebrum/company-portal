@@ -86,11 +86,12 @@ export function UserFormModal({
           email: email.trim(),
           billable,
           groupIds,
+          ...(password ? { password } : {}),
         });
         if (groupIds.length > 0) {
           await setUserGroups.mutateAsync({ id: created.id, groupIds });
         }
-        toast.success('Invite sent');
+        toast.success('User added');
       }
       onClose();
     } catch (e) {
@@ -110,7 +111,7 @@ export function UserFormModal({
         <>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button variant="primary" onClick={onSave} disabled={!name.trim() || !email.trim() || busy}>
-            {isEdit ? 'Save changes' : 'Send invite'}
+            {isEdit ? 'Save changes' : 'Invite'}
           </Button>
         </>
       }
@@ -134,11 +135,21 @@ export function UserFormModal({
             ))}
           </div>
         </Field>
-        {isEdit && (
-          <Field label="Reset password" hint="Leave blank to keep current password">
-            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="New password (min 8 chars)" />
-          </Field>
-        )}
+        <Field
+          label={isEdit ? 'Reset password' : 'Password (optional)'}
+          hint={
+            isEdit
+              ? 'Leave blank to keep current password'
+              : "Leave blank — they'll sign in with Google (recommended)"
+          }
+        >
+          <Input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={isEdit ? 'New password (min 8 chars)' : 'Only set for non-Google testers'}
+          />
+        </Field>
       </div>
     </Modal>
   );

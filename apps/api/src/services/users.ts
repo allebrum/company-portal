@@ -43,8 +43,11 @@ export async function inviteUser(args: {
   color?: string;
   whoId: string;
 }): Promise<User> {
-  const password = args.password ?? 'Allebrum2026!';
-  const passwordHash = await argon2.hash(password);
+  // No default password — leaving the field blank creates a Google-only
+  // account (verifyLogin rejects null-passwordHash users, so password
+  // login is correctly disabled and the only way in is Google sign-in).
+  // The admin can still explicitly set a password for non-Google testers.
+  const passwordHash = args.password ? await argon2.hash(args.password) : null;
   const existing = await findByEmail(args.email);
   if (existing) throw new HttpError(409, 'email_taken');
   const [row] = await db
