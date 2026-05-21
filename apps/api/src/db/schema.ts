@@ -204,6 +204,11 @@ export const goals = pgTable('goals', {
   endDate: date('end_date'),
   priority: priorityEnum('priority').notNull().default('medium'),
   tag: text('tag').notNull().default('Delivery'),
+  description: text('description'),
+  // Inline checklist (array of { id, text, done }). Stored as JSONB so we
+  // can keep the whole list with the row; server treats it as a full
+  // replace on update (no diffing).
+  checklist: jsonb('checklist').notNull().default(sql`'[]'::jsonb`),
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
@@ -246,6 +251,11 @@ export const todos = pgTable('todos', {
   priority: priorityEnum('priority').notNull().default('medium'),
   tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
   private: boolean('private').notNull().default(false),
+  description: text('description'),
+  // Inline checklist (array of { id, text, done }). Stored as JSONB so we
+  // can keep the whole list with the row; server treats it as a full
+  // replace on update (no diffing).
+  checklist: jsonb('checklist').notNull().default(sql`'[]'::jsonb`),
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({

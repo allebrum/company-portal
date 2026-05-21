@@ -70,22 +70,26 @@ export type GoalResourceRow = {
   addedBy: string | null;
   addedAt: string;
 };
+export type ChecklistItemRow = { id: string; text: string; done: boolean };
 export type GoalRow = {
   id: string;
   clientId: string;
   projectId: string;
   title: string;
+  description: string | null;
   status: 'backlog' | 'in-progress' | 'review' | 'done';
   ownerId: string | null;
   startDate: string | null;
   endDate: string | null;
   priority: 'low' | 'medium' | 'high';
   tag: string;
+  checklist: ChecklistItemRow[];
   resources: GoalResourceRow[];
 };
 export type TodoRow = {
   id: string;
   title: string;
+  description: string | null;
   assigneeId: string | null;
   clientId: string | null;
   projectId: string | null;
@@ -97,6 +101,7 @@ export type TodoRow = {
   priority: 'low' | 'medium' | 'high';
   tags: string[];
   private: boolean;
+  checklist: ChecklistItemRow[];
 };
 export type EntryRow = {
   id: string;

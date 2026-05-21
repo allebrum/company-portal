@@ -40,12 +40,14 @@ export async function createGoal(input: CreateGoalInput, whoId: string): Promise
     clientId: input.clientId,
     projectId: input.projectId,
     title: input.title,
+    description: input.description ?? null,
     status: input.status,
     ownerId: input.ownerId ?? null,
     startDate: input.startDate ?? null,
     endDate: input.endDate ?? null,
     priority: input.priority,
     tag: input.tag,
+    checklist: input.checklist,
   }).returning();
   if (!row) throw new Error('goal insert failed');
   emit.toOrg(EV.GOAL_CREATED, { id: row.id, by: whoId, at: new Date().toISOString() });
@@ -58,12 +60,14 @@ export async function updateGoal(id: string, patch: UpdateGoalInput, whoId: stri
   if (patch.clientId !== undefined) upd.clientId = patch.clientId;
   if (patch.projectId !== undefined) upd.projectId = patch.projectId;
   if (patch.title !== undefined) upd.title = patch.title;
+  if (patch.description !== undefined) upd.description = patch.description;
   if (patch.status !== undefined) upd.status = patch.status;
   if (patch.ownerId !== undefined) upd.ownerId = patch.ownerId;
   if (patch.startDate !== undefined) upd.startDate = patch.startDate;
   if (patch.endDate !== undefined) upd.endDate = patch.endDate;
   if (patch.priority !== undefined) upd.priority = patch.priority;
   if (patch.tag !== undefined) upd.tag = patch.tag;
+  if (patch.checklist !== undefined) upd.checklist = patch.checklist;
   const [row] = await db.update(goals).set(upd).where(eq(goals.id, id)).returning();
   if (!row) throw new HttpError(404, 'goal_not_found');
   emit.toOrg(EV.GOAL_UPDATED, { id: row.id, by: whoId, at: new Date().toISOString() });
