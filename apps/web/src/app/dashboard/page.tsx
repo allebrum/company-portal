@@ -6,6 +6,7 @@ import { Card, Section, Tile, Pill, Empty } from '@/components/ui';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { ItemComposer } from '@/components/features/ItemComposer';
+import { QuickAddTodo } from '@/components/features/QuickAddTodo';
 import { TodoTimerButton } from '@/components/features/TodoTimerButton';
 import { useAuth } from '@/hooks/useAuth';
 import {
@@ -117,6 +118,11 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Section title="Your plate today" className="lg:col-span-2">
+          <div className="space-y-3">
+          <QuickAddTodo
+            context={{ assigneeId: me?.id ?? null }}
+            onElaborate={(t) => { setTodoModal(t); setTodoModalOpen(true); }}
+          />
           {myTodos.length === 0 ? (
             <Empty title="All clear" description="No open to-dos assigned to you." />
           ) : (
@@ -147,6 +153,7 @@ export default function DashboardPage() {
               </ul>
             </Card>
           )}
+          </div>
         </Section>
 
         <Section title="Live goals">

@@ -20,6 +20,7 @@ import {
 } from '@/hooks/useResources';
 import { useMyTimer } from '@/hooks/useTimer';
 import { fmtTimer, PRIORITY_DOT } from '@/lib/formatters';
+import { QuickAddTodo } from '@/components/features/QuickAddTodo';
 import { PropertyCell } from '@/components/composer/PropertyCell';
 import { Checklist } from '@/components/composer/Checklist';
 import { UserChip } from '@/components/composer/chips/UserChip';
@@ -120,7 +121,6 @@ export function ItemComposer(props: ItemComposerProps) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   // goal-edit linked-todos inline form
-  const [newTodoTitle, setNewTodoTitle] = useState('');
   const [pickedTodoId, setPickedTodoId] = useState('');
 
   // ----- reset state on open -----
@@ -162,7 +162,6 @@ export function ItemComposer(props: ItemComposerProps) {
     setRTitle('');
     setRUrl('');
     setRMeta('');
-    setNewTodoTitle('');
     setPickedTodoId('');
     setEditingTodo(null);
     setDragging(false);
@@ -344,24 +343,6 @@ export function ItemComposer(props: ItemComposerProps) {
       setRMeta('');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to attach');
-    }
-  };
-
-  const onCreateLinkedTodo = async () => {
-    if (mode !== 'goal' || !props.goal || !newTodoTitle.trim()) return;
-    try {
-      await createTodo.mutateAsync({
-        title: newTodoTitle.trim(),
-        goalId: props.goal.id,
-        clientId: props.goal.clientId,
-        projectId: props.goal.projectId,
-        assigneeId: props.goal.ownerId,
-        tags: [],
-      });
-      setNewTodoTitle('');
-      toast.success('To-do added');
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to add to-do');
     }
   };
 
@@ -798,29 +779,17 @@ export function ItemComposer(props: ItemComposerProps) {
                   })}
                 </ul>
 
-                {/* Inline create + attach picker */}
-                <div className="flex items-center gap-2">
-                  <input
-                    value={newTodoTitle}
-                    onChange={(e) => setNewTodoTitle(e.target.value)}
-                    placeholder="New to-do title"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        void onCreateLinkedTodo();
-                      }
-                    }}
-                    className="flex-1 px-2 py-1.5 text-sm border border-gray-200 rounded outline-none focus:border-brand-400"
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={onCreateLinkedTodo}
-                    disabled={!newTodoTitle.trim() || createTodo.isPending}
-                  >
-                    <Plus className="w-4 h-4" /> Add
-                  </Button>
-                </div>
+                {/* Inline quick-create (Enter) / create-and-elaborate (⇧Enter) */}
+                <QuickAddTodo
+                  context={{
+                    goalId: props.goal.id,
+                    clientId: props.goal.clientId,
+                    projectId: props.goal.projectId,
+                    assigneeId: props.goal.ownerId,
+                  }}
+                  placeholder="Add a linked to-do — Enter, or ⇧Enter for details"
+                  onElaborate={setEditingTodo}
+                />
                 {attachableTodos.length > 0 && (
                   <div className="flex items-center gap-2">
                     <select
