@@ -17,7 +17,10 @@ projectsRouter.get('/', async (_req, res, next) => {
   }
 });
 
-projectsRouter.post('/', requirePermission('projects.manage'), validate(CreateProjectSchema), async (req, res, next) => {
+// Any authenticated teammate can create a project (e.g. inline from the
+// composer while creating a goal/to-do). Editing/renaming stays gated by
+// projects.manage below.
+projectsRouter.post('/', validate(CreateProjectSchema), async (req, res, next) => {
   try {
     const me = req.session.user!;
     const row = await createProject(getValidated<typeof CreateProjectSchema._type>(req), me.userId);
