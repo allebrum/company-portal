@@ -6,14 +6,38 @@ import { emit } from '../realtime/emit.js';
 import { EV } from '@allebrum/shared';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';
+import { isConnected as driveIsConnected, ensureSharedFolder, createFolder as driveCreateFolder } from './drive.js';
 
 export async function listClients(): Promise<Client[]> {
   return db.select().from(clients).orderBy(asc(clients.name));
 }
 
 export async function createClient(input: CreateClientInput, whoId: string): Promise<Client> {
-  const [row] = await db.insert(clients).values(input).returning();
-  if (!row) throw new Error('client insert failed');
+  const [inserted] = await db.insert(clients).values(input).returning();
+  if (!inserted) throw new Error('client insert failed');
+  let row = inserted;
+
+  // Best-effort: create a Drive folder for this client under the shared
+  // portal root. If Drive isn't connected or the API call fails, the
+  // client is still returned — driveFolderId stays null. Projects created
+  // under a folder-less client will not get sub-folders either ("going
+  // forward only" semantics for the auto-folder feature).
+  try {
+    if (await driveIsConnected()) {
+      const rootId = await ensureSharedFolder();
+      const folder = await driveCreateFolder(rootId, row.name);
+      const [updated] = await db
+        .update(clients)
+        .set({ driveFolderId: folder.id, updatedAt: new Date().toISOString() })
+        .where(eq(clients.id, row.id))
+        .returning();
+      if (updated) row = updated;
+    }
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn(`[drive] failed to create folder for client "${row.name}":`, e instanceof Error ? e.message : e);
+  }
+
   emit.toOrg(EV.CLIENT_CREATED, { id: row.id, by: whoId, at: new Date().toISOString() });
   await appendActivity({ whoId, kind: 'client.create', target: `${row.name} added` });
   return row;

@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { API_URL } from '@/lib/env';
 import { qk } from '@/lib/queryKeys';
 import type {
   CreateClientInput,
@@ -61,25 +62,34 @@ export type GoalResourceRow = {
   title: string;
   url: string;
   meta: string;
+  // Populated for resources that were uploaded into the portal (the file
+  // was pushed to Drive). Null for legacy URL-bookmark resources.
+  driveFileId: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
   addedBy: string | null;
   addedAt: string;
 };
+export type ChecklistItemRow = { id: string; text: string; done: boolean };
 export type GoalRow = {
   id: string;
   clientId: string;
   projectId: string;
   title: string;
+  description: string | null;
   status: 'backlog' | 'in-progress' | 'review' | 'done';
   ownerId: string | null;
   startDate: string | null;
   endDate: string | null;
   priority: 'low' | 'medium' | 'high';
   tag: string;
+  checklist: ChecklistItemRow[];
   resources: GoalResourceRow[];
 };
 export type TodoRow = {
   id: string;
   title: string;
+  description: string | null;
   assigneeId: string | null;
   clientId: string | null;
   projectId: string | null;
@@ -91,6 +101,7 @@ export type TodoRow = {
   priority: 'low' | 'medium' | 'high';
   tags: string[];
   private: boolean;
+  checklist: ChecklistItemRow[];
 };
 export type EntryRow = {
   id: string;
@@ -324,6 +335,29 @@ export function useRemoveResource() {
   return useMutation({
     mutationFn: ({ goalId, resourceId }: { goalId: string; resourceId: string }) =>
       api.del<{ ok: true }>(`/goals/${goalId}/resources/${resourceId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.goals }),
+  });
+}
+// Multipart upload: pushes a real file into the goal's project Drive
+// folder and records the resource. Use this for drag-drop / file-picker
+// flows; useAddResource() is still the right call for URL bookmarks.
+export function useUploadGoalResource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ goalId, file }: { goalId: string; file: File }) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch(`${API_URL}/api/goals/${goalId}/resources/upload`, {
+        method: 'POST',
+        credentials: 'include',
+        body: fd,
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? 'upload_failed');
+      }
+      return res.json() as Promise<GoalResourceRow>;
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.goals }),
   });
 }

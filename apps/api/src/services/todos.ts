@@ -41,6 +41,7 @@ export async function createTodo(input: CreateTodoInput, whoId: string): Promise
     .insert(todos)
     .values({
       title: input.title,
+      description: input.description ?? null,
       assigneeId: input.assigneeId ?? whoId,
       clientId: input.clientId ?? null,
       projectId: input.projectId ?? null,
@@ -50,6 +51,7 @@ export async function createTodo(input: CreateTodoInput, whoId: string): Promise
       priority: input.priority,
       tags: input.tags,
       private: input.private,
+      checklist: input.checklist,
     })
     .returning();
   if (!row) throw new Error('todo insert failed');
@@ -64,6 +66,7 @@ export async function updateTodo(id: string, patch: UpdateTodoInput, whoId: stri
 
   const upd: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   if (patch.title !== undefined) upd.title = patch.title;
+  if (patch.description !== undefined) upd.description = patch.description;
   if (patch.assigneeId !== undefined) upd.assigneeId = patch.assigneeId;
   if (patch.clientId !== undefined) upd.clientId = patch.clientId;
   if (patch.projectId !== undefined) upd.projectId = patch.projectId;
@@ -75,6 +78,7 @@ export async function updateTodo(id: string, patch: UpdateTodoInput, whoId: stri
   if (patch.tags !== undefined) upd.tags = patch.tags;
   if (patch.private !== undefined) upd.private = patch.private;
   if (patch.status !== undefined) upd.status = patch.status;
+  if (patch.checklist !== undefined) upd.checklist = patch.checklist;
 
   const [row] = await db.update(todos).set(upd).where(eq(todos.id, id)).returning();
   if (!row) throw new HttpError(404, 'todo_not_found');

@@ -5,7 +5,7 @@ import { Card, Pill } from '@/components/ui';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
-import { GoalFormModal } from '@/components/features/GoalFormModal';
+import { ItemComposer } from '@/components/features/ItemComposer';
 import {
   useGoals,
   useUsers,
@@ -121,7 +121,7 @@ export default function RoadmapPage() {
       {view === 'list' && <ListView goals={goals} {...ctx} openEdit={openEdit} />}
       {view === 'gantt' && <GanttView goals={goals} {...ctx} openEdit={openEdit} />}
 
-      <GoalFormModal open={modalOpen} onClose={() => setModalOpen(false)} goal={editing} />
+      <ItemComposer mode="goal" open={modalOpen} onClose={() => setModalOpen(false)} goal={editing} />
     </div>
   );
 }

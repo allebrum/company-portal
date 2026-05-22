@@ -16,7 +16,7 @@ export function Modal({
   open: boolean;
   onClose: () => void;
   title?: string;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl';
   footer?: React.ReactNode;
   children: React.ReactNode;
 }) {
@@ -46,6 +46,9 @@ export function Modal({
     md: 'max-w-md',
     lg: 'max-w-lg',
     xl: 'max-w-2xl',
+    '2xl': 'max-w-3xl',
+    '3xl': 'max-w-4xl',
+    '4xl': 'max-w-5xl',
   };
 
   // Rendered into <body> so it escapes any ancestor that establishes a

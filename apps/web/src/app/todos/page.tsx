@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Checkbox, Field, Select } from '@/components/ui/Field';
 import { Avatar } from '@/components/ui/Avatar';
 import { useToast } from '@/components/ui/Toast';
-import { TodoFormModal } from '@/components/features/TodoFormModal';
+import { ItemComposer } from '@/components/features/ItemComposer';
 import { TodoTimerButton } from '@/components/features/TodoTimerButton';
 import {
   useTodos,
@@ -157,7 +157,7 @@ export default function TodosPage() {
         )}
       </Section>
 
-      <TodoFormModal open={modalOpen} onClose={() => setModalOpen(false)} todo={editing} />
+      <ItemComposer mode="todo" open={modalOpen} onClose={() => setModalOpen(false)} todo={editing} />
     </div>
   );
 }

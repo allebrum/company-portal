@@ -5,8 +5,7 @@ import Link from 'next/link';
 import { Card, Section, Tile, Pill, Empty } from '@/components/ui';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
-import { TodoFormModal } from '@/components/features/TodoFormModal';
-import { GoalFormModal } from '@/components/features/GoalFormModal';
+import { ItemComposer } from '@/components/features/ItemComposer';
 import { TodoTimerButton } from '@/components/features/TodoTimerButton';
 import { useAuth } from '@/hooks/useAuth';
 import {
@@ -231,8 +230,8 @@ export default function DashboardPage() {
         </Section>
       </div>
 
-      <TodoFormModal open={todoModalOpen} onClose={() => setTodoModalOpen(false)} todo={todoModal} />
-      <GoalFormModal open={goalModalOpen} onClose={() => setGoalModalOpen(false)} goal={goalModal} />
+      <ItemComposer mode="todo" open={todoModalOpen} onClose={() => setTodoModalOpen(false)} todo={todoModal} />
+      <ItemComposer mode="goal" open={goalModalOpen} onClose={() => setGoalModalOpen(false)} goal={goalModal} />
     </div>
   );
 }

@@ -165,6 +165,10 @@ export const clients = pgTable('clients', {
   name: text('name').notNull(),
   kind: clientKindEnum('kind').notNull().default('agency'),
   color: text('color').notNull().default('#7e22ce'),
+  // Google Drive folder ID for this client (created automatically on
+  // client creation when Drive is connected; null otherwise). Sub-folders
+  // for the client's projects are created inside this folder.
+  driveFolderId: text('drive_folder_id'),
   createdAt: ts(),
   updatedAt: updTs(),
 });
@@ -178,6 +182,10 @@ export const projects = pgTable('projects', {
   billable: boolean('billable').notNull().default(true),
   budgetHrs: integer('budget_hrs').notNull().default(120),
   color: text('color').notNull().default('#9333ea'),
+  // Google Drive folder ID for this project (created inside the parent
+  // client's drive_folder_id when both Drive is connected and the client
+  // has its own folder; null otherwise).
+  driveFolderId: text('drive_folder_id'),
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
@@ -196,6 +204,11 @@ export const goals = pgTable('goals', {
   endDate: date('end_date'),
   priority: priorityEnum('priority').notNull().default('medium'),
   tag: text('tag').notNull().default('Delivery'),
+  description: text('description'),
+  // Inline checklist (array of { id, text, done }). Stored as JSONB so we
+  // can keep the whole list with the row; server treats it as a full
+  // replace on update (no diffing).
+  checklist: jsonb('checklist').notNull().default(sql`'[]'::jsonb`),
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
@@ -211,6 +224,12 @@ export const goalResources = pgTable('goal_resources', {
   title: text('title').notNull(),
   url: text('url').notNull().default(''),
   meta: text('meta').notNull().default(''),
+  // When the resource was uploaded directly into the portal (not a manual
+  // URL bookmark), these carry the Drive-side identity of the uploaded
+  // file. Stay null for URL-bookmark resources for backwards compatibility.
+  driveFileId: text('drive_file_id'),
+  mimeType: text('mime_type'),
+  sizeBytes: integer('size_bytes'),
   addedBy: uuid('added_by').references(() => users.id, { onDelete: 'set null' }),
   addedAt: date('added_at').notNull().defaultNow(),
 }, (t) => ({
@@ -232,6 +251,11 @@ export const todos = pgTable('todos', {
   priority: priorityEnum('priority').notNull().default('medium'),
   tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
   private: boolean('private').notNull().default(false),
+  description: text('description'),
+  // Inline checklist (array of { id, text, done }). Stored as JSONB so we
+  // can keep the whole list with the row; server treats it as a full
+  // replace on update (no diffing).
+  checklist: jsonb('checklist').notNull().default(sql`'[]'::jsonb`),
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
