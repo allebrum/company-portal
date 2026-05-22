@@ -64,6 +64,9 @@ export type ItemComposerProps =
 export function ItemComposer(props: ItemComposerProps) {
   const { mode, open, onClose } = props;
   const isEdit = mode === 'todo' ? !!props.todo : !!props.goal;
+  // Stable identity of the item being edited (null in create mode). Used as
+  // an effect dependency so the reset only fires on open / item change.
+  const editItemId = props.mode === 'todo' ? (props.todo?.id ?? null) : (props.goal?.id ?? null);
   const toast = useToast();
   const { me } = useAuth();
 
@@ -175,7 +178,12 @@ export function ItemComposer(props: ItemComposerProps) {
     setPickedTodoId('');
     setEditingTodo(null);
     setDragging(false);
-  }, [open, mode, props, me]);
+    // Only re-initialise when the modal opens or the edited item changes —
+    // NOT on every parent re-render (which happens whenever a background
+    // query refetches, e.g. after inline-creating a client). Depending on
+    // the whole `props` object here used to wipe in-progress edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, mode, editItemId, me?.id]);
 
   // ----- derived data -----
   const client = clients.find((c) => c.id === clientId) ?? null;
@@ -679,7 +687,7 @@ export function ItemComposer(props: ItemComposerProps) {
                   )}
                   {props.goal.resources.map((r) => (
                     <li key={r.id} className="flex items-center gap-2 text-sm py-1">
-                      <span className="flex-1 truncate">
+                      <span className="flex-1 min-w-0 truncate">
                         {r.url ? (
                           <a
                             href={r.url}
@@ -790,7 +798,7 @@ export function ItemComposer(props: ItemComposerProps) {
                           title={dot?.label ?? ''}
                         />
                         <span
-                          className={`flex-1 truncate ${
+                          className={`flex-1 min-w-0 truncate ${
                             t.status === 'done' ? 'line-through text-gray-400' : 'text-gray-800'
                           }`}
                         >
