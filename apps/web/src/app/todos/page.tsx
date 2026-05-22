@@ -8,6 +8,7 @@ import { Checkbox, Field, Select } from '@/components/ui/Field';
 import { Avatar } from '@/components/ui/Avatar';
 import { useToast } from '@/components/ui/Toast';
 import { ItemComposer } from '@/components/features/ItemComposer';
+import { QuickAddTodo } from '@/components/features/QuickAddTodo';
 import { TodoTimerButton } from '@/components/features/TodoTimerButton';
 import {
   useTodos,
@@ -86,6 +87,11 @@ export default function TodosPage() {
         <Checkbox label="Show completed" checked={showDone} onChange={setShowDone} />
         <div className="ml-auto text-sm text-gray-500">{visible.length} item{visible.length === 1 ? '' : 's'}</div>
       </Card>
+
+      <QuickAddTodo
+        context={{ assigneeId: scope === 'me' ? me?.id ?? null : null }}
+        onElaborate={openEdit}
+      />
 
       <Section>
         {visible.length === 0 ? (
