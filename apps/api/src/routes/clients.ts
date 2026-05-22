@@ -17,7 +17,9 @@ clientsRouter.get('/', async (_req, res, next) => {
   }
 });
 
-clientsRouter.post('/', requirePermission('clients.manage'), validate(CreateClientSchema), async (req, res, next) => {
+// Any authenticated teammate can create a client (e.g. inline from the
+// composer). Editing/renaming stays gated by clients.manage below.
+clientsRouter.post('/', validate(CreateClientSchema), async (req, res, next) => {
   try {
     const me = req.session.user!;
     const row = await createClient(getValidated<typeof CreateClientSchema._type>(req), me.userId);
