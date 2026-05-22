@@ -47,8 +47,8 @@ export function EpicChip({
         title={disabled ? 'Pick a project first' : undefined}
         style={current ? { color: current.color } : undefined}
       >
-        <Layers className="w-3.5 h-3.5" />
-        {current ? current.title : disabled ? 'Pick a project first' : 'No epic'}
+        <Layers className="w-3.5 h-3.5 shrink-0" />
+        <span className="truncate max-w-[12rem]">{current ? current.title : disabled ? 'Pick a project first' : 'No epic'}</span>
       </ChipButton>
       <Popover open={open} onClose={() => setOpen(false)} anchorRef={ref}>
         <SearchablePicker
