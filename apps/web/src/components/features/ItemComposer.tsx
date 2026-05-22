@@ -193,6 +193,12 @@ export function ItemComposer(props: ItemComposerProps) {
     return todos.filter((t) => t.goalId == null && t.projectId === props.goal!.projectId);
   }, [mode, props, todos]);
 
+  // Distinct tags across all to-dos — feeds the TagsChip autocomplete.
+  const tagSuggestions = useMemo(
+    () => Array.from(new Set(todos.flatMap((t) => t.tags))).sort(),
+    [todos],
+  );
+
   // ----- submit -----
   const onSave = async () => {
     if (!title.trim()) {
@@ -559,7 +565,7 @@ export function ItemComposer(props: ItemComposerProps) {
 
               {mode === 'todo' && (
                 <PropertyCell icon={Tag} label="Tags" span={2}>
-                  <TagsChip value={tags} onChange={setTags} />
+                  <TagsChip value={tags} onChange={setTags} suggestions={tagSuggestions} />
                 </PropertyCell>
               )}
 

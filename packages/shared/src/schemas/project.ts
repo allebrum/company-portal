@@ -8,7 +8,8 @@ export const CreateProjectSchema = z.object({
   budgetHrs: z.number().int().nonnegative().max(100000).default(120),
   color: z.string().max(20).default('#9333ea'),
 });
-export type CreateProjectInput = z.infer<typeof CreateProjectSchema>;
+// z.input so callers can create with just { clientId, name } (rest default).
+export type CreateProjectInput = z.input<typeof CreateProjectSchema>;
 
 export const UpdateProjectSchema = z.object({
   clientId: z.string().uuid().optional(),
