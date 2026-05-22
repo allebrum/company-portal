@@ -5,6 +5,8 @@ export const qk = {
   clients: ['clients'] as const,
   projects: ['projects'] as const,
   goals: ['goals'] as const,
+  epics: ['epics'] as const,
+  milestones: ['milestones'] as const,
   todos: ['todos'] as const,
   entries: (params?: Record<string, unknown>) => (params ? (['entries', params] as const) : (['entries'] as const)),
   timers: ['timers'] as const,

@@ -21,6 +21,7 @@ import {
 import { useMyTimer } from '@/hooks/useTimer';
 import { fmtTimer, PRIORITY_DOT } from '@/lib/formatters';
 import { QuickAddTodo } from '@/components/features/QuickAddTodo';
+import { statusesForScope } from '@/lib/roadmap';
 import { PropertyCell } from '@/components/composer/PropertyCell';
 import { Checklist } from '@/components/composer/Checklist';
 import { UserChip } from '@/components/composer/chips/UserChip';
@@ -107,7 +108,7 @@ export function ItemComposer(props: ItemComposerProps) {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [goalCategory, setGoalCategory] = useState('Delivery');
-  const [goalStatus, setGoalStatus] = useState<'backlog' | 'in-progress' | 'review' | 'done'>('backlog');
+  const [goalStatus, setGoalStatus] = useState<string>('backlog');
 
   // goal-edit nested-modal state (open a linked todo in another composer)
   const [editingTodo, setEditingTodo] = useState<TodoRow | null>(null);
@@ -422,7 +423,12 @@ export function ItemComposer(props: ItemComposerProps) {
               {mode === 'todo' ? (
                 <StatusChip mode="todo" value={todoStatus} onChange={setTodoStatus} />
               ) : (
-                <StatusChip mode="goal" value={goalStatus} onChange={setGoalStatus} />
+                <StatusChip
+                  mode="goal"
+                  value={goalStatus}
+                  onChange={setGoalStatus}
+                  statuses={statusesForScope(projectId ? { kind: 'project', id: projectId } : { kind: 'all' }, projects)}
+                />
               )}
               <div className="text-xs text-gray-500 flex items-center gap-1.5 flex-wrap min-w-0">
                 {client && (
