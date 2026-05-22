@@ -20,6 +20,7 @@ export async function createProject(input: CreateProjectInput, whoId: string): P
     billable: input.billable,
     budgetHrs: input.budgetHrs,
     color: input.color,
+    statuses: input.statuses ?? null,
   }).returning();
   if (!inserted) throw new Error('project insert failed');
   let row = inserted;
@@ -69,6 +70,7 @@ export async function updateProject(
   if (patch.billable !== undefined) upd.billable = patch.billable;
   if (patch.budgetHrs !== undefined) upd.budgetHrs = patch.budgetHrs;
   if (patch.color !== undefined) upd.color = patch.color;
+  if (patch.statuses !== undefined) upd.statuses = patch.statuses;
   const [row] = await db.update(projects).set(upd).where(eq(projects.id, id)).returning();
   if (!row) throw new HttpError(404, 'project_not_found');
   emit.toOrg(EV.PROJECT_UPDATED, { id: row.id, by: whoId, at: new Date().toISOString() });

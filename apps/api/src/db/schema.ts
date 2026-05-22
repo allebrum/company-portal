@@ -186,6 +186,9 @@ export const projects = pgTable('projects', {
   // client's drive_folder_id when both Drive is connected and the client
   // has its own folder; null otherwise).
   driveFolderId: text('drive_folder_id'),
+  // Custom status workflow: array of { id, label, tone }. Null = use the
+  // default backlog/in-progress/review/done workflow.
+  statuses: jsonb('statuses'),
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
@@ -198,22 +201,59 @@ export const goals = pgTable('goals', {
   clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'restrict' }),
   projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
   title: text('title').notNull(),
-  status: goalStatusEnum('status').notNull().default('backlog'),
+  // Free-form status string. The default workflow uses GOAL_STATUSES
+  // (backlog/in-progress/review/done) but projects may define custom
+  // workflows; the UI buckets custom statuses into canonical columns at
+  // render time. Stored as text (was a pgEnum) so any workflow value is
+  // valid.
+  status: text('status').notNull().default('backlog'),
   ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
   startDate: date('start_date'),
   endDate: date('end_date'),
   priority: priorityEnum('priority').notNull().default('medium'),
   tag: text('tag').notNull().default('Delivery'),
   description: text('description'),
-  // Inline checklist (array of { id, text, done }). Stored as JSONB so we
-  // can keep the whole list with the row; server treats it as a full
-  // replace on update (no diffing).
   checklist: jsonb('checklist').notNull().default(sql`'[]'::jsonb`),
+  // PM workspace extensions:
+  epicId: uuid('epic_id').references(() => epics.id, { onDelete: 'set null' }),
+  health: text('health'),                              // on-track | at-risk | off-track | done
+  progress: integer('progress'),                       // 0–100 manual override; else rolled up
+  dependsOn: jsonb('depends_on'),                      // array of goal ids that must finish first
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
   statusIdx: index('goals_status_idx').on(t.status),
   projectIdx: index('goals_project_idx').on(t.projectId),
+}));
+
+// ---- Epics (top of the PM hierarchy: epic → goal → to-do) ----
+export const epics = pgTable('epics', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  color: text('color').notNull().default('#9333ea'),
+  icon: text('icon').notNull().default('layers'),
+  startDate: date('start_date'),
+  endDate: date('end_date'),
+  createdAt: ts(),
+  updatedAt: updTs(),
+}, (t) => ({
+  projectIdx: index('epics_project_idx').on(t.projectId),
+}));
+
+// ---- Milestones (point-in-time markers on Gantt + Calendar) ----
+export const milestones = pgTable('milestones', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  date: date('date').notNull(),
+  kind: text('kind').notNull().default('release'),     // release | review | deadline | phase
+  color: text('color').notNull().default('#9333ea'),
+  createdAt: ts(),
+  updatedAt: updTs(),
+}, (t) => ({
+  projectIdx: index('milestones_project_idx').on(t.projectId),
 }));
 
 // ---- Goal resources ----
@@ -382,6 +422,8 @@ export type Client = typeof clients.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export type Goal = typeof goals.$inferSelect;
 export type GoalResource = typeof goalResources.$inferSelect;
+export type Epic = typeof epics.$inferSelect;
+export type Milestone = typeof milestones.$inferSelect;
 export type Todo = typeof todos.$inferSelect;
 export type PayPeriod = typeof payPeriods.$inferSelect;
 export type PayConfig = typeof payConfig.$inferSelect;

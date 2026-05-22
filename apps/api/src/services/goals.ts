@@ -11,7 +11,6 @@ import type {
   UpdateGoalInput,
   MoveGoalInput,
   AddResourceInput,
-  GoalStatus,
 } from '@allebrum/shared';
 import { EV } from '@allebrum/shared';
 import { emit } from '../realtime/emit.js';
@@ -48,6 +47,10 @@ export async function createGoal(input: CreateGoalInput, whoId: string): Promise
     priority: input.priority,
     tag: input.tag,
     checklist: input.checklist,
+    epicId: input.epicId ?? null,
+    health: input.health ?? null,
+    progress: input.progress ?? null,
+    dependsOn: input.dependsOn ?? null,
   }).returning();
   if (!row) throw new Error('goal insert failed');
   emit.toOrg(EV.GOAL_CREATED, { id: row.id, by: whoId, at: new Date().toISOString() });
@@ -68,6 +71,10 @@ export async function updateGoal(id: string, patch: UpdateGoalInput, whoId: stri
   if (patch.priority !== undefined) upd.priority = patch.priority;
   if (patch.tag !== undefined) upd.tag = patch.tag;
   if (patch.checklist !== undefined) upd.checklist = patch.checklist;
+  if (patch.epicId !== undefined) upd.epicId = patch.epicId;
+  if (patch.health !== undefined) upd.health = patch.health;
+  if (patch.progress !== undefined) upd.progress = patch.progress;
+  if (patch.dependsOn !== undefined) upd.dependsOn = patch.dependsOn;
   const [row] = await db.update(goals).set(upd).where(eq(goals.id, id)).returning();
   if (!row) throw new HttpError(404, 'goal_not_found');
   emit.toOrg(EV.GOAL_UPDATED, { id: row.id, by: whoId, at: new Date().toISOString() });
@@ -77,7 +84,7 @@ export async function updateGoal(id: string, patch: UpdateGoalInput, whoId: stri
 export async function moveGoal(id: string, input: MoveGoalInput, whoId: string): Promise<Goal> {
   const [row] = await db
     .update(goals)
-    .set({ status: input.status as GoalStatus, updatedAt: new Date().toISOString() })
+    .set({ status: input.status, updatedAt: new Date().toISOString() })
     .where(eq(goals.id, id))
     .returning();
   if (!row) throw new HttpError(404, 'goal_not_found');

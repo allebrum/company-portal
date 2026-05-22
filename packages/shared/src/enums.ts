@@ -100,3 +100,13 @@ export type WeekendRule = (typeof WEEKEND_RULES)[number];
 
 export const INTEGRATION_KINDS = ['drive', 'github', 'slack', 'quickbooks'] as const;
 export type IntegrationKind = (typeof INTEGRATION_KINDS)[number];
+
+// ---- PM workspace ----
+export const HEALTHS = ['on-track', 'at-risk', 'off-track', 'done'] as const;
+export type Health = (typeof HEALTHS)[number];
+
+export const MILESTONE_KINDS = ['release', 'review', 'deadline', 'phase'] as const;
+export type MilestoneKind = (typeof MILESTONE_KINDS)[number];
+
+export const STATUS_TONES = ['gray', 'purple', 'amber', 'green', 'blue', 'orange', 'red', 'teal', 'pink'] as const;
+export type StatusTone = (typeof STATUS_TONES)[number];
