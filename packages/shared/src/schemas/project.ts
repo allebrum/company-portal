@@ -1,4 +1,13 @@
 import { z } from 'zod';
+import { STATUS_TONES } from '../enums';
+
+// One column in a project's custom status workflow.
+export const ProjectStatusSchema = z.object({
+  id: z.string().min(1).max(40),
+  label: z.string().min(1).max(60),
+  tone: z.enum(STATUS_TONES),
+});
+export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
 
 export const CreateProjectSchema = z.object({
   clientId: z.string().uuid(),
@@ -7,6 +16,7 @@ export const CreateProjectSchema = z.object({
   billable: z.boolean().default(true),
   budgetHrs: z.number().int().nonnegative().max(100000).default(120),
   color: z.string().max(20).default('#9333ea'),
+  statuses: z.array(ProjectStatusSchema).max(12).nullable().optional(),
 });
 // z.input so callers can create with just { clientId, name } (rest default).
 export type CreateProjectInput = z.input<typeof CreateProjectSchema>;
@@ -18,5 +28,6 @@ export const UpdateProjectSchema = z.object({
   billable: z.boolean().optional(),
   budgetHrs: z.number().int().nonnegative().max(100000).optional(),
   color: z.string().max(20).optional(),
+  statuses: z.array(ProjectStatusSchema).max(12).nullable().optional(),
 });
 export type UpdateProjectInput = z.infer<typeof UpdateProjectSchema>;

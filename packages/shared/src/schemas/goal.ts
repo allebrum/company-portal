@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { GOAL_STATUSES, PRIORITIES, RESOURCE_KINDS } from '../enums';
+import { PRIORITIES, RESOURCE_KINDS, HEALTHS } from '../enums';
 import { ChecklistItemSchema } from './todo';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD');
@@ -9,23 +9,28 @@ export const CreateGoalSchema = z.object({
   projectId: z.string().uuid(),
   title: z.string().min(1).max(240),
   description: z.string().max(10_000).nullable().optional(),
-  status: z.enum(GOAL_STATUSES).default('backlog'),
+  // Free-form status (default workflow OR a project's custom workflow id).
+  status: z.string().min(1).max(60).default('backlog'),
   ownerId: z.string().uuid().nullable().optional(),
   startDate: isoDate.optional(),
   endDate: isoDate.optional(),
   priority: z.enum(PRIORITIES).default('medium'),
   tag: z.string().max(60).default('Delivery'),
   checklist: z.array(ChecklistItemSchema).max(50).default([]),
+  // PM workspace extensions
+  epicId: z.string().uuid().nullable().optional(),
+  health: z.enum(HEALTHS).nullable().optional(),
+  progress: z.number().int().min(0).max(100).nullable().optional(),
+  dependsOn: z.array(z.string().uuid()).nullable().optional(),
 });
-// Use z.input so callers may omit fields that have defaults (status,
-// priority, tag, checklist) — the server applies them via zod.
+// z.input so callers can omit fields with defaults (status/priority/tag/checklist).
 export type CreateGoalInput = z.input<typeof CreateGoalSchema>;
 
 export const UpdateGoalSchema = CreateGoalSchema.partial();
 export type UpdateGoalInput = z.infer<typeof UpdateGoalSchema>;
 
 export const MoveGoalSchema = z.object({
-  status: z.enum(GOAL_STATUSES),
+  status: z.string().min(1).max(60),
 });
 export type MoveGoalInput = z.infer<typeof MoveGoalSchema>;
 
