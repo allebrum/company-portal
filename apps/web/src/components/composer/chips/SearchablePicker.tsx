@@ -13,6 +13,8 @@ export function SearchablePicker<T extends { id: string }>({
   selectedId,
   onSelect,
   onClear,
+  onCreate,
+  creating = false,
   getLabel,
   renderRow,
   placeholder = 'Search…',
@@ -23,6 +25,10 @@ export function SearchablePicker<T extends { id: string }>({
   onSelect: (item: T) => void;
   /** Provided → renders an "unassigned" row at the top. */
   onClear?: () => void;
+  /** Provided → renders a "+ Create '<query>'" row when the typed query
+   *  has no exact (case-insensitive) label match. */
+  onCreate?: (name: string) => void;
+  creating?: boolean;
   getLabel: (item: T) => string;
   renderRow?: (item: T, selected: boolean) => ReactNode;
   placeholder?: string;
@@ -38,6 +44,10 @@ export function SearchablePicker<T extends { id: string }>({
     if (!needle) return items;
     return items.filter((it) => getLabel(it).toLowerCase().includes(needle));
   }, [q, items, getLabel]);
+
+  const trimmed = q.trim();
+  const exactMatch = items.some((it) => getLabel(it).toLowerCase() === trimmed.toLowerCase());
+  const showCreate = !!onCreate && trimmed.length > 0 && !exactMatch;
 
   return (
     <div className="w-72">
@@ -62,8 +72,18 @@ export function SearchablePicker<T extends { id: string }>({
             {clearLabel ?? '— Unassigned —'}
           </button>
         )}
-        {filtered.length === 0 && (
+        {filtered.length === 0 && !showCreate && (
           <div className="px-3 py-2 text-sm text-gray-400">No matches.</div>
+        )}
+        {showCreate && (
+          <button
+            type="button"
+            disabled={creating}
+            onClick={() => onCreate!(trimmed)}
+            className="w-full text-left px-3 py-1.5 text-sm text-brand-700 hover:bg-brand-50 font-medium disabled:opacity-60"
+          >
+            {creating ? 'Creating…' : <>+ Create &ldquo;{trimmed}&rdquo;</>}
+          </button>
         )}
         {filtered.map((it) => {
           const selected = it.id === selectedId;

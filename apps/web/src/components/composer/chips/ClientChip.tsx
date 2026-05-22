@@ -4,7 +4,8 @@ import { useRef, useState } from 'react';
 import { Popover } from '@/components/ui/Popover';
 import { ChipButton } from './ChipButton';
 import { SearchablePicker } from './SearchablePicker';
-import type { ClientRow } from '@/hooks/useResources';
+import { useCreateClient, type ClientRow } from '@/hooks/useResources';
+import { useToast } from '@/components/ui/Toast';
 
 function Dot({ color }: { color: string }) {
   return (
@@ -31,6 +32,19 @@ export function ClientChip({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const current = clients.find((c) => c.id === value) ?? null;
+  const createClient = useCreateClient();
+  const toast = useToast();
+
+  const onCreate = async (name: string) => {
+    try {
+      const row = await createClient.mutateAsync({ name });
+      onChange(row.id);
+      setOpen(false);
+      toast.success(`Client "${row.name}" created`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not create client');
+    }
+  };
 
   return (
     <>
@@ -57,8 +71,10 @@ export function ClientChip({
             setOpen(false);
           }}
           onClear={allowClear ? () => { onChange(null); setOpen(false); } : undefined}
+          onCreate={onCreate}
+          creating={createClient.isPending}
           getLabel={(c) => c.name}
-          placeholder="Search clients…"
+          placeholder="Search or create a client…"
           renderRow={(c) => (
             <span className="inline-flex items-center gap-2">
               <Dot color={c.color} />

@@ -4,7 +4,8 @@ import { useMemo, useRef, useState } from 'react';
 import { Popover } from '@/components/ui/Popover';
 import { ChipButton } from './ChipButton';
 import { SearchablePicker } from './SearchablePicker';
-import type { ProjectRow } from '@/hooks/useResources';
+import { useCreateProject, type ProjectRow } from '@/hooks/useResources';
+import { useToast } from '@/components/ui/Toast';
 
 export function ProjectChip({
   value,
@@ -28,6 +29,20 @@ export function ProjectChip({
   );
   const current = scoped.find((p) => p.id === value) ?? null;
   const disabled = !clientId;
+  const createProject = useCreateProject();
+  const toast = useToast();
+
+  const onCreate = async (name: string) => {
+    if (!clientId) return;
+    try {
+      const row = await createProject.mutateAsync({ clientId, name });
+      onChange(row.id);
+      setOpen(false);
+      toast.success(`Project "${row.name}" created`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not create project');
+    }
+  };
 
   return (
     <>
@@ -55,8 +70,10 @@ export function ProjectChip({
             setOpen(false);
           }}
           onClear={allowClear ? () => { onChange(null); setOpen(false); } : undefined}
+          onCreate={onCreate}
+          creating={createProject.isPending}
           getLabel={(p) => p.name}
-          placeholder="Search projects…"
+          placeholder="Search or create a project…"
           renderRow={(p) => (
             <span className="inline-flex items-center gap-2">
               <span className="truncate">{p.name}</span>
