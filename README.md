@@ -1,3 +1,24 @@
+## License
+
+This project is free and open-source software licensed under the GNU Affero General Public License v3.0.
+
+You are free to use, study, modify, and redistribute the software under the terms of the AGPLv3.
+
+We also offer a hosted version for teams that do not want to manage their own infrastructure.
+
+## Hosted Version
+
+This repository contains the free, self-hosted version of the platform.
+
+For teams that do not want to install, host, secure, back up, monitor, or maintain their own deployment, we offer a paid hosted version with managed infrastructure, updates, support, backups, and optional enterprise services.
+
+## Trademark
+
+The software code is licensed under the AGPLv3, but the project name, company name, logos, and branding are not licensed for unrestricted commercial use.
+
+You may not use our trademarks, logos, or confusingly similar branding to market a competing hosted service without written permission.
+
+
 # Allebrum Company Portal
 
 Internal team-management and time-tracking portal for Allebrum, LLC. Static Next.js frontend, Express + Socket.IO backend, PostgreSQL via Drizzle, Redis for sessions + pub/sub.
@@ -19,6 +40,7 @@ docker compose up -d
 
 # 2. Install deps
 pnpm install
+ * if it doesn't install use `npm install -g pnpm`
 
 # 3. Configure env
 copy .env.example .env
