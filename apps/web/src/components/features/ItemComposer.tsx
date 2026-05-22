@@ -11,16 +11,19 @@ import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/hooks/useAuth';
 import {
-  useUsers, useClients, useProjects, useGoals, useTodos,
+  useUsers, useClients, useProjects, useGoals, useTodos, useEpics,
   useCreateTodo, useUpdateTodo, useDeleteTodo,
   useCreateGoal, useUpdateGoal, useMoveGoal,
   useAddResource, useRemoveResource, useUploadGoalResource,
   useStartTimer, useStopTimer,
-  type TodoRow, type GoalRow, type ChecklistItemRow,
+  type TodoRow, type GoalRow, type ChecklistItemRow, type GoalHealth,
 } from '@/hooks/useResources';
 import { useMyTimer } from '@/hooks/useTimer';
 import { fmtTimer, PRIORITY_DOT } from '@/lib/formatters';
 import { QuickAddTodo } from '@/components/features/QuickAddTodo';
+import { statusesForScope, HEALTH_TONE } from '@/lib/roadmap';
+import { EpicChip } from '@/components/composer/chips/EpicChip';
+import { Activity, Gauge, Layers } from 'lucide-react';
 import { PropertyCell } from '@/components/composer/PropertyCell';
 import { Checklist } from '@/components/composer/Checklist';
 import { UserChip } from '@/components/composer/chips/UserChip';
@@ -70,6 +73,7 @@ export function ItemComposer(props: ItemComposerProps) {
   const { data: projects = [] } = useProjects();
   const { data: goals = [] } = useGoals();
   const { data: todos = [] } = useTodos();
+  const { data: epics = [] } = useEpics();
 
   // Mutations.
   const createTodo = useCreateTodo();
@@ -107,7 +111,10 @@ export function ItemComposer(props: ItemComposerProps) {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [goalCategory, setGoalCategory] = useState('Delivery');
-  const [goalStatus, setGoalStatus] = useState<'backlog' | 'in-progress' | 'review' | 'done'>('backlog');
+  const [goalStatus, setGoalStatus] = useState<string>('backlog');
+  const [goalHealth, setGoalHealth] = useState<GoalHealth | null>(null);
+  const [goalProgress, setGoalProgress] = useState<number | null>(null);
+  const [goalEpicId, setGoalEpicId] = useState<string | null>(null);
 
   // goal-edit nested-modal state (open a linked todo in another composer)
   const [editingTodo, setEditingTodo] = useState<TodoRow | null>(null);
@@ -156,6 +163,9 @@ export function ItemComposer(props: ItemComposerProps) {
       setGoalCategory(g?.tag ?? 'Delivery');
       setGoalStatus(g?.status ?? 'backlog');
       setChecklist(g?.checklist ?? []);
+      setGoalHealth(g?.health ?? null);
+      setGoalProgress(g?.progress ?? null);
+      setGoalEpicId(g?.epicId ?? null);
     }
     // reset transient form-y state
     setRKind('link');
@@ -247,6 +257,9 @@ export function ItemComposer(props: ItemComposerProps) {
           priority,
           tag: goalCategory,
           checklist,
+          health: goalHealth,
+          progress: goalProgress,
+          epicId: goalEpicId,
         };
         if (props.goal) {
           await updateGoal.mutateAsync({ id: props.goal.id, patch: payload });
@@ -422,7 +435,12 @@ export function ItemComposer(props: ItemComposerProps) {
               {mode === 'todo' ? (
                 <StatusChip mode="todo" value={todoStatus} onChange={setTodoStatus} />
               ) : (
-                <StatusChip mode="goal" value={goalStatus} onChange={setGoalStatus} />
+                <StatusChip
+                  mode="goal"
+                  value={goalStatus}
+                  onChange={setGoalStatus}
+                  statuses={statusesForScope(projectId ? { kind: 'project', id: projectId } : { kind: 'all' }, projects)}
+                />
               )}
               <div className="text-xs text-gray-500 flex items-center gap-1.5 flex-wrap min-w-0">
                 {client && (
@@ -541,6 +559,50 @@ export function ItemComposer(props: ItemComposerProps) {
               {mode === 'goal' && (
                 <PropertyCell icon={Sparkles} label="Category">
                   <CategoryChip value={goalCategory} onChange={setGoalCategory} />
+                </PropertyCell>
+              )}
+
+              {mode === 'goal' && (
+                <PropertyCell icon={Layers} label="Epic">
+                  <EpicChip value={goalEpicId} projectId={projectId} clientId={clientId} epics={epics} onChange={setGoalEpicId} />
+                </PropertyCell>
+              )}
+
+              {mode === 'goal' && (
+                <PropertyCell icon={Activity} label="Health">
+                  <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden text-xs">
+                    {(['on-track', 'at-risk', 'off-track'] as const).map((h, i) => {
+                      const active = goalHealth === h;
+                      return (
+                        <button
+                          key={h}
+                          type="button"
+                          onClick={() => setGoalHealth(active ? null : h)}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 font-medium transition-colors ${i > 0 ? 'border-l border-gray-200' : ''} ${active ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                        >
+                          <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ backgroundColor: active ? '#fff' : HEALTH_TONE[h]!.color }} />
+                          {HEALTH_TONE[h]!.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </PropertyCell>
+              )}
+
+              {mode === 'goal' && (
+                <PropertyCell icon={Gauge} label="Progress">
+                  <div className="inline-flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={goalProgress ?? ''}
+                      onChange={(e) => setGoalProgress(e.target.value === '' ? null : Math.max(0, Math.min(100, Number(e.target.value))))}
+                      placeholder="auto"
+                      className="w-20 px-2 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-brand-400"
+                    />
+                    <span className="text-xs text-gray-400">{goalProgress == null ? 'rolled up from to-dos' : '% override'}</span>
+                  </div>
                 </PropertyCell>
               )}
 

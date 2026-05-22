@@ -13,6 +13,10 @@ import type {
   UpdateGoalInput,
   MoveGoalInput,
   AddResourceInput,
+  CreateEpicInput,
+  UpdateEpicInput,
+  CreateMilestoneInput,
+  UpdateMilestoneInput,
   CreateTodoInput,
   UpdateTodoInput,
   StartTimerInput,
@@ -46,6 +50,7 @@ export type UserRow = {
   updatedAt: string;
 };
 export type ClientRow = { id: string; name: string; kind: string; color: string };
+export type ProjectStatusRow = { id: string; label: string; tone: string };
 export type ProjectRow = {
   id: string;
   clientId: string;
@@ -54,6 +59,7 @@ export type ProjectRow = {
   billable: boolean;
   budgetHrs: number;
   color: string;
+  statuses: ProjectStatusRow[] | null;
 };
 export type GoalResourceRow = {
   id: string;
@@ -71,13 +77,15 @@ export type GoalResourceRow = {
   addedAt: string;
 };
 export type ChecklistItemRow = { id: string; text: string; done: boolean };
+export type GoalHealth = 'on-track' | 'at-risk' | 'off-track' | 'done';
 export type GoalRow = {
   id: string;
   clientId: string;
   projectId: string;
   title: string;
   description: string | null;
-  status: 'backlog' | 'in-progress' | 'review' | 'done';
+  // Free-form: default workflow value OR a project custom-workflow status id.
+  status: string;
   ownerId: string | null;
   startDate: string | null;
   endDate: string | null;
@@ -85,6 +93,29 @@ export type GoalRow = {
   tag: string;
   checklist: ChecklistItemRow[];
   resources: GoalResourceRow[];
+  // PM workspace fields
+  epicId: string | null;
+  health: GoalHealth | null;
+  progress: number | null;
+  dependsOn: string[] | null;
+};
+export type EpicRow = {
+  id: string;
+  projectId: string;
+  clientId: string;
+  title: string;
+  color: string;
+  icon: string;
+  startDate: string | null;
+  endDate: string | null;
+};
+export type MilestoneRow = {
+  id: string;
+  projectId: string;
+  title: string;
+  date: string;
+  kind: 'release' | 'review' | 'deadline' | 'phase';
+  color: string;
 };
 export type TodoRow = {
   id: string;
@@ -286,6 +317,57 @@ export function useUpdateProject() {
 // ---- Goals ----
 export function useGoals() {
   return useQuery({ queryKey: qk.goals, queryFn: () => api.get<GoalRow[]>('/goals') });
+}
+export function useEpics() {
+  return useQuery({ queryKey: qk.epics, queryFn: () => api.get<EpicRow[]>('/epics') });
+}
+export function useCreateEpic() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateEpicInput) => api.post<EpicRow>('/epics', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.epics }),
+  });
+}
+export function useUpdateEpic() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateEpicInput }) => api.patch<EpicRow>(`/epics/${id}`, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.epics }),
+  });
+}
+export function useDeleteEpic() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del<{ ok: true }>(`/epics/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.epics });
+      qc.invalidateQueries({ queryKey: qk.goals });
+    },
+  });
+}
+export function useMilestones() {
+  return useQuery({ queryKey: qk.milestones, queryFn: () => api.get<MilestoneRow[]>('/milestones') });
+}
+export function useCreateMilestone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateMilestoneInput) => api.post<MilestoneRow>('/milestones', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.milestones }),
+  });
+}
+export function useUpdateMilestone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateMilestoneInput }) => api.patch<MilestoneRow>(`/milestones/${id}`, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.milestones }),
+  });
+}
+export function useDeleteMilestone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del<{ ok: true }>(`/milestones/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.milestones }),
+  });
 }
 export function useCreateGoal() {
   const qc = useQueryClient();
