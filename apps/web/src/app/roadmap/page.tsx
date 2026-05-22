@@ -71,7 +71,11 @@ export default function RoadmapPage() {
     return undefined;
   }, [scope, projects]);
 
-  const Body = () => {
+  // Render the active view inline (NOT as a nested component) so that parent
+  // re-renders — e.g. typing in the FilterBar search or toggling View options —
+  // update the view in place instead of remounting it. Remounting would reset
+  // each view's internal state (Calendar's month cursor, Kanban drag, scroll).
+  const renderBody = () => {
     switch (view) {
       case 'gantt': return <GanttView {...viewProps} />;
       case 'list': return <ListView {...viewProps} />;
@@ -108,7 +112,7 @@ export default function RoadmapPage() {
         <FilterBar filters={filters} onChange={setFilters} clients={clients} projects={projects} statuses={statuses} />
       </div>
 
-      <Body />
+      {renderBody()}
 
       <ItemComposer
         mode="goal"
