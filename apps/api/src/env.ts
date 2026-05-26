@@ -24,20 +24,14 @@ const EnvSchema = z.object({
   // Google Drive media manager (reuses the Google OAuth client; redirect
   // defaults to the API origin's drive callback path)
   DRIVE_OAUTH_REDIRECT_URL: z.string().url().optional(),
+  // Gmail send (per-user OAuth for transactional invites + resets; reuses
+  // the Google OAuth client and defaults the redirect like Drive does)
+  GMAIL_OAUTH_REDIRECT_URL: z.string().url().optional(),
   // Production bootstrap (consumed only by `db:init`; the API itself does
   // not require these, so they stay optional here and are validated there).
   ADMIN_EMAIL: z.string().email().optional(),
   ADMIN_PASSWORD: z.string().min(8).optional(),
   ALLOWED_EMAIL_DOMAINS: z.string().optional(),
-  // ---- Outbound transactional mail (Google Workspace SMTP relay) ----
-  // All optional so dev still boots; when any of HOST/USER/PASS is unset
-  // the mail service logs `[mail] would send …` and no-ops instead of
-  // throwing, which keeps password-flow routes working locally.
-  SMTP_HOST: z.string().optional(),
-  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
-  SMTP_USER: z.string().email().optional(),
-  SMTP_PASS: z.string().optional(),
-  MAIL_FROM: z.string().optional(),
 });
 
 export const env = EnvSchema.parse(process.env);
@@ -63,8 +57,14 @@ export const driveOAuthConfigured = !!(
   driveRedirectUrl
 );
 
-// True when we have everything nodemailer needs to actually deliver mail
-// (host/user/pass). Routes don't gate on this — they always run; mail.ts
-// just no-ops when this is false so dev / local tests don't need SMTP set.
-export const mailConfigured = !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS);
-export const mailFrom = env.MAIL_FROM ?? env.SMTP_USER ?? 'no-reply@example.com';
+// Gmail OAuth — same shape as Drive (same client, distinct redirect path).
+export const gmailRedirectUrl =
+  env.GMAIL_OAUTH_REDIRECT_URL ??
+  (env.OAUTH_REDIRECT_URL
+    ? env.OAUTH_REDIRECT_URL.replace(/\/api\/auth\/google\/callback$/, '/api/integrations/gmail/callback')
+    : undefined);
+export const gmailOAuthConfigured = !!(
+  env.GOOGLE_OAUTH_CLIENT_ID &&
+  env.GOOGLE_OAUTH_CLIENT_SECRET &&
+  gmailRedirectUrl
+);

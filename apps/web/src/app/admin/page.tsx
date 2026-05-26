@@ -1,9 +1,15 @@
 'use client';
 
-import { useState } from 'react';
-import { Trash2, Download } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Trash2, Download, Mail } from 'lucide-react';
 import { API_URL } from '@/lib/env';
 import { Card, Section, Pill, Empty, Tile } from '@/components/ui';
+import {
+  useGmailStatus,
+  useDisconnectGmail,
+  useConnectedGmailUsers,
+  gmailConnectUrl,
+} from '@/hooks/useGmail';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Field, Input, Select, Checkbox } from '@/components/ui/Field';
@@ -657,7 +663,128 @@ function IntegrationsTab() {
         </Section>
       )}
 
+      <GmailIntegrationPanel />
+
       <LinkFolderModal open={linkOpen} onClose={() => setLinkOpen(false)} />
     </>
+  );
+}
+
+/**
+ * Per-user Gmail OAuth tile + workspace system-sender designation.
+ *
+ * Lives inside IntegrationsTab so it sits next to Drive. The Connect /
+ * Disconnect buttons act on the *currently logged-in* user's mailbox.
+ * The system-sender dropdown is admin-only (gated server-side by
+ * `groups.manage`) and only lists teammates who actually have a Gmail
+ * token persisted — preventing the workspace from being left in a state
+ * where reset emails silently fail because the picked user never finished
+ * the OAuth flow.
+ */
+function GmailIntegrationPanel() {
+  const toast = useToast();
+  const { data: status } = useGmailStatus();
+  const { can } = useAuth();
+  const canManageWorkspace = can('groups.manage');
+  const { data: settings } = useSettings();
+  const updSettings = useUpdateSettings();
+  const { data: connected = [] } = useConnectedGmailUsers(canManageWorkspace);
+  const disconnect = useDisconnectGmail();
+
+  // Surface the result of the OAuth round-trip when the callback redirects
+  // here with `?gmail=connected|bad_state|error`.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const flag = params.get('gmail');
+    if (!flag) return;
+    if (flag === 'connected') toast.success('Gmail connected — you can now send invites as yourself.');
+    else if (flag === 'bad_state') toast.error('Gmail consent expired or was tampered with. Try again.');
+    else toast.error('Gmail connect failed. Try again.');
+    // Clean up the URL so a reload doesn't re-fire the toast.
+    params.delete('gmail');
+    const next = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;
+    window.history.replaceState({}, '', next);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const onDisconnect = async () => {
+    try {
+      await disconnect.mutateAsync();
+      toast.success('Gmail disconnected');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Disconnect failed');
+    }
+  };
+
+  const onSetSender = async (v: string) => {
+    try {
+      await updSettings.mutateAsync({ systemSenderUserId: v === '' ? null : v });
+      toast.success(v ? 'System sender updated' : 'System sender cleared');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Could not update system sender';
+      toast.error(msg === 'system_sender_not_connected' ? 'Pick a teammate who has actually connected Gmail.' : msg);
+    }
+  };
+
+  return (
+    <Section title="Gmail (transactional sends)">
+      <Card className="p-5 space-y-5">
+        <p className="text-sm text-gray-600">
+          Each teammate sends invites from their own Gmail account. The workspace also designates
+          one connected account as the <strong>system sender</strong> for password-reset emails —
+          those happen without a logged-in user, so they need a stable mailbox to send through.
+        </p>
+
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold text-gray-900">Your Gmail</div>
+            <div className="text-[12px] text-gray-500">
+              {status?.connected
+                ? `Connected${status.lastConnectedAt ? ` · ${new Date(status.lastConnectedAt).toLocaleDateString()}` : ''}`
+                : 'Not connected — invites you send will fall back to a logged URL until you connect.'}
+            </div>
+          </div>
+          {status?.connected ? (
+            <Button variant="ghost" onClick={onDisconnect} disabled={disconnect.isPending}>
+              Disconnect
+            </Button>
+          ) : (
+            <a href={gmailConnectUrl('/admin?tab=integrations')}>
+              <Button variant="primary">
+                <Mail className="w-4 h-4" /> Connect Gmail
+              </Button>
+            </a>
+          )}
+        </div>
+
+        {canManageWorkspace && (
+          <div className="pt-4 border-t border-gray-100">
+            <div className="text-sm font-semibold text-gray-900 mb-1">System sender</div>
+            <div className="text-[12px] text-gray-500 mb-2">
+              Sends password-reset emails on behalf of the workspace. Only teammates with a connected Gmail can be picked.
+            </div>
+            <Select
+              value={settings?.systemSenderUserId ?? ''}
+              onChange={(e) => void onSetSender(e.target.value)}
+              disabled={updSettings.isPending}
+              className="max-w-md"
+            >
+              <option value="">— No system sender (reset emails will be logged-only) —</option>
+              {connected.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} · {u.email}
+                </option>
+              ))}
+            </Select>
+            {connected.length === 0 && (
+              <div className="mt-2 text-[12px] text-amber-600">
+                Nobody has connected Gmail yet. Once a teammate connects above, you can designate them here.
+              </div>
+            )}
+          </div>
+        )}
+
+      </Card>
+    </Section>
   );
 }

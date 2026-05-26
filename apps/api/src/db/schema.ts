@@ -69,6 +69,11 @@ export const appSettings = pgTable('app_settings', {
   bookkeeperEmail: text('bookkeeper_email'),
   sendToBookkeeperOn: text('send_to_bookkeeper_on').notNull().default('never'),
   portalSharedFolderId: text('portal_shared_folder_id'),
+  // Workspace's designated "system sender" — the user whose Gmail OAuth
+  // token is used for mail that has no logged-in sender (currently just
+  // password-reset emails). FK is set null on user delete so a removed
+  // sender doesn't take all reset email with them.
+  systemSenderUserId: uuid('system_sender_user_id').references(() => users.id, { onDelete: 'set null' }),
   updatedAt: updTs(),
 });
 

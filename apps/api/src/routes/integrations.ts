@@ -35,6 +35,16 @@ import {
   deleteEntry,
   driveConfigured,
 } from '../services/drive.js';
+import {
+  buildGmailConsentUrl,
+  exchangeGmailCode,
+  saveGmailToken,
+  disconnectGmail,
+  getGmailStatusForUser,
+  gmailConfigured,
+  listGmailConnectedUserIds,
+} from '../services/gmail.js';
+import { listUsers } from '../services/users.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
 
@@ -234,3 +244,103 @@ integrationsRouter.delete('/drive/file/:id', requirePermission('media.manage'), 
     next(e);
   }
 });
+
+// ---- Gmail (per-user OAuth for transactional sends) ----
+//
+// Unlike Drive (workspace-wide single connection), Gmail is per-user — each
+// teammate connects their own mailbox and any inviter sends from their own
+// account. No `integrations.manage` gate; any signed-in user can connect or
+// disconnect their own Gmail.
+
+integrationsRouter.get('/gmail/status', async (req, res, next) => {
+  try {
+    const me = req.session.user!;
+    res.json(await getGmailStatusForUser(me.userId));
+  } catch (e) {
+    next(e);
+  }
+});
+
+integrationsRouter.get('/gmail/connect', async (req, res, next) => {
+  try {
+    if (!gmailConfigured()) {
+      res.status(404).json({ error: 'gmail_oauth_not_configured' });
+      return;
+    }
+    const state = randomBytes(16).toString('hex');
+    // Carry an optional return_to so the just-in-time invite flow can
+    // bounce the user straight back to where they triggered the modal.
+    // Only allow same-origin path-only returns (no scheme, no `//host`) to
+    // avoid open-redirect abuse.
+    const rawReturnTo = typeof req.query.return_to === 'string' ? req.query.return_to : undefined;
+    const returnTo = rawReturnTo && rawReturnTo.startsWith('/') && !rawReturnTo.startsWith('//')
+      ? rawReturnTo
+      : undefined;
+    req.session.gmailOauthState = { state, returnTo };
+    req.session.save((err) => {
+      if (err) return next(err);
+      res.redirect(buildGmailConsentUrl(state));
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+integrationsRouter.get('/gmail/callback', async (req, res) => {
+  // Redirect back to where the user was, with `?gmail=connected|bad_state|error`
+  // appended (correctly preserving any existing query string in returnTo).
+  const back = (q: string, returnTo?: string) => {
+    const base = `${env.WEB_ORIGIN}${returnTo ?? '/admin?tab=integrations'}`;
+    const sep = base.includes('?') ? '&' : '?';
+    res.redirect(`${base}${sep}gmail=${encodeURIComponent(q)}`);
+  };
+  try {
+    const me = req.session.user;
+    const stored = req.session.gmailOauthState;
+    const returnTo = stored?.returnTo;
+    if (!me) return back('error', returnTo);
+    const code = typeof req.query.code === 'string' ? req.query.code : '';
+    const state = typeof req.query.state === 'string' ? req.query.state : '';
+    if (!code || !state || !stored || state !== stored.state) return back('bad_state', returnTo);
+    delete req.session.gmailOauthState;
+    const tokens = await exchangeGmailCode(code);
+    await saveGmailToken(me.userId, tokens);
+    return back('connected', returnTo);
+  } catch {
+    return back('error', req.session.gmailOauthState?.returnTo);
+  }
+});
+
+integrationsRouter.post('/gmail/disconnect', async (req, res, next) => {
+  try {
+    const me = req.session.user!;
+    await disconnectGmail(me.userId);
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Returns the slim user records of every teammate currently holding a Gmail
+// OAuth token. Drives the "System sender" dropdown in Settings, so it's
+// gated to whoever can edit workspace settings (groups.manage — same gate
+// PATCH /settings already uses).
+integrationsRouter.get(
+  '/gmail/connected-users',
+  requirePermission('groups.manage'),
+  async (_req, res, next) => {
+    try {
+      const [connectedIds, allUsers] = await Promise.all([
+        listGmailConnectedUserIds(),
+        listUsers(),
+      ]);
+      const set = new Set(connectedIds);
+      const out = allUsers
+        .filter((u) => set.has(u.id))
+        .map((u) => ({ id: u.id, name: u.name, email: u.email, color: u.color }));
+      res.json(out);
+    } catch (e) {
+      next(e);
+    }
+  },
+);

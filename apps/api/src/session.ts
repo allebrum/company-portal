@@ -11,6 +11,10 @@ declare module 'express-session' {
     // Transient WebAuthn challenge for register/authenticate ceremonies.
     webauthnChallenge?: string;
     oauthState?: string;
+    // Gmail uses its own state slot so a concurrent Drive connect (which
+    // also uses `oauthState`) can't collide. Also carries `returnTo` so
+    // the JIT connect flow can come back to where the user was.
+    gmailOauthState?: { state: string; returnTo?: string };
   }
 }
 
