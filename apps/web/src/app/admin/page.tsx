@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Trash2, Download, Mail } from 'lucide-react';
+import { Trash2, Download, Mail, X } from 'lucide-react';
 import { API_URL } from '@/lib/env';
 import { Card, Section, Pill, Empty, Tile } from '@/components/ui';
 import {
@@ -439,6 +439,13 @@ function PayTab() {
   const [count, setCount] = useState(6);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  // Local mirror of the anchor date so the date input stays controlled
+  // while the user types. Synced from server whenever the config changes
+  // (e.g. after a successful PATCH from another tab or a fresh load).
+  const [anchor, setAnchor] = useState('');
+  useEffect(() => {
+    if (config) setAnchor(config.anchor ?? '');
+  }, [config?.anchor]);
 
   if (!config) return null;
 
@@ -487,6 +494,42 @@ function PayTab() {
               <option value="as-is">Leave as-is</option>
             </Select>
           </Field>
+
+          {config.cadence === 'by-date' && (
+            <div className="md:col-span-2">
+              <Field
+                label="Pay dates"
+                hint="Days of the month each pay period closes on. Up to 8. Dates beyond a month's last day clamp to that month's end (e.g. picking 31 in February uses the 28th)."
+              >
+                <PayDatesEditor
+                  value={config.payDates}
+                  onChange={(next) => patch({ payDates: next })}
+                  disabled={upd.isPending}
+                />
+              </Field>
+            </div>
+          )}
+
+          {config.cadence !== 'by-date' && (
+            <div className="md:col-span-2">
+              <Field
+                label="Cycle start (anchor)"
+                hint={`First period starts on this day; subsequent ${config.cadence === 'weekly' ? 'weekly (7-day)' : 'bi-weekly (14-day)'} cycles march forward from here.`}
+              >
+                <Input
+                  type="date"
+                  value={anchor}
+                  onChange={(e) => setAnchor(e.target.value)}
+                  onBlur={() => {
+                    const next = anchor || null;
+                    if (next !== (config.anchor ?? null)) patch({ anchor: next });
+                  }}
+                  className="max-w-xs"
+                />
+              </Field>
+            </div>
+          )}
+
           <Field label="Processing buffer (days)">
             <Input type="number" min={0} defaultValue={config.processingBufferDays} onBlur={(e) => patch({ processingBufferDays: Number(e.target.value) || 0 })} />
           </Field>
@@ -574,6 +617,108 @@ function PayTab() {
       </Section>
     </>
   );
+}
+
+/**
+ * Chip-style editor for the `payConfig.payDates` array.
+ *
+ * Renders each currently-selected day as a removable chip ("15th",
+ * "Last day", etc.) and offers a trailing `<select>` to add another.
+ * Hard-capped at 8 entries; the array can't drop below 1 — removing the
+ * last chip is blocked so the server never sees an empty list (which the
+ * backend would silently coerce back to `[15, 'last']` anyway).
+ *
+ * Values are persisted via the parent's `onChange` immediately on each
+ * add/remove — no local "save" button. Sort order is numeric ascending
+ * with `'last'` always trailing.
+ */
+function PayDatesEditor({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: (number | 'last')[];
+  onChange: (next: (number | 'last')[]) => void;
+  disabled?: boolean;
+}) {
+  const MAX = 8;
+  const sorted = [...value].sort((a, b) => {
+    if (a === 'last') return 1;
+    if (b === 'last') return -1;
+    return (a as number) - (b as number);
+  });
+  const used = new Set(sorted.map(String));
+  const atMin = sorted.length <= 1;
+  const atMax = sorted.length >= MAX;
+
+  const remove = (d: number | 'last') => {
+    if (atMin) return;
+    onChange(sorted.filter((x) => x !== d));
+  };
+
+  const add = (raw: string) => {
+    if (!raw || atMax) return;
+    const v: number | 'last' = raw === 'last' ? 'last' : Number(raw);
+    if (sorted.includes(v)) return;
+    onChange([...sorted, v]);
+  };
+
+  return (
+    <div className="flex items-center flex-wrap gap-1.5">
+      {sorted.map((d) => (
+        <span
+          key={String(d)}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-brand-50 border border-brand-200 text-brand-800 text-xs font-semibold"
+        >
+          {payDateLabel(d)}
+          <button
+            type="button"
+            onClick={() => remove(d)}
+            disabled={disabled || atMin}
+            className="text-brand-500 hover:text-brand-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            title={atMin ? 'At least one pay date is required' : `Remove ${payDateLabel(d)}`}
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </span>
+      ))}
+      {/* Inline "+ Add date" select — placeholder option resets after add. */}
+      <select
+        value=""
+        onChange={(e) => {
+          add(e.target.value);
+          e.currentTarget.value = '';
+        }}
+        disabled={disabled || atMax}
+        className="px-2 py-1 text-xs border border-gray-200 rounded-md bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+        aria-label="Add another pay date"
+      >
+        <option value="">{atMax ? `Maxed (${MAX})` : '+ Add date'}</option>
+        {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+          <option key={d} value={d} disabled={used.has(String(d))}>
+            {payDateLabel(d)}
+          </option>
+        ))}
+        <option value="last" disabled={used.has('last')}>Last day of month</option>
+      </select>
+    </div>
+  );
+}
+
+function payDateLabel(d: number | 'last'): string {
+  if (d === 'last') return 'Last day';
+  return `${d}${ordinalSuffix(d)}`;
+}
+
+function ordinalSuffix(n: number): string {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return 'th';
+  switch (n % 10) {
+    case 1: return 'st';
+    case 2: return 'nd';
+    case 3: return 'rd';
+    default: return 'th';
+  }
 }
 
 function IntegrationsTab() {
