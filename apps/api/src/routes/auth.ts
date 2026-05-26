@@ -39,8 +39,11 @@ authRouter.get('/config', async (_req, res, next) => {
     const cfg: AuthConfig = {
       passwordLoginEnabled: s.passwordLoginEnabled,
       googleLoginEnabled: s.googleLoginEnabled && googleOAuthConfigured,
-      termsConfigured: !!(s.termsOfService && s.termsOfService.trim() !== ''),
-      privacyConfigured: !!(s.privacyPolicy && s.privacyPolicy.trim() !== ''),
+      termsUrl: s.termsUrl,
+      privacyUrl: s.privacyUrl,
+      portalName: s.portalName,
+      brandPrimaryColor: s.brandPrimaryColor,
+      brandLogoDataUrl: s.brandLogoDataUrl,
     };
     res.json(cfg);
   } catch (e) {

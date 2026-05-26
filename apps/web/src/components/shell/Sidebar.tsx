@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Home, Clock, CheckSquare, Target, Shield, BarChart3, Settings, FolderOpen } from 'lucide-react';
 import type { Permission } from '@allebrum/shared';
-import { useEntries } from '@/hooks/useResources';
+import { useEntries, useAuthConfig } from '@/hooks/useResources';
 import { useAuth } from '@/hooks/useAuth';
 import { Avatar } from '../ui/Avatar';
 import { Button } from '../ui/Button';
@@ -25,17 +25,38 @@ export function Sidebar() {
   const pathname = usePathname();
   const { me, can, logout } = useAuth();
   const { data: entries } = useEntries();
+  const { data: cfg } = useAuthConfig();
   const pending = (entries ?? []).filter((e) => e.status === 'submitted').length;
+
+  // Branding from the public auth config — cached + auto-invalidated on
+  // settings changes, so the sidebar updates within a query refresh after
+  // an admin edits Branding settings.
+  const portalName = cfg?.portalName ?? 'Allebrum';
+  const brandColor = cfg?.brandPrimaryColor ?? '#9333ea';
+  const logoDataUrl = cfg?.brandLogoDataUrl ?? null;
 
   return (
     <aside className="w-60 shrink-0 h-full bg-white border-r border-gray-200 text-gray-700 flex flex-col">
       <div className="px-5 pt-5 pb-4 flex items-center gap-2.5">
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-600 to-brand-700 flex items-center justify-center shadow-md">
-          <span className="text-white text-base font-bold">A</span>
+        <div
+          className="w-9 h-9 rounded-xl flex items-center justify-center shadow-md overflow-hidden"
+          style={{ backgroundColor: brandColor }}
+        >
+          {logoDataUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={logoDataUrl} alt={`${portalName} logo`} className="w-full h-full object-contain" />
+          ) : (
+            <span className="text-white text-base font-bold">{portalName.charAt(0).toUpperCase() || 'A'}</span>
+          )}
         </div>
         <div className="leading-tight">
-          <div className="font-bold text-base tracking-tight text-gray-900">Allebrum</div>
-          <div className="text-[10px] uppercase tracking-widest text-brand-600 font-semibold">Company portal</div>
+          <div className="font-bold text-base tracking-tight text-gray-900">{portalName}</div>
+          <div
+            className="text-[10px] uppercase tracking-widest font-semibold"
+            style={{ color: brandColor }}
+          >
+            Company portal
+          </div>
         </div>
       </div>
 

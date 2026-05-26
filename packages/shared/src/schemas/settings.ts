@@ -1,13 +1,19 @@
 import { z } from 'zod';
 
-/** Public auth config the login page reads (no secrets). */
+/** Public auth config the login page reads (no secrets). Carries branding
+ *  + legal-URL data so the unauthenticated login surface can render an
+ *  on-brand experience without a second fetch. */
 export type AuthConfig = {
   passwordLoginEnabled: boolean;
   googleLoginEnabled: boolean;
-  /** Whether the workspace admin has published a Terms of Service / Privacy
-   *  Policy. The login footer shows the corresponding links only when true. */
-  termsConfigured: boolean;
-  privacyConfigured: boolean;
+  /** External URLs admins paste in Settings → Branding. The login footer
+   *  shows each link only when its URL is set. */
+  termsUrl: string | null;
+  privacyUrl: string | null;
+  /** Branding controls — applied to the login page + sidebar. */
+  portalName: string;
+  brandPrimaryColor: string;
+  brandLogoDataUrl: string | null;
 };
 
 export const UpdateAppSettingsSchema = z.object({
@@ -20,10 +26,18 @@ export const UpdateAppSettingsSchema = z.object({
   // (password reset). Pass null to clear. Validated by the route to ensure
   // the chosen user actually has a `google_gmail` oauth_tokens row.
   systemSenderUserId: z.string().uuid().nullable().optional(),
-  // Markdown-formatted policy copy surfaced on the public /terms and
-  // /privacy pages. Pass null to clear (hides the login-footer link).
-  termsOfService: z.string().max(65535).nullable().optional(),
-  privacyPolicy: z.string().max(65535).nullable().optional(),
+  // External URLs for Terms / Privacy. Pass null to clear (hides the
+  // login-footer link). Validated as URLs because the login page builds
+  // an <a href> straight from them.
+  termsUrl: z.string().url().max(2000).nullable().optional(),
+  privacyUrl: z.string().url().max(2000).nullable().optional(),
+  // Branding — single primary color (#rrggbb), short portal name (used in
+  // the sidebar + login title), and an optional logo image stored as a
+  // base64 data URL. The 800k cap is the server-side guard; the UI caps
+  // user uploads at ~500k pre-encoding.
+  portalName: z.string().min(1).max(60).optional(),
+  brandPrimaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Hex color #RRGGBB').optional(),
+  brandLogoDataUrl: z.string().max(800_000).nullable().optional(),
 });
 export type UpdateAppSettingsInput = z.infer<typeof UpdateAppSettingsSchema>;
 
@@ -35,7 +49,10 @@ export type AppSettings = {
   bookkeeperEmail: string | null;
   sendToBookkeeperOn: 'never' | 'pay_period_closed';
   systemSenderUserId: string | null;
-  termsOfService: string | null;
-  privacyPolicy: string | null;
+  termsUrl: string | null;
+  privacyUrl: string | null;
+  portalName: string;
+  brandPrimaryColor: string;
+  brandLogoDataUrl: string | null;
   updatedAt: string;
 };
