@@ -57,6 +57,13 @@
       "when": 1779813572909,
       "tag": "0007_dear_mulholland_black",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1779830968922,
+      "tag": "0008_sour_emma_frost",
+      "breakpoints": true
     }
   ]
 }
