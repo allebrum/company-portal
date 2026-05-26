@@ -4,7 +4,10 @@ export const InviteUserSchema = z.object({
   name: z.string().min(1).max(120),
   email: z.string().email(),
   groupIds: z.array(z.string().uuid()).default([]),
-  password: z.string().min(8).max(200).optional(),
+  // `sendInvite` controls whether the new teammate receives a transactional
+  // "set your password" email (default true). Set false for Google-only
+  // teammates who only sign in via the OAuth flow.
+  sendInvite: z.boolean().default(true),
   billable: z.number().nonnegative().max(10000).default(150),
   color: z.string().max(20).optional(),
 });

@@ -43,6 +43,13 @@
       "when": 1779811543977,
       "tag": "0005_wakeful_living_lightning",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779812341618,
+      "tag": "0006_whole_gateway",
+      "breakpoints": true
     }
   ]
 }

@@ -29,6 +29,15 @@ const EnvSchema = z.object({
   ADMIN_EMAIL: z.string().email().optional(),
   ADMIN_PASSWORD: z.string().min(8).optional(),
   ALLOWED_EMAIL_DOMAINS: z.string().optional(),
+  // ---- Outbound transactional mail (Google Workspace SMTP relay) ----
+  // All optional so dev still boots; when any of HOST/USER/PASS is unset
+  // the mail service logs `[mail] would send …` and no-ops instead of
+  // throwing, which keeps password-flow routes working locally.
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+  SMTP_USER: z.string().email().optional(),
+  SMTP_PASS: z.string().optional(),
+  MAIL_FROM: z.string().optional(),
 });
 
 export const env = EnvSchema.parse(process.env);
@@ -53,3 +62,9 @@ export const driveOAuthConfigured = !!(
   env.GOOGLE_OAUTH_CLIENT_SECRET &&
   driveRedirectUrl
 );
+
+// True when we have everything nodemailer needs to actually deliver mail
+// (host/user/pass). Routes don't gate on this — they always run; mail.ts
+// just no-ops when this is false so dev / local tests don't need SMTP set.
+export const mailConfigured = !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS);
+export const mailFrom = env.MAIL_FROM ?? env.SMTP_USER ?? 'no-reply@example.com';
