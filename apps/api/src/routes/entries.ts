@@ -23,6 +23,7 @@ import {
   reopenEntries,
   getActiveTimer,
   listActiveTimers,
+  exportEntriesCsv,
 } from '../services/entries.js';
 
 export const entriesRouter = Router();
@@ -35,6 +36,24 @@ entriesRouter.get('/', validate(EntryListQuerySchema, 'query'), async (req, res,
     const q = getValidated<typeof EntryListQuerySchema._type>(req, 'query');
     const canViewAll = await userCan(req, 'time_entry.view_all');
     res.json(await listEntries(me.userId, canViewAll, q));
+  } catch (e) {
+    next(e);
+  }
+});
+
+// CSV export — gated by pay.manage (Bookkeeper / Admin / Owner). Reuses the
+// EntryListQuerySchema so the same `periodId`, `from`, `to`, `status`,
+// `userId` filters work for both list and export. The browser handles the
+// download (cookies pass automatically since we redirect via the same origin).
+entriesRouter.get('/export.csv', requirePermission('pay.manage'), validate(EntryListQuerySchema, 'query'), async (req, res, next) => {
+  try {
+    const me = req.session.user!;
+    const q = getValidated<typeof EntryListQuerySchema._type>(req, 'query');
+    const { filename, csv } = await exportEntriesCsv(me.userId, q);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    // BOM so Excel auto-detects UTF-8 instead of mojibake on non-ASCII names.
+    res.send('﻿' + csv);
   } catch (e) {
     next(e);
   }

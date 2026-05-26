@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Download } from 'lucide-react';
+import { API_URL } from '@/lib/env';
 import { Card, Section, Pill, Empty, Tile } from '@/components/ui';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
@@ -430,6 +431,8 @@ function PayTab() {
   const upd = useUpdatePayConfig();
   const gen = useGeneratePeriods();
   const [count, setCount] = useState(6);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
 
   if (!config) return null;
 
@@ -440,6 +443,24 @@ function PayTab() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Update failed');
     }
+  };
+
+  // CSV exports are downloads, not fetches — point the browser at the
+  // endpoint so the response triggers a "save file" with cookies attached.
+  const exportPeriod = (periodId: string) => {
+    window.location.assign(`${API_URL}/api/entries/export.csv?periodId=${encodeURIComponent(periodId)}`);
+  };
+  const exportRange = () => {
+    if (!from || !to) {
+      toast.error('Pick a start and end date');
+      return;
+    }
+    if (from > to) {
+      toast.error('Start date must be on or before end date');
+      return;
+    }
+    const params = new URLSearchParams({ from, to });
+    window.location.assign(`${API_URL}/api/entries/export.csv?${params.toString()}`);
   };
 
   return (
@@ -502,9 +523,47 @@ function PayTab() {
                   <div className="text-[11px] text-gray-500">Cutoff {p.approvalCutoff} · Pay {p.payDate}</div>
                 </div>
                 <Pill tone={PAY_PERIOD_STATUS_PILL[p.status]}>{PAY_PERIOD_STATUS_LABEL[p.status]}</Pill>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => exportPeriod(p.id)}
+                  title={`Download CSV for ${p.label}`}
+                >
+                  <Download className="w-3.5 h-3.5" /> CSV
+                </Button>
               </li>
             ))}
           </ul>
+        </Card>
+      </Section>
+
+      <Section title="Custom range export">
+        <Card className="p-5">
+          <p className="text-sm text-gray-600 mb-3">
+            Download a CSV of every time entry whose start date falls in the picked range.
+            Use this for off-cycle exports or audits that don't line up with a pay period.
+          </p>
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="From">
+              <Input
+                type="date"
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+                className="w-44"
+              />
+            </Field>
+            <Field label="To">
+              <Input
+                type="date"
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+                className="w-44"
+              />
+            </Field>
+            <Button variant="primary" onClick={exportRange}>
+              <Download className="w-4 h-4" /> Export CSV
+            </Button>
+          </div>
         </Card>
       </Section>
     </>
