@@ -16,6 +16,7 @@ import { bootstrapRouter } from './bootstrap.js';
 import { rbacRouter } from './rbac.js';
 import { settingsRouter } from './settings.js';
 import { twofaRouter } from './twofa.js';
+import { policiesRouter } from './policies.js';
 
 export const apiRouter = Router();
 
@@ -40,3 +41,4 @@ apiRouter.use('/integrations', integrationsRouter);
 apiRouter.use('/bootstrap', bootstrapRouter);
 apiRouter.use('/rbac', rbacRouter);
 apiRouter.use('/settings', settingsRouter);
+apiRouter.use('/policies', policiesRouter);

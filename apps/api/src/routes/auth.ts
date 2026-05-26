@@ -39,6 +39,8 @@ authRouter.get('/config', async (_req, res, next) => {
     const cfg: AuthConfig = {
       passwordLoginEnabled: s.passwordLoginEnabled,
       googleLoginEnabled: s.googleLoginEnabled && googleOAuthConfigured,
+      termsConfigured: !!(s.termsOfService && s.termsOfService.trim() !== ''),
+      privacyConfigured: !!(s.privacyPolicy && s.privacyPolicy.trim() !== ''),
     };
     res.json(cfg);
   } catch (e) {

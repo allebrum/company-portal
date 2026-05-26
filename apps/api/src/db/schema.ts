@@ -74,6 +74,11 @@ export const appSettings = pgTable('app_settings', {
   // password-reset emails). FK is set null on user delete so a removed
   // sender doesn't take all reset email with them.
   systemSenderUserId: uuid('system_sender_user_id').references(() => users.id, { onDelete: 'set null' }),
+  // Markdown-formatted legal copy. Null = "no policy configured" — the
+  // login page hides the corresponding footer link in that state. Served
+  // unauthenticated via /policies/:kind so prospective signees can read.
+  termsOfService: text('terms_of_service'),
+  privacyPolicy: text('privacy_policy'),
   updatedAt: updTs(),
 });
 

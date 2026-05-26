@@ -426,7 +426,88 @@ function WorkspaceTab() {
 
       <ClientFormModal open={cOpen} onClose={() => setCOpen(false)} client={cEditing} />
       <ProjectFormModal open={pOpen} onClose={() => setPOpen(false)} project={pEditing} />
+
+      <LegalPoliciesPanel />
     </>
+  );
+}
+
+/**
+ * Markdown editors for Terms of Service and Privacy Policy. Save-on-blur
+ * via useUpdateSettings, same pattern as bookkeeperEmail elsewhere in the
+ * tab. Permission-gated to `groups.manage` — the panel renders nothing for
+ * members so it doesn't visually dangle in tabs they're allowed to see.
+ */
+function LegalPoliciesPanel() {
+  const { can } = useAuth();
+  const canManage = can('groups.manage');
+  const toast = useToast();
+  const { data: settings } = useSettings();
+  const upd = useUpdateSettings();
+  const [terms, setTerms] = useState('');
+  const [privacy, setPrivacy] = useState('');
+  useEffect(() => {
+    if (!settings) return;
+    setTerms(settings.termsOfService ?? '');
+    setPrivacy(settings.privacyPolicy ?? '');
+  }, [settings?.termsOfService, settings?.privacyPolicy]);
+
+  if (!canManage || !settings) return null;
+
+  const save = async (patch: Parameters<typeof upd.mutateAsync>[0], ok: string) => {
+    try {
+      await upd.mutateAsync(patch);
+      toast.success(ok);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Update failed');
+    }
+  };
+
+  const saveTerms = () => {
+    const next = terms.trim() === '' ? null : terms;
+    if (next === (settings.termsOfService ?? null)) return;
+    void save({ termsOfService: next }, 'Terms of Service updated');
+  };
+  const savePrivacy = () => {
+    const next = privacy.trim() === '' ? null : privacy;
+    if (next === (settings.privacyPolicy ?? null)) return;
+    void save({ privacyPolicy: next }, 'Privacy Policy updated');
+  };
+
+  return (
+    <Section title="Legal policies">
+      <Card className="p-5 space-y-5">
+        <p className="text-sm text-gray-600">
+          Markdown supported — headings (<code>#</code> / <code>##</code>), bullet lists (<code>-</code>),
+          and links (<code>[label](url)</code>) all render on the public pages.
+          Saved on blur. Leave a field empty to hide its link on the login page.
+          Public URLs: <a href="/terms" className="underline" target="_blank" rel="noreferrer">/terms</a> ·{' '}
+          <a href="/privacy" className="underline" target="_blank" rel="noreferrer">/privacy</a>.
+        </p>
+
+        <Field label="Terms of Service">
+          <textarea
+            value={terms}
+            onChange={(e) => setTerms(e.target.value)}
+            onBlur={saveTerms}
+            rows={12}
+            className="w-full font-mono text-sm rounded-lg border border-gray-200 px-3 py-2 focus:border-brand-400 focus:ring-1 focus:ring-brand-400 outline-none"
+            placeholder={'## Allebrum Terms of Service\n\n_Last updated: …_\n\n1. …'}
+          />
+        </Field>
+
+        <Field label="Privacy Policy">
+          <textarea
+            value={privacy}
+            onChange={(e) => setPrivacy(e.target.value)}
+            onBlur={savePrivacy}
+            rows={12}
+            className="w-full font-mono text-sm rounded-lg border border-gray-200 px-3 py-2 focus:border-brand-400 focus:ring-1 focus:ring-brand-400 outline-none"
+            placeholder={'## Allebrum Privacy Policy\n\n_Last updated: …_\n\n…'}
+          />
+        </Field>
+      </Card>
+    </Section>
   );
 }
 

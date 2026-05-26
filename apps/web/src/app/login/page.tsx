@@ -201,6 +201,19 @@ export default function LoginPage() {
             )}
           </>
         )}
+
+        {/* Public legal links — only render the ones the admin has published. */}
+        {(cfg?.termsConfigured || cfg?.privacyConfigured) && (
+          <div className="pt-2 text-center text-[11px] text-gray-400 space-x-2">
+            {cfg?.termsConfigured && (
+              <a href="/terms" className="hover:text-brand-700">Terms of Service</a>
+            )}
+            {cfg?.termsConfigured && cfg?.privacyConfigured && <span>·</span>}
+            {cfg?.privacyConfigured && (
+              <a href="/privacy" className="hover:text-brand-700">Privacy Policy</a>
+            )}
+          </div>
+        )}
       </Card>
     </div>
   );
