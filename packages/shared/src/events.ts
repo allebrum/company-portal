@@ -51,7 +51,10 @@ export type IdPayload = { id: string; by?: string | null; at: string };
 
 export type TimerPayload = {
   userId: string;
-  projectId: string;
+  // Nullable: timers may run against a to-do that has no project, or with
+  // no to-do at all. UIs that show "Tracking · {client/project}" must
+  // gracefully render when this is null.
+  projectId: string | null;
   todoId: string | null;
   note: string;
   startedAt: string;

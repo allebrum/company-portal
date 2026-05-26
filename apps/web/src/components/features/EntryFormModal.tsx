@@ -64,7 +64,9 @@ export function EntryFormModal({
     if (entry) {
       const proj = projects.find((p) => p.id === entry.projectId);
       setClientId(proj?.clientId ?? '');
-      setProjectId(entry.projectId);
+      // entry.projectId may be null (project-less entry); the empty string
+      // is the "no selection" sentinel for the <Select> below.
+      setProjectId(entry.projectId ?? '');
       const s = isoToLocalInput(entry.startIso);
       setStart(s);
       setEnd(
@@ -93,22 +95,20 @@ export function EntryFormModal({
   const durationValid = durationMin > 0 && durationMin <= 24 * 60;
 
   const onSave = async () => {
-    if (!projectId) {
-      toast.error('Pick a project');
-      return;
-    }
     if (!durationValid) {
       toast.error(durationMin <= 0 ? 'End must be after start' : 'Entry cannot exceed 24 hours');
       return;
     }
     const startIso = localInputToIso(start);
     const endIso = localInputToIso(end);
+    // Project is optional now — empty string = no project picked.
+    const pid = projectId || null;
     try {
       if (isEdit && entry) {
-        await update.mutateAsync({ id: entry.id, patch: { projectId, note, startIso, endIso } });
+        await update.mutateAsync({ id: entry.id, patch: { projectId: pid, note, startIso, endIso } });
         toast.success('Entry updated');
       } else {
-        await add.mutateAsync({ projectId, note: note || 'Manual entry', startIso, endIso, todoId: null });
+        await add.mutateAsync({ projectId: pid, note: note || 'Manual entry', startIso, endIso, todoId: null });
         toast.success('Entry added');
       }
       onClose();
@@ -144,7 +144,7 @@ export function EntryFormModal({
             </Button>
           )}
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={onSave} disabled={!projectId || !durationValid || busy}>
+          <Button variant="primary" onClick={onSave} disabled={!durationValid || busy}>
             {isEdit ? 'Save changes' : 'Add entry'}
           </Button>
         </>

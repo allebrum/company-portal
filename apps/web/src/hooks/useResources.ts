@@ -137,7 +137,9 @@ export type TodoRow = {
 export type EntryRow = {
   id: string;
   userId: string;
-  projectId: string;
+  // Nullable: an entry may have no project when the user tracked time
+  // against a project-less to-do. Renderers should fall back to "—".
+  projectId: string | null;
   note: string;
   startIso: string;
   endIso: string | null;

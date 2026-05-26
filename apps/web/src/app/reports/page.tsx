@@ -54,7 +54,7 @@ export default function ReportsPage() {
   // Client invoicing
   const clientTotals = clients.map((c) => {
     const projIds = projects.filter((p) => p.clientId === c.id).map((p) => p.id);
-    const cEntries = recent.filter((e) => projIds.includes(e.projectId));
+    const cEntries = recent.filter((e) => e.projectId != null && projIds.includes(e.projectId));
     const rev = cEntries.reduce((s, e) => {
       const proj = projects.find((p) => p.id === e.projectId);
       if (!proj?.billable) return s;
