@@ -14,7 +14,7 @@ import type {
 import { EV } from '@allebrum/shared';
 import { emit } from '../realtime/emit.js';
 import { appendActivity } from './activity.js';
-import { logTimeToTodo } from './todos.js';
+import { getTodo, logTimeToTodo } from './todos.js';
 import { periodForDate } from './payPeriods.js';
 import { HttpError } from '../middleware/errorHandler.js';
 
@@ -37,12 +37,20 @@ export async function startTimer(userId: string, input: StartTimerInput): Promis
   if (existing) {
     await stopTimer(userId);
   }
+  // Infer projectId from the linked to-do when the caller didn't provide one
+  // (e.g. UI now starts timers from project-less to-dos). If the to-do also
+  // has no project, the timer simply runs with project_id = NULL.
+  let projectId: string | null = input.projectId ?? null;
+  if (!projectId && input.todoId) {
+    const todo = await getTodo(input.todoId);
+    projectId = todo?.projectId ?? null;
+  }
   const startedAt = new Date().toISOString();
   const [row] = await db
     .insert(activeTimers)
     .values({
       userId,
-      projectId: input.projectId,
+      projectId,
       note: input.note,
       todoId: input.todoId ?? null,
       startedAt,
@@ -128,11 +136,17 @@ export async function listEntries(
 export async function createManualEntry(userId: string, input: ManualEntryInput): Promise<TimeEntry> {
   const period = await periodForDate(input.startIso);
   const durationMin = minutesBetween(input.startIso, input.endIso);
+  // Same project-inference fallback as startTimer when caller omits projectId.
+  let projectId: string | null = input.projectId ?? null;
+  if (!projectId && input.todoId) {
+    const todo = await getTodo(input.todoId);
+    projectId = todo?.projectId ?? null;
+  }
   const [row] = await db
     .insert(timeEntries)
     .values({
       userId,
-      projectId: input.projectId,
+      projectId,
       note: input.note,
       startIso: input.startIso,
       endIso: input.endIso,

@@ -337,7 +337,11 @@ export const payConfig = pgTable('pay_config', {
 export const timeEntries = pgTable('time_entries', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  // projectId is nullable: users may track time against a to-do that has no
+  // project (e.g. personal/overhead tasks). FK behavior stays `restrict` to
+  // preserve the payroll audit trail — deleting a project that has entries
+  // should be blocked, not retroactively null the history.
+  projectId: uuid('project_id').references(() => projects.id, { onDelete: 'restrict' }),
   note: text('note').notNull().default(''),
   startIso: timestamp('start_iso', { withTimezone: true, mode: 'string' }).notNull(),
   endIso: timestamp('end_iso', { withTimezone: true, mode: 'string' }),
@@ -359,7 +363,9 @@ export const timeEntries = pgTable('time_entries', {
 // ---- Active timers (one per user) ----
 export const activeTimers = pgTable('active_timers', {
   userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
-  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  // Nullable: matches time_entries.projectId. The running timer may not have
+  // a project yet (the user picked a project-less to-do, or no to-do at all).
+  projectId: uuid('project_id').references(() => projects.id, { onDelete: 'restrict' }),
   note: text('note').notNull().default(''),
   todoId: uuid('todo_id').references(() => todos.id, { onDelete: 'set null' }),
   startedAt: timestamp('started_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull(),

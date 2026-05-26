@@ -36,9 +36,14 @@ export function TodoTimerButton({ todo, size = 'sm' }: { todo: TodoRow; size?: '
 
   const start = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!todo.projectId) return;
     try {
-      await startTimer.mutateAsync({ projectId: todo.projectId, note: todo.title, todoId: todo.id });
+      // projectId is optional — the server infers it from the to-do when
+      // present, or leaves it null when the to-do also has no project.
+      await startTimer.mutateAsync({
+        projectId: todo.projectId ?? null,
+        note: todo.title,
+        todoId: todo.id,
+      });
       toast.success(`Timer started — ${todo.title}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not start timer');
@@ -61,9 +66,9 @@ export function TodoTimerButton({ todo, size = 'sm' }: { todo: TodoRow; size?: '
   return (
     <button
       onClick={start}
-      disabled={!todo.projectId || startTimer.isPending}
+      disabled={startTimer.isPending}
       className={`inline-flex items-center gap-1.5 rounded-lg border border-gray-200 text-gray-600 font-semibold hover:bg-brand-50 hover:text-brand-700 hover:border-brand-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-600 disabled:hover:border-gray-200 ${pad}`}
-      title={todo.projectId ? 'Start timer for this task' : 'Add a project to this to-do to track time'}
+      title="Start timer for this task"
     >
       <Play className={icon} />
       Start

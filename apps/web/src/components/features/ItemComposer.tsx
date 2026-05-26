@@ -294,12 +294,9 @@ export function ItemComposer(props: ItemComposerProps) {
         await stopTimer.mutateAsync();
         toast.success('Timer stopped');
       } else {
-        if (!props.todo.projectId) {
-          toast.error('Add a project to this to-do to track time');
-          return;
-        }
+        // projectId is optional — server infers from the to-do when present.
         await startTimer.mutateAsync({
-          projectId: props.todo.projectId,
+          projectId: props.todo.projectId ?? null,
           note: props.todo.title,
           todoId: props.todo.id,
         });
@@ -388,12 +385,12 @@ export function ItemComposer(props: ItemComposerProps) {
   };
 
   const onStartLinkedTimer = async (t: TodoRow) => {
-    if (!t.projectId) {
-      toast.error('Add a project to this to-do first');
-      return;
-    }
     try {
-      await startTimer.mutateAsync({ projectId: t.projectId, note: t.title, todoId: t.id });
+      await startTimer.mutateAsync({
+        projectId: t.projectId ?? null,
+        note: t.title,
+        todoId: t.id,
+      });
       toast.success(`Timer started — ${t.title}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Timer action failed');
@@ -819,9 +816,8 @@ export function ItemComposer(props: ItemComposerProps) {
                               <button
                                 type="button"
                                 onClick={() => onStartLinkedTimer(t)}
-                                disabled={!t.projectId}
-                                className="text-gray-400 hover:text-brand-700 disabled:opacity-40 disabled:cursor-not-allowed"
-                                title={t.projectId ? 'Start timer' : 'Project required'}
+                                className="text-gray-400 hover:text-brand-700"
+                                title="Start timer"
                               >
                                 <Play className="w-4 h-4" />
                               </button>
@@ -908,12 +904,8 @@ export function ItemComposer(props: ItemComposerProps) {
                   <Button
                     variant="outline"
                     onClick={onToggleTimer}
-                    disabled={!props.todo.projectId || startTimer.isPending}
-                    title={
-                      props.todo.projectId
-                        ? 'Start timer for this task'
-                        : 'Add a project to this to-do to track time'
-                    }
+                    disabled={startTimer.isPending}
+                    title="Start timer for this task"
                   >
                     <Play className="w-4 h-4" /> Start timer
                   </Button>

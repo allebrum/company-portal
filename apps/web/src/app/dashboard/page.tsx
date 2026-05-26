@@ -66,12 +66,17 @@ export default function DashboardPage() {
   const liveGoals = goals.filter((g) => g.status === 'in-progress' || g.status === 'review').slice(0, 5);
 
   const hoursByProject = useMemo(() => {
+    // Bucket entries by project; null projectId (project-less entries)
+    // collapse into a single "No project" bucket so the dashboard still
+    // accounts for that time without skipping it.
     const map = new Map<string, number>();
+    const NO_PROJECT = '__none__';
     for (const e of week) {
-      map.set(e.projectId, (map.get(e.projectId) ?? 0) + e.durationMin);
+      const key = e.projectId ?? NO_PROJECT;
+      map.set(key, (map.get(key) ?? 0) + e.durationMin);
     }
     const arr = [...map.entries()].map(([projectId, mins]) => {
-      const p = projects.find((x) => x.id === projectId);
+      const p = projectId === NO_PROJECT ? undefined : projects.find((x) => x.id === projectId);
       return { project: p, mins };
     });
     arr.sort((a, b) => b.mins - a.mins);
