@@ -7,6 +7,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useBootstrap } from '@/hooks/useResources';
 import { Sidebar } from './Sidebar';
 import { TimerBar } from './TimerBar';
+import { ClientSpaceOverlay } from '@/components/space/ClientSpaceOverlay';
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
@@ -57,7 +58,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }
 
   return (
-    <ShellWithBootstrap>{children}</ShellWithBootstrap>
+    <>
+      <ShellWithBootstrap>{children}</ShellWithBootstrap>
+      {/* Client/Project Space overlay — fixed inset-0 portal, only renders
+          when context's openScope is non-null. Lives alongside the shell so
+          it sits above sidebar + content but inside the auth gate. */}
+      <ClientSpaceOverlay />
+    </>
   );
 }
 

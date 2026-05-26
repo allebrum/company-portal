@@ -35,6 +35,8 @@ import type {
   AuthConfig,
   AppSettings,
   UpdateAppSettingsInput,
+  SpaceBlock,
+  SpaceFile,
 } from '@allebrum/shared';
 
 // ---- Types (matching API row shapes; permissive to avoid double-maintaining schema) ----
@@ -49,7 +51,18 @@ export type UserRow = {
   createdAt: string;
   updatedAt: string;
 };
-export type ClientRow = { id: string; name: string; kind: string; color: string };
+export type ClientRow = {
+  id: string;
+  name: string;
+  kind: string;
+  color: string;
+  /** Drive folder id for this client (lazy-created when Drive is connected). */
+  driveFolderId: string | null;
+  // Client/Project Spaces: Notes-canvas blocks and Files-tab attachments.
+  // Always arrays — server defaults to [] on insert; never null.
+  spaceBlocks: SpaceBlock[];
+  spaceFiles: SpaceFile[];
+};
 export type ProjectStatusRow = { id: string; label: string; tone: string };
 export type ProjectRow = {
   id: string;
@@ -59,7 +72,11 @@ export type ProjectRow = {
   billable: boolean;
   budgetHrs: number;
   color: string;
+  /** Drive folder id for this project (sub-folder under its client). */
+  driveFolderId: string | null;
   statuses: ProjectStatusRow[] | null;
+  spaceBlocks: SpaceBlock[];
+  spaceFiles: SpaceFile[];
 };
 export type GoalResourceRow = {
   id: string;

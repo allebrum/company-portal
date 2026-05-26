@@ -58,6 +58,7 @@ export async function startTimer(userId: string, input: StartTimerInput): Promis
       projectId,
       note: input.note,
       todoId: input.todoId ?? null,
+      spaceBlockId: input.spaceBlockId ?? null,
       startedAt,
     })
     .returning();
@@ -91,6 +92,7 @@ export async function stopTimer(userId: string): Promise<TimeEntry | null> {
       payPeriodId: period?.id ?? null,
       status: 'draft',
       todoId: t.todoId ?? null,
+      spaceBlockId: t.spaceBlockId ?? null,
     })
     .returning();
   await db.delete(activeTimers).where(eq(activeTimers.userId, userId));

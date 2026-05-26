@@ -198,6 +198,11 @@ export const clients = pgTable('clients', {
   // client creation when Drive is connected; null otherwise). Sub-folders
   // for the client's projects are created inside this folder.
   driveFolderId: text('drive_folder_id'),
+  // Client/Project Spaces — per-scope Notes canvas + Files list. Both
+  // full-replace on update. Same convention as goals.checklist /
+  // projects.statuses (small array, fold into parent, no diffing).
+  spaceBlocks: jsonb('space_blocks').notNull().default(sql`'[]'::jsonb`),
+  spaceFiles: jsonb('space_files').notNull().default(sql`'[]'::jsonb`),
   createdAt: ts(),
   updatedAt: updTs(),
 });
@@ -218,6 +223,9 @@ export const projects = pgTable('projects', {
   // Custom status workflow: array of { id, label, tone }. Null = use the
   // default backlog/in-progress/review/done workflow.
   statuses: jsonb('statuses'),
+  // See clients.spaceBlocks / spaceFiles — same per-scope canvas storage.
+  spaceBlocks: jsonb('space_blocks').notNull().default(sql`'[]'::jsonb`),
+  spaceFiles: jsonb('space_files').notNull().default(sql`'[]'::jsonb`),
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
@@ -382,6 +390,10 @@ export const timeEntries = pgTable('time_entries', {
   approvedBy: uuid('approved_by').references(() => users.id, { onDelete: 'set null' }),
   rejectionNote: text('rejection_note'),
   todoId: uuid('todo_id').references(() => todos.id, { onDelete: 'set null' }),
+  // Provenance marker when a timer was started from a Notes-canvas /timer
+  // block — lets the block recognize itself as the running one without
+  // depending on note-text matching. Nullable; unused for non-Space starts.
+  spaceBlockId: text('space_block_id'),
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
@@ -397,6 +409,10 @@ export const activeTimers = pgTable('active_timers', {
   projectId: uuid('project_id').references(() => projects.id, { onDelete: 'restrict' }),
   note: text('note').notNull().default(''),
   todoId: uuid('todo_id').references(() => todos.id, { onDelete: 'set null' }),
+  // Mirror of time_entries.space_block_id — carried while the timer is
+  // running so a Notes /timer block can paint itself as "running" without
+  // string-matching on the note.
+  spaceBlockId: text('space_block_id'),
   startedAt: timestamp('started_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 });
 

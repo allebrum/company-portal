@@ -8,6 +8,9 @@ export const StartTimerSchema = z.object({
   projectId: z.string().uuid().nullable().optional(),
   note: z.string().max(500).default('Working'),
   todoId: z.string().uuid().nullable().optional(),
+  // Optional provenance marker — when present, identifies a Notes-canvas
+  // /timer block as the source so the block can render its "running" state.
+  spaceBlockId: z.string().max(80).nullable().optional(),
 });
 export type StartTimerInput = z.infer<typeof StartTimerSchema>;
 

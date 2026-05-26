@@ -58,6 +58,9 @@ export type TimerPayload = {
   todoId: string | null;
   note: string;
   startedAt: string;
+  /** Set when the timer was started from a Notes-canvas /timer block —
+   *  lets the block render its own running state without note-matching. */
+  spaceBlockId?: string | null;
 };
 
 export type ActivityPayload = {

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { STATUS_TONES } from '../enums';
+import { SpaceBlockSchema, SpaceFileSchema } from './space';
 
 // One column in a project's custom status workflow.
 export const ProjectStatusSchema = z.object({
@@ -29,5 +30,8 @@ export const UpdateProjectSchema = z.object({
   budgetHrs: z.number().int().nonnegative().max(100000).optional(),
   color: z.string().max(20).optional(),
   statuses: z.array(ProjectStatusSchema).max(12).nullable().optional(),
+  // See client.ts — same Space-canvas full-replace semantics.
+  spaceBlocks: z.array(SpaceBlockSchema).max(2000).optional(),
+  spaceFiles: z.array(SpaceFileSchema).max(500).optional(),
 });
 export type UpdateProjectInput = z.infer<typeof UpdateProjectSchema>;
