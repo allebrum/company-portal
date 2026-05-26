@@ -3,9 +3,14 @@ import { db } from '../db/client.js';
 import {
   timeEntries,
   activeTimers,
+  todos,
   type TimeEntry,
   type ActiveTimer,
 } from '../db/schema.js';
+import { listUsers } from './users.js';
+import { listProjects } from './projects.js';
+import { listClients } from './clients.js';
+import { listPeriods } from './payPeriods.js';
 import type {
   StartTimerInput,
   ManualEntryInput,
@@ -287,6 +292,91 @@ export async function rejectEntries(ids: string[], note: string, whoId: string):
     });
   }
   return result.length;
+}
+
+// ---- CSV export ----
+//
+// Renders an Excel-safe CSV of every entry matching the EntryListQuery.
+// `pay.manage` gate at the route — so viewerId is treated as canViewAll=true.
+// The CSV uses CRLF line endings and prefixes any cell beginning with `=`,
+// `+`, `-`, `@`, TAB or CR with a single quote to defuse the classic CSV
+// formula-injection vector (user-named clients/projects can flow in here).
+export async function exportEntriesCsv(
+  viewerId: string,
+  q: EntryListQuery,
+): Promise<{ filename: string; csv: string }> {
+  // Force a generous limit — for the export we want every matching row in
+  // the period/range, not the paged 500 listEntries returns by default.
+  const entries = await listEntries(viewerId, true, { ...q, limit: 2000 });
+  const [usersArr, projectsArr, clientsArr, periodsArr] = await Promise.all([
+    listUsers(),
+    listProjects(),
+    listClients(),
+    listPeriods(),
+  ]);
+  const todoIds = [...new Set(entries.map((e) => e.todoId).filter((x): x is string => !!x))];
+  const todosArr = todoIds.length
+    ? await db.select().from(todos).where(inArray(todos.id, todoIds))
+    : [];
+
+  const userById = new Map(usersArr.map((u) => [u.id, u]));
+  const projectById = new Map(projectsArr.map((p) => [p.id, p]));
+  const clientById = new Map(clientsArr.map((c) => [c.id, c]));
+  const todoById = new Map(todosArr.map((t) => [t.id, t]));
+  const periodById = new Map(periodsArr.map((p) => [p.id, p]));
+
+  const header = [
+    'date', 'user_name', 'user_email', 'client', 'project', 'todo',
+    'note', 'start_iso', 'end_iso', 'duration_min', 'hours',
+    'billable_rate', 'status', 'pay_period',
+  ];
+
+  const rows: string[][] = entries.map((e) => {
+    const u = userById.get(e.userId);
+    const p = e.projectId ? projectById.get(e.projectId) : undefined;
+    const c = p ? clientById.get(p.clientId) : undefined;
+    const t = e.todoId ? todoById.get(e.todoId) : undefined;
+    const period = e.payPeriodId ? periodById.get(e.payPeriodId) : undefined;
+    return [
+      (e.startIso ?? '').slice(0, 10),
+      u?.name ?? '',
+      u?.email ?? '',
+      c?.name ?? '',
+      p?.name ?? '',
+      t?.title ?? '',
+      e.note ?? '',
+      e.startIso ?? '',
+      e.endIso ?? '',
+      String(e.durationMin),
+      (e.durationMin / 60).toFixed(2),
+      u ? String(u.billable) : '',
+      e.status,
+      period?.label ?? '',
+    ];
+  });
+
+  const escape = (raw: unknown): string => {
+    let v = raw == null ? '' : String(raw);
+    // Formula-injection guard (CSV → Excel auto-execute risk).
+    if (/^[=+\-@\t\r]/.test(v)) v = `'${v}`;
+    return /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+  };
+
+  const lines = [
+    header.map(escape).join(','),
+    ...rows.map((r) => r.map(escape).join(',')),
+  ];
+  // CRLF + trailing newline keeps Excel happy across platforms.
+  const csv = lines.join('\r\n') + '\r\n';
+
+  let label = 'time-entries';
+  if (q.periodId) {
+    const p = periodById.get(q.periodId);
+    if (p) label = `time-entries-${p.label.replace(/[^a-z0-9-]+/gi, '-').toLowerCase()}`;
+  } else if (q.from || q.to) {
+    label = `time-entries-${q.from ?? 'start'}-to-${q.to ?? 'now'}`;
+  }
+  return { filename: `${label}.csv`, csv };
 }
 
 export async function reopenEntries(ids: string[], whoId: string): Promise<number> {
