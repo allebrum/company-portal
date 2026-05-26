@@ -44,6 +44,20 @@ services:
       - { key: ADMIN_EMAIL, scope: RUN_TIME, type: SECRET }
       - { key: ADMIN_PASSWORD, scope: RUN_TIME, type: SECRET }
       - { key: ALLOWED_EMAIL_DOMAINS, value: allebrum.com }
+      # Outbound transactional mail (invite + password-reset emails) via
+      # Google Workspace SMTP relay. All optional — when unset, the mail
+      # service logs `[mail] would send …` and no-ops so the auth routes
+      # still work for testing without sending real email.
+      # One-time setup: Admin Console → Apps → Google Workspace → Gmail →
+      # Routing → SMTP relay service (require auth + TLS), then generate
+      # an App Password on a dedicated workspace mailbox (e.g.
+      # no-reply@allebrum.com) and paste the 16-char password into
+      # SMTP_PASS via doctl after the first deploy.
+      - { key: SMTP_HOST, value: smtp-relay.gmail.com }
+      - { key: SMTP_PORT, value: "587" }
+      - { key: SMTP_USER, scope: RUN_TIME, type: SECRET }
+      - { key: SMTP_PASS, scope: RUN_TIME, type: SECRET }
+      - { key: MAIL_FROM, value: "Allebrum <no-reply@allebrum.com>" }
 
 static_sites:
   - name: web

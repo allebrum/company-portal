@@ -6,6 +6,9 @@ import { HttpError } from '../middleware/errorHandler.js';
 import { appendActivity } from './activity.js';
 import { emit } from '../realtime/emit.js';
 import { EV } from '@allebrum/shared';
+import { env } from '../env.js';
+import { issueToken, invalidateTokensFor, INVITE_TTL_MS } from '../auth/tokens.js';
+import { sendInviteEmail } from './mail.js';
 
 function initialsFrom(name: string): string {
   return name
@@ -38,16 +41,17 @@ export async function findByEmail(email: string): Promise<User | undefined> {
 export async function inviteUser(args: {
   name: string;
   email: string;
-  password?: string;
   billable?: number;
   color?: string;
   whoId: string;
+  /** When true (default), issue an invite token + email an accept link.
+   *  Pass false for Google-only teammates who'll sign in via OAuth. */
+  sendInvite?: boolean;
 }): Promise<User> {
-  // No default password — leaving the field blank creates a Google-only
-  // account (verifyLogin rejects null-passwordHash users, so password
-  // login is correctly disabled and the only way in is Google sign-in).
-  // The admin can still explicitly set a password for non-Google testers.
-  const passwordHash = args.password ? await argon2.hash(args.password) : null;
+  // We never accept a password on invite anymore — the invitee sets their
+  // own via the accept-invite page after consuming an invite token. The
+  // column stays nullable; if `sendInvite` is false (Google-only), it
+  // stays null forever and password login is correctly disabled.
   const existing = await findByEmail(args.email);
   if (existing) throw new HttpError(409, 'email_taken');
   const [row] = await db
@@ -55,7 +59,7 @@ export async function inviteUser(args: {
     .values({
       name: args.name,
       email: args.email,
-      passwordHash,
+      passwordHash: null,
       initials: initialsFrom(args.name),
       color: args.color ?? '#6b7280',
       billable: String(args.billable ?? 150),
@@ -69,7 +73,46 @@ export async function inviteUser(args: {
     kind: 'user.invite',
     target: `${row.email} invited`,
   });
+
+  // Issue a 7-day invite token and send the accept-invite email. Errors
+  // here are logged but don't fail the invite — the admin can always
+  // resend, and the user row is already created. (If we threw, the row
+  // would still exist due to RETURNING above, leaving a half-state.)
+  if (args.sendInvite !== false) {
+    try {
+      const inviter = await getUser(args.whoId);
+      const { rawToken, expiresAt } = await issueToken(row.id, 'invite', INVITE_TTL_MS);
+      const acceptUrl = `${env.WEB_ORIGIN}/accept-invite?token=${encodeURIComponent(rawToken)}`;
+      await sendInviteEmail({
+        to: row.email,
+        inviterName: inviter?.name ?? 'A teammate',
+        acceptUrl,
+        expiresAt,
+      });
+    } catch (e) {
+      console.error('[invite] failed to send email', e);
+    }
+  }
   return row;
+}
+
+/** Re-issue an invite token for an `invited` user — invalidates any prior
+ *  unused invite tokens so older email links stop working immediately. */
+export async function resendInvite(userId: string, whoId: string): Promise<void> {
+  const target = await getUser(userId);
+  if (!target) throw new HttpError(404, 'user_not_found');
+  if (target.status !== 'invited') throw new HttpError(400, 'user_already_active');
+  await invalidateTokensFor(target.id, 'invite');
+  const inviter = await getUser(whoId);
+  const { rawToken, expiresAt } = await issueToken(target.id, 'invite', INVITE_TTL_MS);
+  const acceptUrl = `${env.WEB_ORIGIN}/accept-invite?token=${encodeURIComponent(rawToken)}`;
+  await sendInviteEmail({
+    to: target.email,
+    inviterName: inviter?.name ?? 'A teammate',
+    acceptUrl,
+    expiresAt,
+  });
+  await appendActivity({ whoId, kind: 'user.invite.resend', target: target.email });
 }
 
 export async function updateUser(

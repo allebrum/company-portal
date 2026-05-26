@@ -1,19 +1,34 @@
 import { Router } from 'express';
 import { randomBytes } from 'node:crypto';
-import { LoginSchema } from '@allebrum/shared';
+import argon2 from 'argon2';
+import { eq } from 'drizzle-orm';
+import {
+  LoginSchema,
+  ForgotPasswordSchema,
+  ResetPasswordSchema,
+  AcceptInviteSchema,
+} from '@allebrum/shared';
 import type { AuthConfig } from '@allebrum/shared';
 import { validate, getValidated } from '../middleware/validate.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
-import { verifyLogin, getUser, findOrCreateGoogleUser } from '../services/users.js';
+import { verifyLogin, getUser, findByEmail, findOrCreateGoogleUser } from '../services/users.js';
 import { getEffectivePermissions } from '../auth/permissions.js';
 import { getUserGroupIds } from '../services/rbac.js';
 import { getSettings } from '../services/settings.js';
 import { buildConsentUrl, exchangeCodeForProfile } from '../auth/google.js';
 import { needsSecondFactor } from '../services/twofa.js';
 import { db } from '../db/client.js';
-import { oauthTokens } from '../db/schema.js';
+import { oauthTokens, users } from '../db/schema.js';
 import { env, googleOAuthConfigured } from '../env.js';
+import {
+  issueToken,
+  consumeToken,
+  invalidateTokensFor,
+  RESET_TTL_MS,
+} from '../auth/tokens.js';
+import { sendResetEmail } from '../services/mail.js';
+import { appendActivity } from '../services/activity.js';
 
 export const authRouter = Router();
 
@@ -177,6 +192,103 @@ authRouter.get('/google/callback', async (req, res, next) => {
     return fail('oauth_failed');
   }
 });
+
+// ---- Password reset / accept-invite ----
+//
+// All three routes are rate-limited and gated on `passwordLoginEnabled` —
+// if the org has disabled password login, password recovery would just
+// re-enable the surface they tried to close.
+
+// "Forgot password" returns 200 unconditionally to defeat email-enumeration.
+// We perform a constant-time argon2 dummy hash on misses so timing doesn't
+// leak whether an email is registered.
+authRouter.post(
+  '/forgot-password',
+  rateLimit({ key: 'forgot', max: 5, windowSec: 60 }),
+  validate(ForgotPasswordSchema),
+  async (req, res, next) => {
+    try {
+      const settings = await getSettings();
+      if (!settings.passwordLoginEnabled) {
+        res.status(403).json({ error: 'password_login_disabled' });
+        return;
+      }
+      const { email } = getValidated<typeof ForgotPasswordSchema._type>(req);
+      const user = await findByEmail(email);
+      if (user && user.passwordHash) {
+        // Invalidate any prior unused reset tokens so older email links
+        // can't be replayed after a new reset request.
+        await invalidateTokensFor(user.id, 'reset');
+        const { rawToken, expiresAt } = await issueToken(user.id, 'reset', RESET_TTL_MS);
+        const resetUrl = `${env.WEB_ORIGIN}/reset-password?token=${encodeURIComponent(rawToken)}`;
+        await sendResetEmail({ to: user.email, name: user.name, resetUrl, expiresAt });
+        await appendActivity({ whoId: user.id, kind: 'auth.reset.request', target: user.email });
+      } else {
+        // Spend ~the same wall-clock time as the hit branch so a clock-
+        // wielding attacker can't enumerate emails by response timing.
+        await argon2.hash('dummy-constant-time-burn');
+      }
+      res.json({ ok: true });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+authRouter.post(
+  '/reset-password',
+  rateLimit({ key: 'reset', max: 10, windowSec: 60 }),
+  validate(ResetPasswordSchema),
+  async (req, res, next) => {
+    try {
+      const settings = await getSettings();
+      if (!settings.passwordLoginEnabled) {
+        res.status(403).json({ error: 'password_login_disabled' });
+        return;
+      }
+      const { token, password } = getValidated<typeof ResetPasswordSchema._type>(req);
+      const { userId } = await consumeToken(token, 'reset');
+      const passwordHash = await argon2.hash(password);
+      await db
+        .update(users)
+        .set({ passwordHash, updatedAt: new Date().toISOString() })
+        .where(eq(users.id, userId));
+      await appendActivity({ whoId: userId, kind: 'auth.reset.complete', target: userId });
+      res.json({ ok: true });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+authRouter.post(
+  '/accept-invite',
+  rateLimit({ key: 'accept-invite', max: 10, windowSec: 60 }),
+  validate(AcceptInviteSchema),
+  async (req, res, next) => {
+    try {
+      const settings = await getSettings();
+      if (!settings.passwordLoginEnabled) {
+        res.status(403).json({ error: 'password_login_disabled' });
+        return;
+      }
+      const { token, password } = getValidated<typeof AcceptInviteSchema._type>(req);
+      const { userId } = await consumeToken(token, 'invite');
+      const passwordHash = await argon2.hash(password);
+      // Accept-invite both sets the password AND flips the user to `active`
+      // — the legacy "first login flips invited→active" branch in
+      // verifyLogin stays as a fallback but this is the canonical path.
+      await db
+        .update(users)
+        .set({ passwordHash, status: 'active', updatedAt: new Date().toISOString() })
+        .where(eq(users.id, userId));
+      await appendActivity({ whoId: userId, kind: 'auth.invite.accept', target: userId });
+      res.json({ ok: true });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
 
 authRouter.post('/logout', requireAuth, (req, res, next) => {
   req.session.destroy((err) => {

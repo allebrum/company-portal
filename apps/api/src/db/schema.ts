@@ -118,6 +118,25 @@ export const webauthnCredentials = pgTable('webauthn_credentials', {
   userIdx: index('webauthn_user_idx').on(t.userId),
 }));
 
+// ---- Auth tokens (invite + password-reset) ----
+//
+// Opaque random tokens, SHA-256-hashed at rest. The raw token is only ever
+// in the outbound email and the user's browser URL; the DB only ever holds
+// the hash, the kind (`invite` or `reset`), an absolute expiry, and a
+// `usedAt` marker for single-use revocation.
+export const authTokens = pgTable('auth_tokens', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  kind: text('kind').notNull(),                                // 'invite' | 'reset'
+  tokenHash: text('token_hash').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'string' }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true, mode: 'string' }),
+  createdAt: ts(),
+}, (t) => ({
+  hashIdx: uniqueIndex('auth_tokens_token_hash_idx').on(t.tokenHash),
+  userKindIdx: index('auth_tokens_user_kind_idx').on(t.userId, t.kind, t.usedAt),
+}));
+
 // ---- RBAC: permissions catalog, groups, membership, overrides ----
 export const permissions = pgTable('permissions', {
   key: text('key').primaryKey(),
@@ -439,3 +458,4 @@ export type ActivityRow = typeof activityLog.$inferSelect;
 export type Integration = typeof integrations.$inferSelect;
 export type DriveFolder = typeof driveLinkedFolders.$inferSelect;
 export type DriveItem = typeof driveItems.$inferSelect;
+export type AuthToken = typeof authTokens.$inferSelect;
