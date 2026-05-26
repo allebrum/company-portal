@@ -1,8 +1,9 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, Layers } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { useSpace } from '@/contexts/SpaceContext';
 import {
   useGoals, useEpics, useMilestones, useClients, useProjects, useUsers, useTodos,
   type GoalRow,
@@ -31,6 +32,7 @@ export default function RoadmapPage() {
   const { data: users = [] } = useUsers();
   const { data: todos = [] } = useTodos();
 
+  const { openSpace } = useSpace();
   const [view, setView] = useState<RoadmapView>('kanban');
   const [scope, setScope] = useState<Scope>({ kind: 'all' });
   const [filters, setFilters] = useState<RoadmapFilters>({ client: null, project: null, status: null, q: '' });
@@ -100,9 +102,26 @@ export default function RoadmapPage() {
             {visible.length} goal{visible.length === 1 ? '' : 's'} · {epics.length} epic{epics.length === 1 ? '' : 's'} · {milestones.length} milestone{milestones.length === 1 ? '' : 's'}
           </p>
         </div>
-        <Button variant="primary" onClick={() => { setEditing(null); setComposerOpen(true); }}>
-          <Plus className="w-4 h-4" /> New goal
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Project space button — only when a specific client or project
+              is selected. Gradient pill calls openSpace() on the context
+              and the global overlay renders the canvas + tabs. */}
+          {scope.kind !== 'all' && (
+            <button
+              type="button"
+              onClick={() => openSpace(scope)}
+              className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 px-3 py-1.5 text-white font-semibold text-sm shadow-md"
+              title="Open the Client/Project Space"
+            >
+              <Layers className="w-4 h-4" />
+              {scope.kind === 'project' ? 'Project space' : 'Client space'}
+              <span className="ml-1 text-[10px] uppercase tracking-wider font-bold bg-white/20 rounded px-1.5">New</span>
+            </button>
+          )}
+          <Button variant="primary" onClick={() => { setEditing(null); setComposerOpen(true); }}>
+            <Plus className="w-4 h-4" /> New goal
+          </Button>
+        </div>
       </div>
 
       <HealthSummary goals={visible} todos={todos} />

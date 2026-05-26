@@ -71,6 +71,8 @@ export async function updateProject(
   if (patch.budgetHrs !== undefined) upd.budgetHrs = patch.budgetHrs;
   if (patch.color !== undefined) upd.color = patch.color;
   if (patch.statuses !== undefined) upd.statuses = patch.statuses;
+  if (patch.spaceBlocks !== undefined) upd.spaceBlocks = patch.spaceBlocks;
+  if (patch.spaceFiles !== undefined) upd.spaceFiles = patch.spaceFiles;
   const [row] = await db.update(projects).set(upd).where(eq(projects.id, id)).returning();
   if (!row) throw new HttpError(404, 'project_not_found');
   emit.toOrg(EV.PROJECT_UPDATED, { id: row.id, by: whoId, at: new Date().toISOString() });

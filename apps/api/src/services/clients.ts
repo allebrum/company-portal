@@ -52,6 +52,8 @@ export async function updateClient(
   if (patch.name !== undefined) upd.name = patch.name;
   if (patch.kind !== undefined) upd.kind = patch.kind;
   if (patch.color !== undefined) upd.color = patch.color;
+  if (patch.spaceBlocks !== undefined) upd.spaceBlocks = patch.spaceBlocks;
+  if (patch.spaceFiles !== undefined) upd.spaceFiles = patch.spaceFiles;
   const [row] = await db.update(clients).set(upd).where(eq(clients.id, id)).returning();
   if (!row) throw new HttpError(404, 'client_not_found');
   emit.toOrg(EV.CLIENT_UPDATED, { id: row.id, by: whoId, at: new Date().toISOString() });

@@ -7,6 +7,7 @@ import { qk } from '@/lib/queryKeys';
 import { EV, type ActivityPayload, type TimerPayload } from '@allebrum/shared';
 import { AuthProvider } from '@/hooks/useAuth';
 import { ToastProvider } from '@/components/ui/Toast';
+import { SpaceProvider } from '@/contexts/SpaceContext';
 
 function LiveEventBindings(): null {
   const qc = useQueryClient();
@@ -103,8 +104,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={qc}>
       <ToastProvider>
         <AuthProvider>
-          <LiveEventBindings />
-          {children}
+          <SpaceProvider>
+            <LiveEventBindings />
+            {children}
+          </SpaceProvider>
         </AuthProvider>
       </ToastProvider>
     </QueryClientProvider>
