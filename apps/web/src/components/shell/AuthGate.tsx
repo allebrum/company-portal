@@ -15,16 +15,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const rawPathname = usePathname();
   // Normalize trailing slashes (next.config has trailingSlash:true for static export).
   const pathname = rawPathname?.replace(/\/+$/, '') || '/';
-  // Routes that render unauthenticated — login, password flows, and the
-  // public legal-policy pages. The redirect-to-login + render-without-shell
-  // path treats all of them the same.
+  // Routes that render unauthenticated — login + the password flows. The
+  // redirect-to-login + render-without-shell path treats all of them the same.
   const PUBLIC_ROUTES = new Set([
     '/login',
     '/forgot-password',
     '/reset-password',
     '/accept-invite',
-    '/terms',
-    '/privacy',
   ]);
   const isPublic = PUBLIC_ROUTES.has(pathname);
   const isRoot = pathname === '/' || rawPathname === '';

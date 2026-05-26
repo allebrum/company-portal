@@ -74,11 +74,19 @@ export const appSettings = pgTable('app_settings', {
   // password-reset emails). FK is set null on user delete so a removed
   // sender doesn't take all reset email with them.
   systemSenderUserId: uuid('system_sender_user_id').references(() => users.id, { onDelete: 'set null' }),
-  // Markdown-formatted legal copy. Null = "no policy configured" — the
-  // login page hides the corresponding footer link in that state. Served
-  // unauthenticated via /policies/:kind so prospective signees can read.
-  termsOfService: text('terms_of_service'),
-  privacyPolicy: text('privacy_policy'),
+  // External URLs the workspace links to from the login footer. Empty /
+  // null = hide the link. The portal no longer renders policy text
+  // itself — admins host the content wherever they please (Notion, a
+  // marketing site, Google Sites) and just paste the URL here.
+  termsUrl: text('terms_url'),
+  privacyUrl: text('privacy_url'),
+  // Workspace-branding controls. Portal name + primary brand color show
+  // on the login card and sidebar header. The logo, when set, replaces
+  // the gradient "A" tile and is stored as a base64 data URL so we don't
+  // need Drive permissions or external hosting for it.
+  portalName: text('portal_name').notNull().default('Allebrum'),
+  brandPrimaryColor: text('brand_primary_color').notNull().default('#9333ea'),
+  brandLogoDataUrl: text('brand_logo_data_url'),
   updatedAt: updTs(),
 });
 

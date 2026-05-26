@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Trash2, Download, Mail, X } from 'lucide-react';
 import { API_URL } from '@/lib/env';
 import { Card, Section, Pill, Empty, Tile } from '@/components/ui';
@@ -50,7 +50,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { PAY_PERIOD_STATUS_LABEL, PAY_PERIOD_STATUS_PILL } from '@/lib/formatters';
 import type { Permission } from '@allebrum/shared';
 
-type Tab = 'users' | 'groups' | 'auth' | 'workspace' | 'pay' | 'integrations';
+type Tab = 'users' | 'groups' | 'auth' | 'workspace' | 'pay' | 'integrations' | 'branding';
 
 export default function AdminPage() {
   const { can } = useAuth();
@@ -84,6 +84,7 @@ export default function AdminPage() {
             { id: 'workspace', label: 'Clients & Projects' },
             { id: 'pay', label: 'Pay periods' },
             { id: 'integrations', label: 'Integrations' },
+            { id: 'branding', label: 'Branding' },
           ] as { id: Tab; label: string }[]
         ).map((t) => (
           <button
@@ -104,6 +105,7 @@ export default function AdminPage() {
       {tab === 'workspace' && <WorkspaceTab />}
       {tab === 'pay' && <PayTab />}
       {tab === 'integrations' && <IntegrationsTab />}
+      {tab === 'branding' && <BrandingTab />}
     </div>
   );
 }
@@ -426,89 +428,214 @@ function WorkspaceTab() {
 
       <ClientFormModal open={cOpen} onClose={() => setCOpen(false)} client={cEditing} />
       <ProjectFormModal open={pOpen} onClose={() => setPOpen(false)} project={pEditing} />
-
-      <LegalPoliciesPanel />
     </>
   );
 }
 
 /**
- * Markdown editors for Terms of Service and Privacy Policy. Save-on-blur
- * via useUpdateSettings, same pattern as bookkeeperEmail elsewhere in the
- * tab. Permission-gated to `groups.manage` — the panel renders nothing for
- * members so it doesn't visually dangle in tabs they're allowed to see.
+ * Workspace branding — portal name, primary color, logo upload, plus
+ * external Terms/Privacy URLs that the login footer links to. All five
+ * settings are exposed to the public `/auth/config` so the login page can
+ * pick them up without authentication.
+ *
+ * The logo is converted to a base64 data URL on the client (FileReader)
+ * and capped at 500KB before encoding — small enough to keep the
+ * /auth/config payload reasonable and avoid a separate hosting story.
  */
-function LegalPoliciesPanel() {
+function BrandingTab() {
   const { can } = useAuth();
   const canManage = can('groups.manage');
   const toast = useToast();
   const { data: settings } = useSettings();
   const upd = useUpdateSettings();
+  const [name, setName] = useState('');
+  const [color, setColor] = useState('#9333ea');
   const [terms, setTerms] = useState('');
   const [privacy, setPrivacy] = useState('');
+  const colorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (!settings) return;
-    setTerms(settings.termsOfService ?? '');
-    setPrivacy(settings.privacyPolicy ?? '');
-  }, [settings?.termsOfService, settings?.privacyPolicy]);
+    setName(settings.portalName);
+    setColor(settings.brandPrimaryColor);
+    setTerms(settings.termsUrl ?? '');
+    setPrivacy(settings.privacyUrl ?? '');
+  }, [settings?.portalName, settings?.brandPrimaryColor, settings?.termsUrl, settings?.privacyUrl]);
 
-  if (!canManage || !settings) return null;
+  if (!canManage) {
+    return <Empty title="Permission required" description="You need the 'Manage groups & permissions' permission to edit branding." />;
+  }
+  if (!settings) return null;
 
   const save = async (patch: Parameters<typeof upd.mutateAsync>[0], ok: string) => {
     try {
       await upd.mutateAsync(patch);
       toast.success(ok);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Update failed');
+      const msg = e instanceof Error ? e.message : 'Update failed';
+      toast.error(msg);
     }
   };
 
+  const saveName = () => {
+    const next = name.trim();
+    if (!next || next === settings.portalName) return;
+    void save({ portalName: next }, 'Portal name updated');
+  };
+  const saveColor = (v: string) => {
+    setColor(v);
+    if (!/^#[0-9a-fA-F]{6}$/.test(v)) return;
+    if (colorTimer.current) clearTimeout(colorTimer.current);
+    colorTimer.current = setTimeout(() => {
+      if (v === settings.brandPrimaryColor) return;
+      void save({ brandPrimaryColor: v }, 'Brand color updated');
+    }, 250);
+  };
   const saveTerms = () => {
-    const next = terms.trim() === '' ? null : terms;
-    if (next === (settings.termsOfService ?? null)) return;
-    void save({ termsOfService: next }, 'Terms of Service updated');
+    const next = terms.trim() === '' ? null : terms.trim();
+    if (next === (settings.termsUrl ?? null)) return;
+    void save({ termsUrl: next }, 'Terms URL updated');
   };
   const savePrivacy = () => {
-    const next = privacy.trim() === '' ? null : privacy;
-    if (next === (settings.privacyPolicy ?? null)) return;
-    void save({ privacyPolicy: next }, 'Privacy Policy updated');
+    const next = privacy.trim() === '' ? null : privacy.trim();
+    if (next === (settings.privacyUrl ?? null)) return;
+    void save({ privacyUrl: next }, 'Privacy URL updated');
   };
 
+  const onLogoPick = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please pick an image file');
+      return;
+    }
+    if (file.size > 500_000) {
+      toast.error('Logo must be 500 KB or smaller');
+      return;
+    }
+    const dataUrl = await readAsDataUrl(file);
+    void save({ brandLogoDataUrl: dataUrl }, 'Logo updated');
+  };
+  const clearLogo = () => void save({ brandLogoDataUrl: null }, 'Logo removed');
+
   return (
-    <Section title="Legal policies">
-      <Card className="p-5 space-y-5">
-        <p className="text-sm text-gray-600">
-          Markdown supported — headings (<code>#</code> / <code>##</code>), bullet lists (<code>-</code>),
-          and links (<code>[label](url)</code>) all render on the public pages.
-          Saved on blur. Leave a field empty to hide its link on the login page.
-          Public URLs: <a href="/terms" className="underline" target="_blank" rel="noreferrer">/terms</a> ·{' '}
-          <a href="/privacy" className="underline" target="_blank" rel="noreferrer">/privacy</a>.
-        </p>
+    <>
+      <Section title="Brand identity">
+        <Card className="p-5 space-y-5">
+          <Field label="Portal name" hint="Shows on the login card and sidebar.">
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onBlur={saveName}
+              placeholder="Allebrum"
+              maxLength={60}
+              className="max-w-sm"
+            />
+          </Field>
 
-        <Field label="Terms of Service">
-          <textarea
-            value={terms}
-            onChange={(e) => setTerms(e.target.value)}
-            onBlur={saveTerms}
-            rows={12}
-            className="w-full font-mono text-sm rounded-lg border border-gray-200 px-3 py-2 focus:border-brand-400 focus:ring-1 focus:ring-brand-400 outline-none"
-            placeholder={'## Allebrum Terms of Service\n\n_Last updated: …_\n\n1. …'}
-          />
-        </Field>
+          <Field
+            label="Primary color"
+            hint="Used on the login hero button, sidebar logo tile, and a few other accents. Hex #RRGGBB."
+          >
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                value={color}
+                onChange={(e) => saveColor(e.target.value)}
+                className="w-12 h-9 rounded-lg border border-gray-200 bg-white cursor-pointer"
+                aria-label="Pick brand color"
+              />
+              <Input
+                value={color}
+                onChange={(e) => saveColor(e.target.value)}
+                placeholder="#9333ea"
+                className="w-32 font-mono"
+              />
+              <div
+                className="w-9 h-9 rounded-lg shadow-md"
+                style={{ backgroundColor: /^#[0-9a-fA-F]{6}$/.test(color) ? color : '#9333ea' }}
+              />
+            </div>
+          </Field>
 
-        <Field label="Privacy Policy">
-          <textarea
-            value={privacy}
-            onChange={(e) => setPrivacy(e.target.value)}
-            onBlur={savePrivacy}
-            rows={12}
-            className="w-full font-mono text-sm rounded-lg border border-gray-200 px-3 py-2 focus:border-brand-400 focus:ring-1 focus:ring-brand-400 outline-none"
-            placeholder={'## Allebrum Privacy Policy\n\n_Last updated: …_\n\n…'}
-          />
-        </Field>
-      </Card>
-    </Section>
+          <Field
+            label="Logo"
+            hint="PNG, SVG, or any image up to 500 KB. Replaces the gradient letter tile on the login card and sidebar. Leave empty to use the first letter of the portal name."
+          >
+            <div className="flex items-center gap-4">
+              <div
+                className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-md overflow-hidden"
+                style={{ backgroundColor: settings.brandPrimaryColor }}
+              >
+                {settings.brandLogoDataUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={settings.brandLogoDataUrl} alt="Logo preview" className="w-full h-full object-contain" />
+                ) : (
+                  <span className="text-white text-2xl font-bold">{settings.portalName.charAt(0).toUpperCase() || 'A'}</span>
+                )}
+              </div>
+              <div className="flex flex-col gap-2">
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void onLogoPick(f);
+                    e.target.value = '';
+                  }}
+                />
+                <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
+                  Upload logo
+                </Button>
+                {settings.brandLogoDataUrl && (
+                  <Button variant="ghost" size="sm" onClick={clearLogo}>
+                    Remove logo
+                  </Button>
+                )}
+              </div>
+            </div>
+          </Field>
+        </Card>
+      </Section>
+
+      <Section title="Legal links">
+        <Card className="p-5 space-y-5">
+          <p className="text-sm text-gray-600">
+            Host your policies wherever you like (Notion, Google Sites, a marketing page) and paste the URLs here.
+            The login footer shows each link only when its URL is set; clicking opens in a new tab.
+          </p>
+          <Field label="Terms of Service URL">
+            <Input
+              type="url"
+              value={terms}
+              onChange={(e) => setTerms(e.target.value)}
+              onBlur={saveTerms}
+              placeholder="https://allebrum.com/terms"
+            />
+          </Field>
+          <Field label="Privacy Policy URL">
+            <Input
+              type="url"
+              value={privacy}
+              onChange={(e) => setPrivacy(e.target.value)}
+              onBlur={savePrivacy}
+              placeholder="https://allebrum.com/privacy"
+            />
+          </Field>
+        </Card>
+      </Section>
+    </>
   );
+}
+
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(reader.error ?? new Error('read_failed'));
+    reader.readAsDataURL(file);
+  });
 }
 
 function PayTab() {

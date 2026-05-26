@@ -84,14 +84,28 @@ export default function LoginPage() {
   const passwordEnabled = cfg ? cfg.passwordLoginEnabled : true;
   const googleEnabled = cfg ? cfg.googleLoginEnabled : false;
 
+  // Branding from the public auth config — falls back to Allebrum defaults
+  // until the config request lands so there's no jarring re-render.
+  const portalName = cfg?.portalName ?? 'Allebrum';
+  const brandColor = cfg?.brandPrimaryColor ?? '#9333ea';
+  const logoDataUrl = cfg?.brandLogoDataUrl ?? null;
+
   return (
-    <div className="min-h-screen grid place-items-center bg-gradient-to-br from-brand-900 via-brand-800 to-brand-700 p-6">
+    <div className="min-h-screen grid place-items-center bg-gradient-to-br from-gray-900 via-gray-800 to-gray-700 p-6">
       <Card className="w-full max-w-sm p-6 space-y-5">
         <div className="text-center">
-          <div className="mx-auto w-12 h-12 rounded-2xl bg-gradient-to-br from-brand-600 to-brand-700 flex items-center justify-center text-white text-xl font-bold shadow-md">
-            A
+          <div
+            className="mx-auto w-12 h-12 rounded-2xl flex items-center justify-center text-white text-xl font-bold shadow-md overflow-hidden"
+            style={{ backgroundColor: brandColor }}
+          >
+            {logoDataUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={logoDataUrl} alt={`${portalName} logo`} className="w-full h-full object-contain" />
+            ) : (
+              portalName.charAt(0).toUpperCase() || 'A'
+            )}
           </div>
-          <h1 className="mt-3 text-xl font-bold text-gray-900">Allebrum Portal</h1>
+          <h1 className="mt-3 text-xl font-bold text-gray-900">{portalName} Portal</h1>
           <p className="text-sm text-gray-500">
             {stage === '2fa' ? 'Two-step verification' : 'Sign in to continue'}
           </p>
@@ -202,15 +216,15 @@ export default function LoginPage() {
           </>
         )}
 
-        {/* Public legal links — only render the ones the admin has published. */}
-        {(cfg?.termsConfigured || cfg?.privacyConfigured) && (
+        {/* External legal links — only render the ones the admin has set. */}
+        {(cfg?.termsUrl || cfg?.privacyUrl) && (
           <div className="pt-2 text-center text-[11px] text-gray-400 space-x-2">
-            {cfg?.termsConfigured && (
-              <a href="/terms" className="hover:text-brand-700">Terms of Service</a>
+            {cfg?.termsUrl && (
+              <a href={cfg.termsUrl} target="_blank" rel="noreferrer" className="hover:text-brand-700">Terms of Service</a>
             )}
-            {cfg?.termsConfigured && cfg?.privacyConfigured && <span>·</span>}
-            {cfg?.privacyConfigured && (
-              <a href="/privacy" className="hover:text-brand-700">Privacy Policy</a>
+            {cfg?.termsUrl && cfg?.privacyUrl && <span>·</span>}
+            {cfg?.privacyUrl && (
+              <a href={cfg.privacyUrl} target="_blank" rel="noreferrer" className="hover:text-brand-700">Privacy Policy</a>
             )}
           </div>
         )}

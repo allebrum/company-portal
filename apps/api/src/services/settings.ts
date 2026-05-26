@@ -26,8 +26,11 @@ export async function updateSettings(
   if (patch.allowedEmailDomains !== undefined) upd.allowedEmailDomains = patch.allowedEmailDomains;
   if (patch.bookkeeperEmail !== undefined) upd.bookkeeperEmail = patch.bookkeeperEmail;
   if (patch.sendToBookkeeperOn !== undefined) upd.sendToBookkeeperOn = patch.sendToBookkeeperOn;
-  if (patch.termsOfService !== undefined) upd.termsOfService = patch.termsOfService;
-  if (patch.privacyPolicy !== undefined) upd.privacyPolicy = patch.privacyPolicy;
+  if (patch.termsUrl !== undefined) upd.termsUrl = patch.termsUrl;
+  if (patch.privacyUrl !== undefined) upd.privacyUrl = patch.privacyUrl;
+  if (patch.portalName !== undefined) upd.portalName = patch.portalName;
+  if (patch.brandPrimaryColor !== undefined) upd.brandPrimaryColor = patch.brandPrimaryColor;
+  if (patch.brandLogoDataUrl !== undefined) upd.brandLogoDataUrl = patch.brandLogoDataUrl;
   if (patch.systemSenderUserId !== undefined) {
     // Designating a system sender — only valid if that user actually has a
     // Gmail OAuth token, otherwise password-reset emails will silently
