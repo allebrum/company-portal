@@ -14,6 +14,8 @@ import {
   useSetUserGroups,
   type UserRow,
 } from '@/hooks/useResources';
+import { useGmailStatus } from '@/hooks/useGmail';
+import { ConnectGmailModal } from '@/components/features/ConnectGmailModal';
 import { api } from '@/lib/api';
 
 export function UserFormModal({
@@ -46,6 +48,12 @@ export function UserFormModal({
   const [sendInvite, setSendInvite] = useState(true);
   const [resending, setResending] = useState(false);
 
+  // Gmail-connection gate: if `sendInvite` is on but the current admin
+  // hasn't connected their Gmail yet, open the JIT connect modal before
+  // touching the API. Status is loaded once for the whole modal lifetime.
+  const { data: gmailStatus } = useGmailStatus();
+  const [showGmailModal, setShowGmailModal] = useState(false);
+
   useEffect(() => {
     if (!open) return;
     if (user) {
@@ -76,6 +84,12 @@ export function UserFormModal({
   const onSave = async () => {
     if (!name.trim() || !email.trim()) {
       toast.error('Name and email are required');
+      return;
+    }
+    // Block the create+send-invite path when the current admin hasn't
+    // connected Gmail. The JIT modal then offers Connect or Skip-email.
+    if (!isEdit && sendInvite && gmailStatus && !gmailStatus.connected) {
+      setShowGmailModal(true);
       return;
     }
     try {
@@ -113,6 +127,11 @@ export function UserFormModal({
 
   const onResendInvite = async () => {
     if (!user) return;
+    // Same gate for Resend — needs the clicker's Gmail to send.
+    if (gmailStatus && !gmailStatus.connected) {
+      setShowGmailModal(true);
+      return;
+    }
     setResending(true);
     try {
       await api.post(`/users/${user.id}/resend-invite`);
@@ -127,6 +146,7 @@ export function UserFormModal({
   const busy = invite.isPending || update.isPending || setUserGroups.isPending;
 
   return (
+    <>
     <Modal
       open={open}
       onClose={onClose}
@@ -203,5 +223,11 @@ export function UserFormModal({
         )}
       </div>
     </Modal>
+    <ConnectGmailModal
+      open={showGmailModal}
+      onClose={() => setShowGmailModal(false)}
+      onSkipEmail={() => setSendInvite(false)}
+    />
+    </>
   );
 }

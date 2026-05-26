@@ -221,7 +221,17 @@ authRouter.post(
         await invalidateTokensFor(user.id, 'reset');
         const { rawToken, expiresAt } = await issueToken(user.id, 'reset', RESET_TTL_MS);
         const resetUrl = `${env.WEB_ORIGIN}/reset-password?token=${encodeURIComponent(rawToken)}`;
-        await sendResetEmail({ to: user.email, name: user.name, resetUrl, expiresAt });
+        // No session here — use the workspace's designated system sender
+        // (an admin who connected their Gmail in Settings). If unset, the
+        // mail service logs the URL but doesn't send, which the route
+        // surfaces as the usual constant-time 200.
+        await sendResetEmail({
+          senderUserId: settings.systemSenderUserId,
+          to: user.email,
+          name: user.name,
+          resetUrl,
+          expiresAt,
+        });
         await appendActivity({ whoId: user.id, kind: 'auth.reset.request', target: user.email });
       } else {
         // Spend ~the same wall-clock time as the hit branch so a clock-

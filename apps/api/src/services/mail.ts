@@ -1,40 +1,53 @@
-import nodemailer, { type Transporter } from 'nodemailer';
-import { env, mailConfigured, mailFrom } from '../env.js';
+import { sendAsUser } from './gmail.js';
+import { HttpError } from '../middleware/errorHandler.js';
 
-// Lazy singleton transporter — created the first time we actually need to
-// send, so cold boots and dev environments without SMTP creds don't error.
-let transporter: Transporter | null = null;
-function getTransporter(): Transporter | null {
-  if (!mailConfigured) return null;
-  if (transporter) return transporter;
-  transporter = nodemailer.createTransport({
-    host: env.SMTP_HOST!,
-    port: env.SMTP_PORT,
-    // Workspace SMTP relay uses STARTTLS on 587 (secure=false + requireTLS).
-    // For implicit-TLS on 465 set secure=true; we default to STARTTLS since
-    // smtp-relay.gmail.com / smtp.gmail.com both speak it cleanly.
-    secure: env.SMTP_PORT === 465,
-    requireTLS: env.SMTP_PORT !== 465,
-    auth: { user: env.SMTP_USER!, pass: env.SMTP_PASS! },
-  });
-  return transporter;
-}
-
-async function send(to: string, subject: string, html: string, text: string): Promise<void> {
-  const t = getTransporter();
-  if (!t) {
-    // Dev / unconfigured prod — surface the mail in the log so we can hand-
-    // copy the link during smoke tests instead of having the request error.
-    console.log(`[mail] would send to=${to} subject=${JSON.stringify(subject)}`);
+/**
+ * Thin transactional-mail layer on top of the Gmail OAuth integration.
+ * Every call requires a `senderUserId` — the teammate whose Gmail account
+ * will deliver the message:
+ *
+ *  - Invite + resend-invite use the inviter (the admin who clicked Invite).
+ *  - Password-reset uses the workspace's designated "system sender"
+ *    (`app_settings.system_sender_user_id`).
+ *
+ * If `senderUserId` is null OR that user hasn't connected Gmail yet, we
+ * log the would-be message + the action URL and no-op. Routes never throw
+ * on a missing sender — the invite still creates the user row, the reset
+ * token still gets issued — so the surrounding feature degrades to "the
+ * admin needs to connect Gmail" instead of a hard failure.
+ */
+async function send(
+  senderUserId: string | null | undefined,
+  to: string,
+  subject: string,
+  html: string,
+  text: string,
+): Promise<void> {
+  if (!senderUserId) {
+    console.log(`[mail] no sender configured — would send to=${to} subject=${JSON.stringify(subject)}`);
     console.log(text);
     return;
   }
-  await t.sendMail({ from: mailFrom, to, subject, html, text });
+  try {
+    await sendAsUser(senderUserId, { to, subject, html, text });
+  } catch (e) {
+    // 412 = sender hasn't connected Gmail yet. Log so the admin sees the
+    // action URL and can hand-deliver while they finish the OAuth flow.
+    if (e instanceof HttpError && e.status === 412) {
+      console.log(`[mail] sender ${senderUserId} has not connected Gmail — would send to=${to} subject=${JSON.stringify(subject)}`);
+      console.log(text);
+      return;
+    }
+    // Anything else (Gmail API quota, revoked grant, etc.) gets logged
+    // loudly but does NOT propagate — the broader request shouldn't die.
+    console.error('[mail] send failed', e);
+  }
 }
 
 // ---- Templated emails ----
 
 export async function sendInviteEmail(args: {
+  senderUserId: string | null;
   to: string;
   inviterName: string;
   acceptUrl: string;
@@ -66,10 +79,11 @@ export async function sendInviteEmail(args: {
       <span style="word-break:break-all;">${esc(args.acceptUrl)}</span>
     </p>
   `);
-  await send(args.to, subject, html, text);
+  await send(args.senderUserId, args.to, subject, html, text);
 }
 
 export async function sendResetEmail(args: {
+  senderUserId: string | null;
   to: string;
   name: string;
   resetUrl: string;
@@ -103,7 +117,7 @@ export async function sendResetEmail(args: {
       <span style="word-break:break-all;">${esc(args.resetUrl)}</span>
     </p>
   `);
-  await send(args.to, subject, html, text);
+  await send(args.senderUserId, args.to, subject, html, text);
 }
 
 // ---- HTML helpers ----
@@ -113,7 +127,7 @@ function wrap(body: string): string {
     <div style="max-width:560px;margin:32px auto;background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:32px;">
       ${body}
       <hr style="border:none;border-top:1px solid #f3f4f6;margin:32px 0 16px 0;">
-      <p style="margin:0;font-size:11px;color:#9ca3af;">Allebrum portal · Sent by the system, replies aren't monitored.</p>
+      <p style="margin:0;font-size:11px;color:#9ca3af;">Allebrum portal · Sent on behalf of a teammate's connected Gmail account.</p>
     </div>
   </body></html>`;
 }

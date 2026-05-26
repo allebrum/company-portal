@@ -74,16 +74,17 @@ export async function inviteUser(args: {
     target: `${row.email} invited`,
   });
 
-  // Issue a 7-day invite token and send the accept-invite email. Errors
-  // here are logged but don't fail the invite — the admin can always
-  // resend, and the user row is already created. (If we threw, the row
-  // would still exist due to RETURNING above, leaving a half-state.)
+  // Issue a 7-day invite token and send the accept-invite email from the
+  // inviter's connected Gmail. Errors here are logged but don't fail the
+  // invite — the user row is already created and the admin can resend
+  // once they've connected Gmail (otherwise the URL hits the log).
   if (args.sendInvite !== false) {
     try {
       const inviter = await getUser(args.whoId);
       const { rawToken, expiresAt } = await issueToken(row.id, 'invite', INVITE_TTL_MS);
       const acceptUrl = `${env.WEB_ORIGIN}/accept-invite?token=${encodeURIComponent(rawToken)}`;
       await sendInviteEmail({
+        senderUserId: args.whoId,
         to: row.email,
         inviterName: inviter?.name ?? 'A teammate',
         acceptUrl,
@@ -97,7 +98,8 @@ export async function inviteUser(args: {
 }
 
 /** Re-issue an invite token for an `invited` user — invalidates any prior
- *  unused invite tokens so older email links stop working immediately. */
+ *  unused invite tokens so older email links stop working immediately.
+ *  The new email is sent from whoever clicks Resend (their Gmail). */
 export async function resendInvite(userId: string, whoId: string): Promise<void> {
   const target = await getUser(userId);
   if (!target) throw new HttpError(404, 'user_not_found');
@@ -107,6 +109,7 @@ export async function resendInvite(userId: string, whoId: string): Promise<void>
   const { rawToken, expiresAt } = await issueToken(target.id, 'invite', INVITE_TTL_MS);
   const acceptUrl = `${env.WEB_ORIGIN}/accept-invite?token=${encodeURIComponent(rawToken)}`;
   await sendInviteEmail({
+    senderUserId: whoId,
     to: target.email,
     inviterName: inviter?.name ?? 'A teammate',
     acceptUrl,

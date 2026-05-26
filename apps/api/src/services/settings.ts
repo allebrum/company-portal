@@ -1,10 +1,11 @@
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { appSettings, type AppSettingsRow } from '../db/schema.js';
+import { appSettings, oauthTokens, type AppSettingsRow } from '../db/schema.js';
 import type { UpdateAppSettingsInput } from '@allebrum/shared';
 import { EV } from '@allebrum/shared';
 import { emit } from '../realtime/emit.js';
 import { appendActivity } from './activity.js';
+import { HttpError } from '../middleware/errorHandler.js';
 
 export async function getSettings(): Promise<AppSettingsRow> {
   const rows = await db.select().from(appSettings).limit(1);
@@ -25,6 +26,24 @@ export async function updateSettings(
   if (patch.allowedEmailDomains !== undefined) upd.allowedEmailDomains = patch.allowedEmailDomains;
   if (patch.bookkeeperEmail !== undefined) upd.bookkeeperEmail = patch.bookkeeperEmail;
   if (patch.sendToBookkeeperOn !== undefined) upd.sendToBookkeeperOn = patch.sendToBookkeeperOn;
+  if (patch.systemSenderUserId !== undefined) {
+    // Designating a system sender — only valid if that user actually has a
+    // Gmail OAuth token, otherwise password-reset emails will silently
+    // log instead of sending and the admin will be confused. (Setting it
+    // to null is always allowed — that's how you clear it.)
+    if (patch.systemSenderUserId !== null) {
+      const rows = await db
+        .select({ userId: oauthTokens.userId })
+        .from(oauthTokens)
+        .where(and(
+          eq(oauthTokens.userId, patch.systemSenderUserId),
+          eq(oauthTokens.provider, 'google_gmail'),
+        ))
+        .limit(1);
+      if (!rows[0]) throw new HttpError(400, 'system_sender_not_connected');
+    }
+    upd.systemSenderUserId = patch.systemSenderUserId;
+  }
   const [row] = await db
     .update(appSettings)
     .set(upd)
