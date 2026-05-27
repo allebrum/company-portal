@@ -34,6 +34,7 @@ import {
   downloadFile,
   deleteEntry,
   driveConfigured,
+  reconcileFolders,
 } from '../services/drive.js';
 import {
   buildGmailConsentUrl,
@@ -240,6 +241,19 @@ integrationsRouter.delete('/drive/file/:id', requirePermission('media.manage'), 
   try {
     await deleteEntry(req.params.id!);
     res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Reconcile client/project rows against the Drive folder tree. Clears
+// dangling pointers, links rows that have a matching folder available,
+// flags duplicates + orphans for admin review. Idempotent — safe to
+// re-run. Gated on `integrations.manage` since it can modify
+// `drive_folder_id` pointers across the workspace.
+integrationsRouter.post('/drive/reconcile', requirePermission('integrations.manage'), async (_req, res, next) => {
+  try {
+    res.json(await reconcileFolders());
   } catch (e) {
     next(e);
   }

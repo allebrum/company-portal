@@ -18,6 +18,7 @@ import { UserFormModal } from '@/components/features/UserFormModal';
 import { ClientFormModal } from '@/components/features/ClientFormModal';
 import { ProjectFormModal } from '@/components/features/ProjectFormModal';
 import { LinkFolderModal } from '@/components/features/LinkFolderModal';
+import { useReconcileDriveFolders, type DriveReconciliationReport } from '@/hooks/useDrive';
 import {
   useUsers,
   useClients,
@@ -983,7 +984,10 @@ function IntegrationsTab() {
   const disconnect = useDisconnectIntegration();
   const sync = useSyncDrive();
   const unlink = useUnlinkDriveFolder();
+  const reconcile = useReconcileDriveFolders();
   const [linkOpen, setLinkOpen] = useState(false);
+  const [reconcileReport, setReconcileReport] = useState<DriveReconciliationReport | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
 
   const byKind = (k: string) => integrations.find((i) => i.kind === k);
   const drive = byKind('drive');
@@ -1029,6 +1033,30 @@ function IntegrationsTab() {
           title="Drive folders"
           action={
             <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                disabled={reconcile.isPending}
+                onClick={async () => {
+                  try {
+                    const r = await reconcile.mutateAsync();
+                    setReconcileReport(r);
+                    setReportOpen(true);
+                    const parts: string[] = [];
+                    if (r.linked.length) parts.push(`${r.linked.length} linked`);
+                    if (r.duplicatesDetected.length) parts.push(`${r.duplicatesDetected.length} duplicates flagged`);
+                    if (r.clearedMissing.length) parts.push(`${r.clearedMissing.length} missing cleared`);
+                    if (r.unlinkedFolders.length + r.unlinkedProjectFolders.length > 0) {
+                      parts.push(`${r.unlinkedFolders.length + r.unlinkedProjectFolders.length} orphans`);
+                    }
+                    toast.success(`Reconcile · ${parts.length ? parts.join(' · ') : 'nothing to fix'}`);
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : 'Reconcile failed');
+                  }
+                }}
+                title="Walk every client/project against Drive — clear dangling pointers, link rows to same-named folders, flag duplicates + orphans."
+              >
+                Reconcile
+              </Button>
               <Button variant="outline" onClick={() => setLinkOpen(true)}>Link folder</Button>
               <Button variant="ghost" onClick={() => run(() => sync.mutateAsync(), 'Google Drive synced')}>Sync now</Button>
             </div>
@@ -1058,6 +1086,28 @@ function IntegrationsTab() {
               {folders.length === 0 && <li className="px-5 py-3 text-sm text-gray-500">No folders linked yet.</li>}
             </ul>
           </Card>
+          {reconcileReport && (
+            <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setReportOpen((v) => !v)}
+                className="flex items-center gap-2 text-[12px] uppercase tracking-widest font-bold text-gray-500 hover:text-gray-700"
+                aria-expanded={reportOpen}
+              >
+                <span className={`inline-block transition-transform ${reportOpen ? 'rotate-90' : ''}`}>▸</span>
+                Last reconcile report ·
+                {' '}
+                {reconcileReport.linked.length} linked ·
+                {' '}
+                {reconcileReport.duplicatesDetected.length} dup ·
+                {' '}
+                {reconcileReport.clearedMissing.length} cleared ·
+                {' '}
+                {reconcileReport.unlinkedFolders.length + reconcileReport.unlinkedProjectFolders.length} orphans
+              </button>
+              {reportOpen && <ReconcileReportDetails report={reconcileReport} />}
+            </div>
+          )}
         </Section>
       )}
 
@@ -1065,6 +1115,101 @@ function IntegrationsTab() {
 
       <LinkFolderModal open={linkOpen} onClose={() => setLinkOpen(false)} />
     </>
+  );
+}
+
+/**
+ * Per-section breakdown of a Drive reconcile run. Renders four small
+ * lists — anything the admin needs to actually act on (orphans to
+ * trash, duplicates to manually merge) gets a folder-ID badge so they
+ * can search in Google Drive's URL bar.
+ */
+function ReconcileReportDetails({ report }: { report: DriveReconciliationReport }) {
+  const Row = ({ children }: { children: React.ReactNode }) => (
+    <li className="text-[12px] text-gray-700 py-0.5 break-all">{children}</li>
+  );
+  const Id = ({ id }: { id: string }) => (
+    <span className="font-mono text-[11px] text-gray-500">{id.slice(0, 12)}…</span>
+  );
+  const SubHeader = ({ children }: { children: React.ReactNode }) => (
+    <div className="text-[11px] uppercase tracking-widest font-bold text-gray-500 mt-3 mb-1">{children}</div>
+  );
+  const anything =
+    report.linked.length +
+    report.duplicatesDetected.length +
+    report.clearedMissing.length +
+    report.unlinkedFolders.length +
+    report.unlinkedProjectFolders.length;
+  return (
+    <div className="mt-3 space-y-1">
+      {anything === 0 && (
+        <div className="text-[12px] text-gray-500 italic">Drive folders are in sync — nothing to fix.</div>
+      )}
+      {report.linked.length > 0 && (
+        <>
+          <SubHeader>Linked</SubHeader>
+          <ul>
+            {report.linked.map((r) => (
+              <Row key={`l-${r.scope}-${r.id}`}>
+                {r.scope === 'client' ? 'Client' : 'Project'} <strong>{r.name}</strong> → <Id id={r.folderId} />
+              </Row>
+            ))}
+          </ul>
+        </>
+      )}
+      {report.duplicatesDetected.length > 0 && (
+        <>
+          <SubHeader>Duplicates flagged · manual cleanup in Drive</SubHeader>
+          <ul>
+            {report.duplicatesDetected.map((r) => (
+              <Row key={`d-${r.scope}-${r.id}`}>
+                <strong>{r.name}</strong> kept <Id id={r.canonicalFolderId} />; duplicates:{' '}
+                {r.duplicateFolderIds.map((id) => <Id key={id} id={id} />).reduce(
+                  (acc, el, i) => acc.length ? [...acc, ', ', el] : [el],
+                  [] as React.ReactNode[],
+                )}
+              </Row>
+            ))}
+          </ul>
+        </>
+      )}
+      {report.clearedMissing.length > 0 && (
+        <>
+          <SubHeader>Missing folders cleared</SubHeader>
+          <ul>
+            {report.clearedMissing.map((r) => (
+              <Row key={`c-${r.scope}-${r.id}`}>
+                {r.scope === 'client' ? 'Client' : 'Project'} <strong>{r.name}</strong> · was <Id id={r.staleFolderId} />
+              </Row>
+            ))}
+          </ul>
+        </>
+      )}
+      {report.unlinkedFolders.length > 0 && (
+        <>
+          <SubHeader>Orphan client folders · not pointed to by any client</SubHeader>
+          <ul>
+            {report.unlinkedFolders.map((r) => (
+              <Row key={`u-${r.folderId}`}>
+                <strong>{r.name}</strong> · <Id id={r.folderId} />
+              </Row>
+            ))}
+          </ul>
+        </>
+      )}
+      {report.unlinkedProjectFolders.length > 0 && (
+        <>
+          <SubHeader>Orphan project folders · inside client folders but not linked</SubHeader>
+          <ul>
+            {report.unlinkedProjectFolders.map((r) => (
+              <Row key={`up-${r.folderId}`}>
+                <strong>{r.name}</strong> in <em>{r.clientName}</em> · <Id id={r.folderId} />
+              </Row>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
   );
 }
 

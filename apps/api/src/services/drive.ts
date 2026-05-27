@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
 import { google, type drive_v3 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
-import { eq, desc } from 'drizzle-orm';
+import { eq, and, desc, isNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { oauthTokens, appSettings, clients, projects } from '../db/schema.js';
 import { getSettings } from './settings.js';
@@ -238,37 +238,265 @@ export async function deleteEntry(fileId: string): Promise<void> {
 }
 
 /**
+ * Search a parent folder for non-trashed sub-folders whose name matches
+ * exactly. Returns oldest-first so callers picking a canonical folder
+ * from a duplicate set get a predictable winner.
+ *
+ * Escapes single quotes per Drive's `q=` syntax (the only character we
+ * need to worry about for folder name matching).
+ */
+async function findFoldersByName(parentId: string, name: string): Promise<drive_v3.Schema$File[]> {
+  const drive = await driveApi();
+  const safeName = name.replace(/'/g, "\\'");
+  const res = await drive.files.list({
+    q: `'${parentId}' in parents and name = '${safeName}' and mimeType = '${FOLDER_MIME}' and trashed = false`,
+    fields: 'files(id,name,createdTime)',
+    orderBy: 'createdTime',
+    pageSize: 50,
+  });
+  return res.data.files ?? [];
+}
+
+/** Quick existence/trashed check — `files.get` throws if the ID is unknown. */
+async function folderIsLive(fileId: string): Promise<boolean> {
+  const drive = await driveApi();
+  try {
+    const res = await drive.files.get({ fileId, fields: 'id, trashed' });
+    return res.data?.trashed !== true;
+  } catch {
+    return false;
+  }
+}
+
+export type ReconciliationReport = {
+  /** Clients whose linked folder was missing/trashed in Drive; cleared to null. */
+  clearedMissing: Array<{ scope: 'client' | 'project'; id: string; name: string; staleFolderId: string }>;
+  /** Clients/projects whose `driveFolderId` was null and we linked to a same-named folder in the parent. */
+  linked: Array<{ scope: 'client' | 'project'; id: string; name: string; folderId: string }>;
+  /** Same-named folders that exist but weren't picked — admin should review and trash manually. */
+  duplicatesDetected: Array<{
+    scope: 'client' | 'project'; id: string; name: string; canonicalFolderId: string; duplicateFolderIds: string[];
+  }>;
+  /** Folders in the shared root that aren't pointed to by any client. */
+  unlinkedFolders: Array<{ folderId: string; name: string }>;
+  /** Same, one level down — folders inside any client folder that aren't pointed to by any project. */
+  unlinkedProjectFolders: Array<{ folderId: string; name: string; clientFolderId: string; clientName: string }>;
+};
+
+/**
+ * Walks every client and project against Drive: cleans dangling
+ * `driveFolderId` pointers, links rows that have a name-matching folder
+ * available, and reports duplicates / orphans so the admin can clean up
+ * Drive directly. Idempotent — re-running is harmless.
+ *
+ * Does NOT auto-trash duplicate folders: a folder might have files an
+ * admin wants to keep. We surface the IDs so the user can decide.
+ */
+export async function reconcileFolders(): Promise<ReconciliationReport> {
+  const report: ReconciliationReport = {
+    clearedMissing: [],
+    linked: [],
+    duplicatesDetected: [],
+    unlinkedFolders: [],
+    unlinkedProjectFolders: [],
+  };
+
+  const rootId = await ensureSharedFolder();
+  const now = () => new Date().toISOString();
+
+  const allClients = await db.select().from(clients);
+  const allProjects = await db.select().from(projects);
+
+  // --- Clients pass ---
+  // 1) Clear dangling pointers (folder deleted in Drive UI).
+  for (const c of allClients) {
+    if (!c.driveFolderId) continue;
+    const live = await folderIsLive(c.driveFolderId);
+    if (!live) {
+      report.clearedMissing.push({ scope: 'client', id: c.id, name: c.name, staleFolderId: c.driveFolderId });
+      await db
+        .update(clients)
+        .set({ driveFolderId: null, updatedAt: now() })
+        .where(eq(clients.id, c.id));
+    }
+  }
+
+  // 2) For clients with null pointer, search the shared root for a same-named folder.
+  const clientsAfter = await db.select().from(clients);
+  for (const c of clientsAfter) {
+    if (c.driveFolderId) continue;
+    const matches = await findFoldersByName(rootId, c.name);
+    if (matches.length === 0) continue; // nothing to link — will be lazy-created on next upload
+    const canonical = matches[0]!;
+    await db
+      .update(clients)
+      .set({ driveFolderId: canonical.id!, updatedAt: now() })
+      .where(and(eq(clients.id, c.id), isNull(clients.driveFolderId)));
+    report.linked.push({ scope: 'client', id: c.id, name: c.name, folderId: canonical.id! });
+    if (matches.length > 1) {
+      report.duplicatesDetected.push({
+        scope: 'client',
+        id: c.id,
+        name: c.name,
+        canonicalFolderId: canonical.id!,
+        duplicateFolderIds: matches.slice(1).map((m) => m.id!),
+      });
+    }
+  }
+
+  // --- Projects pass ---
+  // 1) Clear dangling project pointers.
+  for (const p of allProjects) {
+    if (!p.driveFolderId) continue;
+    const live = await folderIsLive(p.driveFolderId);
+    if (!live) {
+      report.clearedMissing.push({ scope: 'project', id: p.id, name: p.name, staleFolderId: p.driveFolderId });
+      await db
+        .update(projects)
+        .set({ driveFolderId: null, updatedAt: now() })
+        .where(eq(projects.id, p.id));
+    }
+  }
+
+  // 2) For projects with null pointer, search their parent client folder.
+  const projectsAfter = await db.select().from(projects);
+  const clientsById = new Map(
+    (await db.select().from(clients)).map((c) => [c.id, c]),
+  );
+  for (const p of projectsAfter) {
+    if (p.driveFolderId) continue;
+    const parent = clientsById.get(p.clientId);
+    if (!parent?.driveFolderId) continue; // can't link without a parent folder
+    const matches = await findFoldersByName(parent.driveFolderId, p.name);
+    if (matches.length === 0) continue;
+    const canonical = matches[0]!;
+    await db
+      .update(projects)
+      .set({ driveFolderId: canonical.id!, updatedAt: now() })
+      .where(and(eq(projects.id, p.id), isNull(projects.driveFolderId)));
+    report.linked.push({ scope: 'project', id: p.id, name: p.name, folderId: canonical.id! });
+    if (matches.length > 1) {
+      report.duplicatesDetected.push({
+        scope: 'project',
+        id: p.id,
+        name: p.name,
+        canonicalFolderId: canonical.id!,
+        duplicateFolderIds: matches.slice(1).map((m) => m.id!),
+      });
+    }
+  }
+
+  // --- Orphan scan ---
+  // Shared root → list folders → any not pointed-to by a client is an orphan.
+  const finalClients = await db.select().from(clients);
+  const finalProjects = await db.select().from(projects);
+  const claimedClientFolders = new Set(
+    finalClients.map((c) => c.driveFolderId).filter((x): x is string => !!x),
+  );
+  const rootEntries = await listFolder(rootId);
+  for (const e of rootEntries) {
+    if (!e.isFolder) continue;
+    if (!claimedClientFolders.has(e.id)) {
+      report.unlinkedFolders.push({ folderId: e.id, name: e.name });
+    }
+  }
+
+  // Sub-orphans: folders inside each client folder that aren't pointed to by a project.
+  const claimedProjectFolders = new Set(
+    finalProjects.map((p) => p.driveFolderId).filter((x): x is string => !!x),
+  );
+  for (const c of finalClients) {
+    if (!c.driveFolderId) continue;
+    const subEntries = await listFolder(c.driveFolderId);
+    for (const e of subEntries) {
+      if (!e.isFolder) continue;
+      if (!claimedProjectFolders.has(e.id)) {
+        report.unlinkedProjectFolders.push({
+          folderId: e.id,
+          name: e.name,
+          clientFolderId: c.driveFolderId,
+          clientName: c.name,
+        });
+      }
+    }
+  }
+
+  return report;
+}
+
+/**
+ * Resolve the Drive folder ID for a client, creating one inside the shared
+ * portal root if it doesn't exist yet. Race-safe: if two callers find the
+ * row's `driveFolderId` null at the same time and both create Drive folders,
+ * only one's conditional UPDATE succeeds — the other trashes its just-
+ * created folder and returns the winner's ID. This is the only safe way to
+ * lazy-create folders without leaving orphans every time two uploads race.
+ *
+ * Requires Drive to be connected; callers should check `isConnected()` first
+ * if they want a softer failure.
+ */
+export async function ensureClientFolder(clientId: string): Promise<string> {
+  const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
+  if (!client) throw new HttpError(404, 'client_not_found');
+  if (client.driveFolderId) return client.driveFolderId;
+
+  const rootId = await ensureSharedFolder();
+  const folder = await createFolder(rootId, client.name);
+
+  // Conditional write — only succeeds if `driveFolderId` is STILL null. If
+  // another request beat us, no rows are returned; trash our orphan, then
+  // re-read and return the canonical value.
+  const written = await db
+    .update(clients)
+    .set({ driveFolderId: folder.id, updatedAt: new Date().toISOString() })
+    .where(and(eq(clients.id, clientId), isNull(clients.driveFolderId)))
+    .returning({ driveFolderId: clients.driveFolderId });
+
+  if (written.length === 0) {
+    try { await deleteEntry(folder.id); } catch { /* best-effort orphan cleanup */ }
+    const [winner] = await db
+      .select({ driveFolderId: clients.driveFolderId })
+      .from(clients)
+      .where(eq(clients.id, clientId))
+      .limit(1);
+    if (!winner?.driveFolderId) throw new Error('client_folder_race_unresolved');
+    return winner.driveFolderId;
+  }
+  return folder.id;
+}
+
+/**
  * Resolve the Drive folder ID that uploads for `projectId` should land in.
- * If the project already has a `driveFolderId`, returns it. Otherwise lazily
- * creates the (client folder if missing → project folder) chain inside the
- * shared portal root and persists the IDs. Requires Drive to be connected;
- * callers should check `isConnected()` first if they want a softer failure.
+ * Lazily creates the (client folder if missing → project folder) chain
+ * inside the shared portal root and persists the IDs. Race-safe at every
+ * step via `ensureClientFolder` + a matching conditional UPDATE on the
+ * project row. Requires Drive to be connected.
  */
 export async function ensureProjectFolder(projectId: string): Promise<string> {
   const [proj] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
   if (!proj) throw new HttpError(404, 'project_not_found');
   if (proj.driveFolderId) return proj.driveFolderId;
 
-  const [client] = await db.select().from(clients).where(eq(clients.id, proj.clientId)).limit(1);
-  if (!client) throw new HttpError(404, 'client_not_found');
+  const clientFolderId = await ensureClientFolder(proj.clientId);
 
-  // Lazy-backfill the client folder first if it's missing.
-  let clientFolderId = client.driveFolderId;
-  if (!clientFolderId) {
-    const rootId = await ensureSharedFolder();
-    const folder = await createFolder(rootId, client.name);
-    clientFolderId = folder.id;
-    await db
-      .update(clients)
-      .set({ driveFolderId: clientFolderId, updatedAt: new Date().toISOString() })
-      .where(eq(clients.id, client.id));
-  }
-
-  // Now create the project folder inside it.
-  const projectFolder = await createFolder(clientFolderId, proj.name);
-  await db
+  // Create the project folder, then conditionally claim it on the row.
+  // Same race-safe pattern as ensureClientFolder above.
+  const folder = await createFolder(clientFolderId, proj.name);
+  const written = await db
     .update(projects)
-    .set({ driveFolderId: projectFolder.id, updatedAt: new Date().toISOString() })
-    .where(eq(projects.id, proj.id));
-  return projectFolder.id;
+    .set({ driveFolderId: folder.id, updatedAt: new Date().toISOString() })
+    .where(and(eq(projects.id, projectId), isNull(projects.driveFolderId)))
+    .returning({ driveFolderId: projects.driveFolderId });
+
+  if (written.length === 0) {
+    try { await deleteEntry(folder.id); } catch { /* best-effort orphan cleanup */ }
+    const [winner] = await db
+      .select({ driveFolderId: projects.driveFolderId })
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .limit(1);
+    if (!winner?.driveFolderId) throw new Error('project_folder_race_unresolved');
+    return winner.driveFolderId;
+  }
+  return folder.id;
 }

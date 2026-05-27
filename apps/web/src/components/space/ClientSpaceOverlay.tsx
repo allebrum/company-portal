@@ -14,7 +14,7 @@ import {
   useUpdateGoal, useUpdateTodo, useStartTimer, useStopTimer,
   type GoalRow, type TodoRow, type ProjectRow, type ClientRow,
 } from '@/hooks/useResources';
-import { useUploadDriveFile, useDriveStatus, driveConnectUrl } from '@/hooks/useDrive';
+import { useUploadSpaceFile, useDriveStatus, driveConnectUrl } from '@/hooks/useDrive';
 import { useMyTimer } from '@/hooks/useTimer';
 import { useToast } from '@/components/ui/Toast';
 import { Button } from '@/components/ui/Button';
@@ -686,7 +686,8 @@ function FilesTab({
 }) {
   const { data: driveStatus } = useDriveStatus();
   const { data: goals = [] } = useGoals();
-  const upload = useUploadDriveFile();
+  const { data: projects = [] } = useProjects();
+  const upload = useUploadSpaceFile();
   const setFiles = useUpdateSpaceFiles(scope);
   const toast = useToast();
   const { me } = useAuth();
@@ -694,6 +695,10 @@ function FilesTab({
   const [embedOpen, setEmbedOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Drive folder for this scope — used purely for the "no folder yet" UX
+  // gate. The server-side `uploadSpaceFile` will lazy-create the folder
+  // via `ensureClientFolder` / `ensureProjectFolder` if it's still null,
+  // so we no longer need it for the upload call itself.
   const folderId = data.project?.driveFolderId ?? data.client?.driveFolderId ?? null;
   const driveConnected = !!driveStatus?.connected;
 
@@ -706,29 +711,27 @@ function FilesTab({
       (g.resources ?? []).map((r) => ({ goal: g, resource: r })),
     );
   }, [goals, data]);
+  // At CLIENT scope only: aggregate files from every project under this
+  // client so a teammate viewing the client space sees uploads made in
+  // sub-project spaces too. The Media dashboard already surfaces these
+  // (it walks the folder tree); this surfaces them in the right scope-
+  // local UI as well.
+  const inSubProjects = useMemo(() => {
+    if (scope.kind !== 'client') return [];
+    return projects
+      .filter((p) => p.clientId === scope.id)
+      .flatMap((p) =>
+        (p.spaceFiles ?? []).map((file) => ({ project: p, file })),
+      );
+  }, [scope, projects]);
 
   const onUploadFile = async (file: File) => {
     if (!driveConnected) {
       toast.error('Connect Google Drive first');
       return;
     }
-    if (!folderId) {
-      toast.error('No Drive folder for this scope — try reconnecting Drive');
-      return;
-    }
     try {
-      const drive = await upload.mutateAsync({ parentId: folderId, file });
-      const newFile: SpaceFile = {
-        id: crypto.randomUUID(),
-        kind: 'drive-doc',
-        title: drive.name,
-        url: drive.webViewLink ?? `https://drive.google.com/file/d/${drive.id}/view`,
-        meta: `Drive · ${file.size.toLocaleString()} B`,
-        source: 'files',
-        addedBy: me?.id ?? '',
-        addedAt: new Date().toISOString().slice(0, 10),
-      };
-      await setFiles([...inSpace, newFile]);
+      await upload.mutateAsync({ scopeKind: scope.kind, scopeId: scope.id, file });
       toast.success(`Uploaded ${file.name}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Upload failed');
@@ -891,6 +894,37 @@ function FilesTab({
           </ul>
         )}
       </Section>
+
+      {scope.kind === 'client' && inSubProjects.length > 0 && (
+        <Section title="In sub-projects" count={inSubProjects.length}>
+          <ul className="space-y-1.5">
+            {inSubProjects.map(({ project, file }) => (
+              <li
+                key={`${project.id}:${file.id}`}
+                className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 hover:border-brand-300"
+              >
+                <FileText className="w-4 h-4 text-gray-400 shrink-0" />
+                <a
+                  href={file.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex-1 min-w-0 text-sm text-gray-800 truncate hover:text-brand-700"
+                  title={file.url}
+                >
+                  {file.title}
+                </a>
+                <span
+                  className="text-[10px] font-bold uppercase tracking-wide bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded"
+                  title={`Uploaded in ${project.name}'s space`}
+                >
+                  {project.name}
+                </span>
+                <span className="text-[11px] text-gray-400 truncate max-w-[140px]">{file.meta}</span>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
 
       {attachedToGoals.length > 0 && (
         <Section title="Attached to goals" count={attachedToGoals.length}>

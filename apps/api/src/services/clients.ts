@@ -6,7 +6,7 @@ import { emit } from '../realtime/emit.js';
 import { EV } from '@allebrum/shared';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';
-import { isConnected as driveIsConnected, ensureSharedFolder, createFolder as driveCreateFolder } from './drive.js';
+import { isConnected as driveIsConnected, ensureClientFolder } from './drive.js';
 
 export async function listClients(): Promise<Client[]> {
   return db.select().from(clients).orderBy(asc(clients.name));
@@ -18,20 +18,20 @@ export async function createClient(input: CreateClientInput, whoId: string): Pro
   let row = inserted;
 
   // Best-effort: create a Drive folder for this client under the shared
-  // portal root. If Drive isn't connected or the API call fails, the
-  // client is still returned — driveFolderId stays null. Projects created
-  // under a folder-less client will not get sub-folders either ("going
-  // forward only" semantics for the auto-folder feature).
+  // portal root. Delegates to `ensureClientFolder`, which is race-safe —
+  // if a concurrent request beats us, it cleans up its own orphan and
+  // returns the canonical ID. Failure (Drive disconnected, API error)
+  // leaves `driveFolderId` null; uploads will lazily create on demand.
   try {
     if (await driveIsConnected()) {
-      const rootId = await ensureSharedFolder();
-      const folder = await driveCreateFolder(rootId, row.name);
+      const folderId = await ensureClientFolder(row.id);
       const [updated] = await db
-        .update(clients)
-        .set({ driveFolderId: folder.id, updatedAt: new Date().toISOString() })
+        .select()
+        .from(clients)
         .where(eq(clients.id, row.id))
-        .returning();
+        .limit(1);
       if (updated) row = updated;
+      void folderId;
     }
   } catch (e) {
     // eslint-disable-next-line no-console
