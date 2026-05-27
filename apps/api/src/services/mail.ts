@@ -87,6 +87,20 @@ export async function sendInviteEmail(args: {
  * the body (HTML + plain-text). Fires from the admin who clicked the
  * "Close & send" CTA — the From: is their connected Gmail.
  */
+export type PayrollEntryRow = {
+  /** ISO date (yyyy-mm-dd) — local date the work happened on */
+  date: string;
+  /** HH:MM clock string in the entry's recorded timezone */
+  start: string;
+  /** HH:MM clock string; '—' for entries with no end (shouldn't happen post-stop) */
+  end: string;
+  durationMin: number;
+  project: string;
+  note: string;
+  status: string;
+  /** Name of the admin who approved this entry, or '—' if not yet approved. */
+  approver: string;
+};
 export type PayrollSummaryRow = {
   name: string;
   email: string;
@@ -94,6 +108,13 @@ export type PayrollSummaryRow = {
   revenue: number;
   approvers: string[];
   statuses: string[];
+  /**
+   * Every time entry that contributed to this row. The bookkeeper email
+   * renders them as a per-employee detail table below the summary so the
+   * recipient has the full audit trail (who logged what, when, who
+   * approved it) without needing portal access.
+   */
+  entries: PayrollEntryRow[];
 };
 export async function sendPayrollReportEmail(args: {
   senderUserId: string | null;
@@ -108,6 +129,15 @@ export async function sendPayrollReportEmail(args: {
   const fmt$ = (v: number) => v.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 
   const subject = `Payroll · ${period.label}`;
+  const fmtDur = (m: number) => {
+    const h = Math.floor(m / 60);
+    const mm = m % 60;
+    return `${h}:${String(mm).padStart(2, '0')}`;
+  };
+  // Plain-text variant — keep it useful for terminal-style mail clients
+  // and as a graceful fallback. Detail rows are right-aligned columns
+  // separated by 2-space gaps; no fancy box-drawing chars so any mailer
+  // renders cleanly.
   const text = [
     `Pay period: ${period.label}`,
     `Range:      ${period.startDate} – ${period.endDate}`,
@@ -123,6 +153,18 @@ export async function sendPayrollReportEmail(args: {
     '',
     `Totals: ${fmtHrs(totalHours)}  ${fmt$(totalRev)}`,
     '',
+    'Detail by employee:',
+    ...summaries.flatMap((r) => [
+      '',
+      `── ${r.name} <${r.email}> — ${fmtHrs(r.hours)} · ${fmt$(r.revenue)}`,
+      '  Date        Start  End    Duration  Project              Status     Approver           Note',
+      ...r.entries.map(
+        (e) =>
+          `  ${e.date}  ${e.start.padEnd(5)}  ${e.end.padEnd(5)}  ${fmtDur(e.durationMin).padStart(7)}  ` +
+          `${e.project.slice(0, 20).padEnd(20)} ${e.status.padEnd(10)} ${e.approver.slice(0, 18).padEnd(18)} ${e.note}`,
+      ),
+    ]),
+    '',
     '— Sent from the Allebrum portal',
   ].join('\n');
 
@@ -136,6 +178,64 @@ export async function sendPayrollReportEmail(args: {
         <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;color:#6b7280;font-size:12px;">${esc(r.approvers.join(', ') || '—')}</td>
       </tr>`,
     )
+    .join('');
+
+  // Per-employee detail blocks — mirror the in-app review modal's
+  // expanded view so the bookkeeper sees every entry plus the
+  // approving admin without having to log into the portal.
+  const cellThStyle =
+    'padding:6px 8px;border-bottom:1px solid #e5e7eb;font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;';
+  const cellTdStyle =
+    'padding:6px 8px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;';
+  const detailHtml = summaries
+    .map((r) => {
+      const entryRows =
+        r.entries.length === 0
+          ? `<tr><td colspan="8" style="padding:8px;text-align:center;color:#9ca3af;font-size:12px;">No entries.</td></tr>`
+          : r.entries
+              .map(
+                (e) => `
+            <tr>
+              <td style="${cellTdStyle}white-space:nowrap;font-variant-numeric:tabular-nums;">${esc(e.date)}</td>
+              <td style="${cellTdStyle}white-space:nowrap;font-variant-numeric:tabular-nums;text-align:right;">${esc(e.start)}</td>
+              <td style="${cellTdStyle}white-space:nowrap;font-variant-numeric:tabular-nums;text-align:right;">${esc(e.end)}</td>
+              <td style="${cellTdStyle}white-space:nowrap;font-variant-numeric:tabular-nums;text-align:right;font-weight:600;">${esc(fmtDur(e.durationMin))}</td>
+              <td style="${cellTdStyle}">${esc(e.project)}</td>
+              <td style="${cellTdStyle}">${esc(e.note)}</td>
+              <td style="${cellTdStyle}"><span style="display:inline-block;padding:1px 8px;border-radius:999px;background:#f3f4f6;font-size:11px;color:#374151;">${esc(e.status)}</span></td>
+              <td style="${cellTdStyle}color:#6b7280;">${esc(e.approver)}</td>
+            </tr>`,
+              )
+              .join('');
+      return `
+        <div style="margin-top:22px;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
+          <div style="background:#f9fafb;padding:10px 14px;border-bottom:1px solid #e5e7eb;">
+            <div style="font-size:14px;font-weight:600;color:#111;">${esc(r.name)}</div>
+            <div style="font-size:12px;color:#6b7280;">
+              ${esc(r.email)} · <strong style="color:#111;">${esc(fmtHrs(r.hours))}</strong>
+              · ${esc(fmt$(r.revenue))} billable
+              · approved by ${esc(r.approvers.join(', ') || '—')}
+            </div>
+          </div>
+          <div style="overflow-x:auto;">
+            <table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:12px;">
+              <thead>
+                <tr>
+                  <th align="left" style="${cellThStyle}">Date</th>
+                  <th align="right" style="${cellThStyle}">Start</th>
+                  <th align="right" style="${cellThStyle}">End</th>
+                  <th align="right" style="${cellThStyle}">Duration</th>
+                  <th align="left" style="${cellThStyle}">Project</th>
+                  <th align="left" style="${cellThStyle}">Note</th>
+                  <th align="left" style="${cellThStyle}">Status</th>
+                  <th align="left" style="${cellThStyle}">Approver</th>
+                </tr>
+              </thead>
+              <tbody>${entryRows}</tbody>
+            </table>
+          </div>
+        </div>`;
+    })
     .join('');
 
   const html = wrap(`
@@ -164,6 +264,14 @@ export async function sendPayrollReportEmail(args: {
         </tr>
       </tfoot>
     </table>
+    ${summaries.length > 0 ? `
+      <h3 style="margin:32px 0 4px 0;font-size:15px;color:#111;">Detail by employee</h3>
+      <p style="margin:0 0 8px 0;font-size:12px;color:#6b7280;">
+        Every entry that contributed to the totals above, including the
+        approving admin. Sorted by employee.
+      </p>
+      ${detailHtml}
+    ` : ''}
   `);
 
   await send(args.senderUserId, args.to, subject, html, text);

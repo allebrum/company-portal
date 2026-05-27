@@ -320,14 +320,52 @@ function PeriodReviewModal({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [rejectFormOpen, setRejectFormOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState('Please double-check duration and resubmit.');
-  // Reset row selection + return form whenever a different period opens.
+  // Employee filter: text query + multi-select. Empty query AND empty
+  // multi-select = show everyone. Both narrow independently, so an
+  // admin can type "ali" to find Alice, then click her chip to lock
+  // the filter and keep reviewing even after clearing the query.
+  const [filterQuery, setFilterQuery] = useState('');
+  const [filterUserIds, setFilterUserIds] = useState<Set<string>>(new Set());
+  // Reset row selection + return form + filter whenever a different period opens.
   useEffect(() => {
     if (!open) return;
     setSelected(new Set());
     setRejectFormOpen(false);
+    setFilterQuery('');
+    setFilterUserIds(new Set());
   }, [open, period.id]);
 
-  const submitted = entries.filter((e) => e.status === 'submitted');
+  // Unique users referenced by any entry in this period — used for the
+  // chip-style filter ribbon. Sort by name for predictable layout.
+  const usersInPeriod = useMemo(() => {
+    const ids = new Set(entries.map((e) => e.userId));
+    return users
+      .filter((u) => ids.has(u.id))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [entries, users]);
+
+  // Apply both filters to the entries list. The query matches substring
+  // on user name OR email so admins can type either. The chip set is
+  // an explicit allow-list when non-empty.
+  const visibleEntries = useMemo(() => {
+    const q = filterQuery.trim().toLowerCase();
+    return entries.filter((e) => {
+      if (filterUserIds.size > 0 && !filterUserIds.has(e.userId)) return false;
+      if (q) {
+        const u = users.find((x) => x.id === e.userId);
+        if (!u) return false;
+        const hay = `${u.name} ${u.email}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [entries, users, filterQuery, filterUserIds]);
+  const hasFilter = filterUserIds.size > 0 || filterQuery.trim() !== '';
+
+  const submitted = visibleEntries.filter((e) => e.status === 'submitted');
+  // Period-total bar reflects ALL entries (admin's situational
+  // awareness), not just the filtered view — the filter is a
+  // review-focus tool, not a redefinition of the period.
   const totalMin = entries.reduce((s, e) => s + e.durationMin, 0);
   const billRevenue = entries.reduce((s, e) => {
     const proj = projects.find((p) => p.id === e.projectId);
@@ -337,6 +375,19 @@ function PeriodReviewModal({
     return s + (e.durationMin / 60) * rate;
   }, 0);
   const acting = selected.size > 0 ? [...selected] : submitted.map((e) => e.id);
+
+  const toggleFilterUser = (userId: string) => {
+    setFilterUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  };
+  const clearFilter = () => {
+    setFilterUserIds(new Set());
+    setFilterQuery('');
+  };
 
   const toggleRow = (id: string) => {
     setSelected((prev) => {
@@ -368,7 +419,9 @@ function PeriodReviewModal({
 
   // Per-employee aggregate for the "Payroll summary" panel below the
   // entries table. Treat submitted + approved as in-scope since Close
-  // auto-approves any leftover submissions.
+  // auto-approves any leftover submissions. Driven off the FILTERED
+  // entries so the summary reflects whatever subset the admin is
+  // currently reviewing.
   const usableStatuses = new Set(['submitted', 'approved']);
   type Row = {
     userId: string; name: string; email: string;
@@ -376,7 +429,7 @@ function PeriodReviewModal({
     entries: EntryRow[];
   };
   const byUser = new Map<string, Row>();
-  for (const e of entries) {
+  for (const e of visibleEntries) {
     if (!usableStatuses.has(e.status)) continue;
     const u = users.find((x) => x.id === e.userId);
     if (!u) continue;
@@ -525,13 +578,68 @@ function PeriodReviewModal({
           </div>
         )}
 
+        {/* Employee filter ribbon — both a search box and chip multi-
+            select. Both filters apply to the entries table AND the
+            payroll-summary panel below. */}
+        {usersInPeriod.length > 1 && (
+          <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 space-y-2">
+            <div className="flex items-center gap-2">
+              <input
+                type="search"
+                value={filterQuery}
+                onChange={(ev) => setFilterQuery(ev.target.value)}
+                placeholder="Filter by employee name or email…"
+                className="flex-1 min-w-0 text-sm rounded-lg border border-gray-200 px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-200 focus:border-brand-400"
+              />
+              {hasFilter && (
+                <button
+                  type="button"
+                  onClick={clearFilter}
+                  className="text-[11px] uppercase tracking-widest font-bold text-brand-700 hover:text-brand-900"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {usersInPeriod.map((u) => {
+                const active = filterUserIds.has(u.id);
+                return (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => toggleFilterUser(u.id)}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[12px] transition-colors ${
+                      active
+                        ? 'border-brand-500 bg-brand-50 text-brand-800'
+                        : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-300'
+                    }`}
+                    title={active ? `Stop reviewing only ${u.name}` : `Only review ${u.name}`}
+                  >
+                    <Avatar user={u} size={16} />
+                    <span>{u.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Entries table */}
         <div>
           <div className="text-[11px] uppercase tracking-widest font-bold text-gray-400 mb-1">
-            Entries · {entries.length}
+            Entries · {visibleEntries.length}
+            {hasFilter && (
+              <span className="ml-1 normal-case tracking-normal text-gray-400 italic">
+                (filtered from {entries.length})
+              </span>
+            )}
           </div>
-          {entries.length === 0 ? (
-            <Empty title="No entries in this period" />
+          {visibleEntries.length === 0 ? (
+            <Empty
+              title={hasFilter ? 'No entries match the filter' : 'No entries in this period'}
+              description={hasFilter ? 'Try clearing the filter or picking a different employee.' : undefined}
+            />
           ) : (
             <Card>
               <div className="overflow-x-auto"><table className="w-full text-sm min-w-[820px]">
@@ -550,7 +658,7 @@ function PeriodReviewModal({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {entries.map((e) => {
+                  {visibleEntries.map((e) => {
                     const u = users.find((x) => x.id === e.userId);
                     const proj = projects.find((p) => p.id === e.projectId);
                     const selectable = e.status === 'submitted' && canMutate;
