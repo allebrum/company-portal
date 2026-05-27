@@ -475,12 +475,22 @@ export async function sendPayrollReportToBookkeeper(
   const period = periodRows[0];
   if (!period) throw new HttpError(404, 'period_not_found');
 
-  // Load entries for the period plus a denormalized user / project lookup
-  // so the email can render readable rows without an extra n+1.
+  // Payroll-eligibility filter: only `approved` entries roll into the
+  // bookkeeper report. Drafts, submitted, and rejected entries are not
+  // signed off for payment — including them would inflate the totals
+  // the bookkeeper acts on. Note this is intentionally not parameterized:
+  // the bookkeeper email is the payroll source of truth; non-approved
+  // entries belong on the in-app review surface, not in payroll.
+  //
+  // Operationally this stays consistent with the Close-and-send flow,
+  // because `closePeriod` auto-approves any leftover `submitted`
+  // entries before this query runs — so a "close & send" never drops
+  // legitimately-pending work, while a "send without closing" simply
+  // skips anything the admin hasn't approved yet.
   const entries = await db
     .select()
     .from(timeEntries)
-    .where(eq(timeEntries.payPeriodId, periodId));
+    .where(and(eq(timeEntries.payPeriodId, periodId), eq(timeEntries.status, 'approved')));
   const userIds = [...new Set(entries.map((e) => e.userId))];
   const approverIds = [...new Set(entries.map((e) => e.approvedBy).filter((x): x is string => !!x))];
   const projectIds = [...new Set(entries.map((e) => e.projectId).filter((x): x is string => !!x))];
