@@ -637,6 +637,13 @@ export function useSendBookkeeperReport() {
     mutationFn: (id: string) => api.post<{ ok: true; sentTo: string; rows: number }>(`/pay-periods/${id}/send-bookkeeper`),
   });
 }
+export function useRecalculatePayPeriods() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<{ deleted: number; inserted: number; preserved: number }>('/pay-periods/recalculate'),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.payPeriods }),
+  });
+}
 
 // ---- Integrations + Drive ----
 export function useIntegrations() {

@@ -1,4 +1,4 @@
-import { eq, and, gt, gte, lte, asc, desc, inArray } from 'drizzle-orm';
+import { eq, and, gt, gte, lte, asc, desc, inArray, isNotNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
   payPeriods, payConfig, timeEntries, users, projects, type PayPeriod,
@@ -228,22 +228,46 @@ export async function ensureFuturePeriods(args: {
 }
 
 /**
- * Called after `updatePayConfig` persists a new schedule. Drops every
- * still-`open` period whose start_date is strictly in the future so the
- * regeneration produces a clean schedule. Closed / review periods are
- * preserved (we never retroactively rewrite payroll history).
+ * Called after `updatePayConfig` persists a new schedule AND from the
+ * manual "Recalculate pay periods" admin button. Drops every open period
+ * that **either** (a) starts in the future, **or** (b) has zero time
+ * entries linked. Either condition makes it a stale row safe to discard.
+ *
+ * Periods with any time entries are preserved unconditionally so we
+ * don't retroactively rewrite payroll history; closed / review periods
+ * are also never touched.
+ *
+ * After cleanup, `ensureFuturePeriods` fills the runway from the new
+ * config. Returns counts so the manual route can toast a summary.
  */
 export async function regenerateFuturePeriods(args: { whoId: string }): Promise<{
   deleted: number;
   inserted: number;
+  preserved: number;
 }> {
   const today = isoDate(new Date());
-  const deletedRows = await db
-    .delete(payPeriods)
-    .where(and(eq(payPeriods.status, 'open'), gt(payPeriods.startDate, today)))
-    .returning({ id: payPeriods.id });
+  // All currently-open periods.
+  const openRows = await db
+    .select({ id: payPeriods.id, start: payPeriods.startDate })
+    .from(payPeriods)
+    .where(eq(payPeriods.status, 'open'));
+  // Distinct period ids referenced by at least one time entry.
+  const usedRows = await db
+    .selectDistinct({ pid: timeEntries.payPeriodId })
+    .from(timeEntries)
+    .where(isNotNull(timeEntries.payPeriodId));
+  const usedSet = new Set(usedRows.map((r) => r.pid).filter((x): x is string => !!x));
+
+  const toDelete = openRows
+    .filter((p) => p.start > today || !usedSet.has(p.id))
+    .map((p) => p.id);
+  const preserved = openRows.length - toDelete.length;
+
+  if (toDelete.length > 0) {
+    await db.delete(payPeriods).where(inArray(payPeriods.id, toDelete));
+  }
   const { inserted } = await ensureFuturePeriods({ whoId: args.whoId, count: 12 });
-  return { deleted: deletedRows.length, inserted };
+  return { deleted: toDelete.length, inserted, preserved };
 }
 
 export async function moveToReview(id: string, whoId: string): Promise<void> {
