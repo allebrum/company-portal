@@ -640,7 +640,10 @@ export function useSendBookkeeperReport() {
 export function useRecalculatePayPeriods() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.post<{ deleted: number; inserted: number; preserved: number }>('/pay-periods/recalculate'),
+    mutationFn: () =>
+      api.post<{ deleted: number; inserted: number; preserved: number; merged: number }>(
+        '/pay-periods/recalculate',
+      ),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.payPeriods }),
   });
 }
