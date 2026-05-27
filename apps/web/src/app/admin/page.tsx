@@ -690,7 +690,14 @@ function PayTab() {
   return (
     <>
       <Section title="Schedule">
-        <Card className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card className="p-5 space-y-4">
+          <p className="text-[12px] text-gray-500">
+            Schedule changes apply to <strong>upcoming pay periods only</strong>. Already-started periods keep
+            their original dates so existing time entries stay tied to consistent ranges. Each pay period ends
+            <strong> {config.processingBufferDays} day{config.processingBufferDays === 1 ? '' : 's'} before its pay date</strong>
+            {' '}(your current processing buffer); subsequent periods start the day after the prior period ends.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Cadence">
             <Select value={config.cadence} onChange={(e) => patch({ cadence: e.target.value as typeof config.cadence })}>
               <option value="by-date">Monthly · custom dates</option>
@@ -771,6 +778,7 @@ function PayTab() {
                 className="max-w-md"
               />
             </Field>
+          </div>
           </div>
         </Card>
       </Section>
