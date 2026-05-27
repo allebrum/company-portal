@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, Pill, Empty, Section } from '@/components/ui';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
@@ -18,6 +18,12 @@ import {
   useClosePeriod,
   useMovePeriodToReview,
   useReopenPeriod,
+  useSendBookkeeperReport,
+  useSettings,
+  type PayPeriodRow,
+  type EntryRow,
+  type UserRow,
+  type ProjectRow,
 } from '@/hooks/useResources';
 import { useAuth } from '@/hooks/useAuth';
 import {
@@ -37,18 +43,36 @@ export default function ApprovalsPage() {
   const { data: users = [] } = useUsers();
   const { data: projects = [] } = useProjects();
   const { data: periods = [] } = usePayPeriods();
+  const { data: settings } = useSettings();
   const approve = useApproveEntries();
   const reject = useRejectEntries();
   const reopen = useReopenEntries();
   const closeP = useClosePeriod();
   const toReview = useMovePeriodToReview();
   const reopenP = useReopenPeriod();
+  const sendBookkeeper = useSendBookkeeperReport();
 
-  const initialPeriod = periods.find((p) => p.status === 'review')?.id ?? periods[0]?.id ?? '';
-  const [periodId, setPeriodId] = useState<string>(initialPeriod);
+  const [periodId, setPeriodId] = useState<string>('');
+  // Auto-default to the period that contains today, falling back to the
+  // first 'review' or first 'open' period. We only set this once after the
+  // periods list arrives so manual selection isn't clobbered on refetch.
+  useEffect(() => {
+    if (periodId || periods.length === 0) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const current = periods.find((p) => p.startDate <= today && p.endDate >= today);
+    setPeriodId(
+      current?.id
+        ?? periods.find((p) => p.status === 'review')?.id
+        ?? periods.find((p) => p.status === 'open')?.id
+        ?? periods[0]?.id
+        ?? '',
+    );
+  }, [periods, periodId]);
+
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState('Please double-check duration and resubmit.');
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const isPrivileged = can('time_entry.approve');
 
@@ -152,6 +176,15 @@ export default function ApprovalsPage() {
             >
               Approve {selected.size > 0 ? `(${selected.size})` : '(all)'}
             </Button>
+            {period && period.status !== 'closed' && can('pay.manage') && (
+              <Button
+                variant="outline"
+                onClick={() => setReviewOpen(true)}
+                title="Review the period summary and close it out"
+              >
+                Close period…
+              </Button>
+            )}
           </div>
         </Card>
 
@@ -252,6 +285,195 @@ export default function ApprovalsPage() {
           <Field label="Note"><Textarea value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} /></Field>
         </div>
       </Modal>
+
+      {period && (
+        <PayrollReviewModal
+          open={reviewOpen}
+          onClose={() => setReviewOpen(false)}
+          period={period}
+          entries={periodEntries}
+          users={users}
+          projects={projects}
+          bookkeeperEmail={settings?.bookkeeperEmail ?? null}
+          onCloseOnly={async () => {
+            await run(() => closeP.mutateAsync(period.id), `${period.label} closed`);
+            setReviewOpen(false);
+          }}
+          onCloseAndSend={async () => {
+            // Atomic-ish: close first (auto-approves submitted), then email
+            // the report from the clicking admin's connected Gmail. The
+            // bookkeeper sees a single payroll summary per period.
+            try {
+              await closeP.mutateAsync(period.id);
+              await sendBookkeeper.mutateAsync(period.id);
+              toast.success(`${period.label} closed · report emailed to bookkeeper`);
+              setReviewOpen(false);
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : 'Action failed';
+              if (msg === 'bookkeeper_email_not_set') {
+                toast.error('Set a bookkeeper email in Admin → Pay periods first');
+              } else {
+                toast.error(msg);
+              }
+            }
+          }}
+          busy={closeP.isPending || sendBookkeeper.isPending}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * Final-check modal admins see after clicking "Close period…". Shows a
+ * per-employee summary of approved (or about-to-be-approved) hours +
+ * revenue + approvers, plus two CTAs: Close-only (no email) or the
+ * primary "Close & send to bookkeeper" path that hits the new endpoint.
+ *
+ * Disabled-with-hint when `bookkeeperEmail` isn't set so admins can't
+ * land in the surprise-401 case from the server.
+ */
+function PayrollReviewModal({
+  open,
+  onClose,
+  period,
+  entries,
+  users,
+  projects,
+  bookkeeperEmail,
+  onCloseOnly,
+  onCloseAndSend,
+  busy,
+}: {
+  open: boolean;
+  onClose: () => void;
+  period: PayPeriodRow;
+  entries: EntryRow[];
+  users: UserRow[];
+  projects: ProjectRow[];
+  bookkeeperEmail: string | null;
+  onCloseOnly: () => Promise<void>;
+  onCloseAndSend: () => Promise<void>;
+  busy: boolean;
+}) {
+  // Treat both 'submitted' and 'approved' rows as in-scope since "Close"
+  // auto-approves anything still submitted. Closed-period reopens that
+  // happen to land in the modal are equivalent.
+  const usableStatuses = new Set(['submitted', 'approved']);
+  type Row = {
+    name: string;
+    email: string;
+    hours: number;
+    revenue: number;
+    approverNames: Set<string>;
+  };
+  const byUser = new Map<string, Row>();
+  for (const e of entries) {
+    if (!usableStatuses.has(e.status)) continue;
+    const u = users.find((x) => x.id === e.userId);
+    if (!u) continue;
+    let row = byUser.get(e.userId);
+    if (!row) {
+      row = { name: u.name, email: u.email, hours: 0, revenue: 0, approverNames: new Set() };
+      byUser.set(e.userId, row);
+    }
+    row.hours += e.durationMin / 60;
+    const proj = e.projectId ? projects.find((p) => p.id === e.projectId) : null;
+    if (proj?.billable) {
+      const rate = Number(u.billable) || 0;
+      row.revenue += (e.durationMin / 60) * rate;
+    }
+    if (e.approvedBy) {
+      const approver = users.find((x) => x.id === e.approvedBy);
+      if (approver) row.approverNames.add(approver.name);
+    }
+  }
+  const summaries = [...byUser.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const totalHours = summaries.reduce((s, r) => s + r.hours, 0);
+  const totalRev = summaries.reduce((s, r) => s + r.revenue, 0);
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={`Close ${period.label}`}
+      size="lg"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button variant="outline" onClick={() => void onCloseOnly()} disabled={busy} title="Close the period without emailing the bookkeeper">
+            Close period
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => void onCloseAndSend()}
+            disabled={busy || !bookkeeperEmail}
+            title={bookkeeperEmail ? `Email the report to ${bookkeeperEmail}` : 'Set a bookkeeper email in Admin → Pay periods first'}
+          >
+            Close &amp; send to bookkeeper
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="text-sm text-gray-600">
+          <span className="font-semibold text-gray-900">{period.startDate}</span> – <span className="font-semibold text-gray-900">{period.endDate}</span>
+          {' · '}Pay date <span className="font-semibold text-gray-900">{period.payDate}</span>
+          {' · '}Status <Pill tone={PAY_PERIOD_STATUS_PILL[period.status]}>{PAY_PERIOD_STATUS_LABEL[period.status]}</Pill>
+        </div>
+
+        {!bookkeeperEmail && (
+          <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900">
+            No bookkeeper email is set. Closing the period will still work; the report just won't go out.
+            Add one in <span className="font-semibold">Admin → Pay periods</span>.
+          </div>
+        )}
+
+        <div className="border border-gray-200 rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-[11px] uppercase tracking-widest text-gray-500">
+              <tr>
+                <th className="px-3 py-2 text-left">Employee</th>
+                <th className="px-3 py-2 text-right">Hours</th>
+                <th className="px-3 py-2 text-right">Billable</th>
+                <th className="px-3 py-2 text-left">Approvers</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {summaries.length === 0 ? (
+                <tr><td colSpan={4} className="px-3 py-6 text-center text-gray-400">No entries to summarize in this period.</td></tr>
+              ) : (
+                summaries.map((r) => (
+                  <tr key={r.email}>
+                    <td className="px-3 py-2">
+                      <div className="text-gray-900 font-semibold">{r.name}</div>
+                      <div className="text-[11px] text-gray-500">{r.email}</div>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">{r.hours.toFixed(2)}h</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(r.revenue)}</td>
+                    <td className="px-3 py-2 text-[12px] text-gray-600 truncate max-w-[220px]">
+                      {[...r.approverNames].sort().join(', ') || '—'}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+            <tfoot className="bg-gray-50/60">
+              <tr>
+                <td className="px-3 py-2 font-bold text-gray-900">Totals</td>
+                <td className="px-3 py-2 text-right tabular-nums font-bold">{totalHours.toFixed(2)}h</td>
+                <td className="px-3 py-2 text-right tabular-nums font-bold">{fmtMoney(totalRev)}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <p className="text-[12px] text-gray-500">
+          "Close" auto-approves any remaining submitted entries. "Close &amp; send" additionally emails the
+          per-employee table above to <strong>{bookkeeperEmail ?? '—'}</strong> from your connected Gmail.
+        </p>
+      </div>
+    </Modal>
   );
 }

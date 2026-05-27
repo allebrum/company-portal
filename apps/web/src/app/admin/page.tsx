@@ -26,7 +26,6 @@ import {
   usePayPeriods,
   usePayConfig,
   useUpdatePayConfig,
-  useGeneratePeriods,
   useIntegrations,
   useConnectIntegration,
   useDisconnectIntegration,
@@ -642,11 +641,15 @@ function PayTab() {
   const toast = useToast();
   const { data: periods = [] } = usePayPeriods();
   const { data: config } = usePayConfig();
+  const { data: settings } = useSettings();
   const upd = useUpdatePayConfig();
-  const gen = useGeneratePeriods();
-  const [count, setCount] = useState(6);
+  const updSettings = useUpdateSettings();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [bookkeeperEmail, setBookkeeperEmail] = useState('');
+  useEffect(() => {
+    if (settings) setBookkeeperEmail(settings.bookkeeperEmail ?? '');
+  }, [settings?.bookkeeperEmail]);
   // Local mirror of the anchor date so the date input stays controlled
   // while the user types. Synced from server whenever the config changes
   // (e.g. after a successful PATCH from another tab or a fresh load).
@@ -741,33 +744,42 @@ function PayTab() {
           <Field label="Processing buffer (days)">
             <Input type="number" min={0} defaultValue={config.processingBufferDays} onBlur={(e) => patch({ processingBufferDays: Number(e.target.value) || 0 })} />
           </Field>
-          <Field label="Pay delay (days)">
-            <Input type="number" min={0} defaultValue={config.payDelayDays} onBlur={(e) => patch({ payDelayDays: Number(e.target.value) || 0 })} />
-          </Field>
           <Field label="Auto-close at cutoff">
             <div className="pt-2"><Checkbox label="Auto-close periods at the approval cutoff" checked={config.autoClose} onChange={(v) => patch({ autoClose: v })} /></div>
           </Field>
+
+          <div className="md:col-span-2">
+            <Field
+              label="Bookkeeper email"
+              hint="Where the payroll report goes when an admin clicks 'Close & send to bookkeeper' on a closed period."
+            >
+              <Input
+                type="email"
+                value={bookkeeperEmail}
+                onChange={(e) => setBookkeeperEmail(e.target.value)}
+                onBlur={async () => {
+                  const next = bookkeeperEmail.trim() === '' ? null : bookkeeperEmail.trim();
+                  if (next === (settings?.bookkeeperEmail ?? null)) return;
+                  try {
+                    await updSettings.mutateAsync({ bookkeeperEmail: next });
+                    toast.success('Bookkeeper email updated');
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : 'Could not save bookkeeper email');
+                  }
+                }}
+                placeholder="bookkeeper@allebrum.com"
+                className="max-w-md"
+              />
+            </Field>
+          </div>
         </Card>
       </Section>
 
       <Section
         title="Periods"
         action={
-          <div className="flex items-center gap-2">
-            <Input className="w-24" type="number" min={1} max={24} value={count} onChange={(e) => setCount(Number(e.target.value) || 1)} />
-            <Button
-              variant="primary"
-              onClick={async () => {
-                try {
-                  const { inserted } = await gen.mutateAsync({ count });
-                  toast.success(`${inserted} period${inserted === 1 ? '' : 's'} generated`);
-                } catch (e) {
-                  toast.error(e instanceof Error ? e.message : 'Generate failed');
-                }
-              }}
-            >
-              Generate next {count}
-            </Button>
+          <div className="text-[11px] text-gray-400 italic">
+            Generated automatically from the schedule above.
           </div>
         }
       >

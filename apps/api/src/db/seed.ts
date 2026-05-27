@@ -219,7 +219,6 @@ async function main(): Promise<void> {
     weekendRule: 'prior',
     anchor: '2026-04-06',
     processingBufferDays: 5,
-    payDelayDays: 7,
     autoClose: true,
     approverId: userIds.senica!,
   });

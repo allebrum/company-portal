@@ -5,6 +5,7 @@ import type { PayConfigInput } from '@allebrum/shared';
 import { appendActivity } from './activity.js';
 import { emit } from '../realtime/emit.js';
 import { EV } from '@allebrum/shared';
+import { regenerateFuturePeriods } from './payPeriods.js';
 
 export async function getConfig(): Promise<PayConfig> {
   const rows = await db.select().from(payConfig).limit(1);
@@ -25,7 +26,6 @@ export async function updateConfig(patch: Partial<PayConfigInput>, whoId: string
   if (patch.weekendRule !== undefined) upd.weekendRule = patch.weekendRule;
   if (patch.anchor !== undefined) upd.anchor = patch.anchor;
   if (patch.processingBufferDays !== undefined) upd.processingBufferDays = patch.processingBufferDays;
-  if (patch.payDelayDays !== undefined) upd.payDelayDays = patch.payDelayDays;
   if (patch.autoClose !== undefined) upd.autoClose = patch.autoClose;
   if (patch.approverId !== undefined) upd.approverId = patch.approverId;
   const [updated] = await db
@@ -36,5 +36,14 @@ export async function updateConfig(patch: Partial<PayConfigInput>, whoId: string
   if (!updated) throw new Error('pay_config update failed');
   emit.toOrg(EV.PAY_CONFIG_UPDATED, { id: 'singleton', by: whoId, at: new Date().toISOString() });
   await appendActivity({ whoId, kind: 'period.config', target: 'Pay schedule updated' });
+  // Regenerate future periods from the new schedule so admins never need
+  // to manually click "Generate". Errors logged but don't fail the save —
+  // the config row is already updated and a subsequent /pay-periods GET
+  // will lazy-fill via ensureFuturePeriods.
+  try {
+    await regenerateFuturePeriods({ whoId });
+  } catch (e) {
+    console.error('[pay-config] regenerateFuturePeriods failed', e);
+  }
   return updated;
 }

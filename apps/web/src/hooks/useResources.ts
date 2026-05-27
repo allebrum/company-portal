@@ -186,7 +186,6 @@ export type PayConfigRow = {
   weekendRule: 'prior' | 'after' | 'as-is';
   anchor: string | null;
   processingBufferDays: number;
-  payDelayDays: number;
   autoClose: boolean;
   approverId: string | null;
 };
@@ -631,6 +630,11 @@ export function useMovePeriodToReview() {
   return useMutation({
     mutationFn: (id: string) => api.post(`/pay-periods/${id}/review`),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.payPeriods }),
+  });
+}
+export function useSendBookkeeperReport() {
+  return useMutation({
+    mutationFn: (id: string) => api.post<{ ok: true; sentTo: string; rows: number }>(`/pay-periods/${id}/send-bookkeeper`),
   });
 }
 

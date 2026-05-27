@@ -372,7 +372,6 @@ export const payConfig = pgTable('pay_config', {
   weekendRule: weekendRuleEnum('weekend_rule').notNull().default('prior'),
   anchor: date('anchor'),
   processingBufferDays: integer('processing_buffer_days').notNull().default(5),
-  payDelayDays: integer('pay_delay_days').notNull().default(7),
   autoClose: boolean('auto_close').notNull().default(true),
   approverId: uuid('approver_id').references(() => users.id, { onDelete: 'set null' }),
   updatedAt: updTs(),

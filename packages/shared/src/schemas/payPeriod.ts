@@ -14,8 +14,12 @@ export const PayConfigSchema = z.object({
   payDates: z.array(PayDateRefSchema).max(8).default([15, 'last']),
   weekendRule: z.enum(WEEKEND_RULES).default('prior'),
   anchor: isoDate.optional().nullable(),
+  // The single buffer governing both the gap between period end and pay
+  // date and (implicitly) the approval cutoff. `period_end = pay_date -
+  // processingBufferDays`. Approval cutoff = period_end. Dropped the
+  // separate payDelayDays field — it was always semantically the same
+  // thing in this org's workflow.
   processingBufferDays: z.number().int().min(0).max(60).default(5),
-  payDelayDays: z.number().int().min(0).max(60).default(7),
   autoClose: z.boolean().default(true),
   approverId: z.string().uuid().nullable().optional(),
 });

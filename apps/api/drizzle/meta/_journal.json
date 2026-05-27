@@ -85,6 +85,13 @@
       "when": 1779833281242,
       "tag": "0011_wealthy_raza",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1779903584385,
+      "tag": "0012_short_psynapse",
+      "breakpoints": true
     }
   ]
 }

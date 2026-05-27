@@ -82,6 +82,93 @@ export async function sendInviteEmail(args: {
   await send(args.senderUserId, args.to, subject, html, text);
 }
 
+/**
+ * Payroll-summary email to the bookkeeper. Per-employee table inline in
+ * the body (HTML + plain-text). Fires from the admin who clicked the
+ * "Close & send" CTA — the From: is their connected Gmail.
+ */
+export type PayrollSummaryRow = {
+  name: string;
+  email: string;
+  hours: number;
+  revenue: number;
+  approvers: string[];
+  statuses: string[];
+};
+export async function sendPayrollReportEmail(args: {
+  senderUserId: string | null;
+  to: string;
+  period: { label: string; startDate: string; endDate: string; payDate: string; status: string };
+  summaries: PayrollSummaryRow[];
+}): Promise<void> {
+  const { period, summaries } = args;
+  const totalHours = summaries.reduce((s, r) => s + r.hours, 0);
+  const totalRev = summaries.reduce((s, r) => s + r.revenue, 0);
+  const fmtHrs = (h: number) => `${h.toFixed(2)}h`;
+  const fmt$ = (v: number) => v.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+
+  const subject = `Payroll · ${period.label}`;
+  const text = [
+    `Pay period: ${period.label}`,
+    `Range:      ${period.startDate} – ${period.endDate}`,
+    `Pay date:   ${period.payDate}`,
+    `Status:     ${period.status}`,
+    '',
+    'Per-employee summary:',
+    ...summaries.map(
+      (r) =>
+        `  ${r.name} <${r.email}>  ${fmtHrs(r.hours)}  ${fmt$(r.revenue)}` +
+        `  (approved by: ${r.approvers.join(', ') || '—'})`,
+    ),
+    '',
+    `Totals: ${fmtHrs(totalHours)}  ${fmt$(totalRev)}`,
+    '',
+    '— Sent from the Allebrum portal',
+  ].join('\n');
+
+  const rowsHtml = summaries
+    .map(
+      (r) => `
+      <tr>
+        <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;">${esc(r.name)}<br><span style="color:#6b7280;font-size:12px;">${esc(r.email)}</span></td>
+        <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;text-align:right;font-variant-numeric:tabular-nums;">${esc(fmtHrs(r.hours))}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;text-align:right;font-variant-numeric:tabular-nums;">${esc(fmt$(r.revenue))}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;color:#6b7280;font-size:12px;">${esc(r.approvers.join(', ') || '—')}</td>
+      </tr>`,
+    )
+    .join('');
+
+  const html = wrap(`
+    <h2 style="margin:0 0 6px 0;font-size:20px;color:#111;">Payroll · ${esc(period.label)}</h2>
+    <p style="margin:0 0 16px 0;color:#374151;font-size:13px;">
+      <strong>Range:</strong> ${esc(period.startDate)} – ${esc(period.endDate)}<br>
+      <strong>Pay date:</strong> ${esc(period.payDate)}<br>
+      <strong>Status:</strong> ${esc(period.status)}
+    </p>
+    <table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:14px;">
+      <thead>
+        <tr>
+          <th align="left" style="padding:8px 10px;border-bottom:2px solid #e5e7eb;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;">Employee</th>
+          <th align="right" style="padding:8px 10px;border-bottom:2px solid #e5e7eb;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;">Hours</th>
+          <th align="right" style="padding:8px 10px;border-bottom:2px solid #e5e7eb;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;">Billable</th>
+          <th align="left" style="padding:8px 10px;border-bottom:2px solid #e5e7eb;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;">Approvers</th>
+        </tr>
+      </thead>
+      <tbody>${rowsHtml || '<tr><td colspan="4" style="padding:16px;text-align:center;color:#9ca3af;font-size:13px;">No entries in this period.</td></tr>'}</tbody>
+      <tfoot>
+        <tr>
+          <td style="padding:10px;font-weight:600;color:#111;">Totals</td>
+          <td style="padding:10px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums;">${esc(fmtHrs(totalHours))}</td>
+          <td style="padding:10px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums;">${esc(fmt$(totalRev))}</td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+  `);
+
+  await send(args.senderUserId, args.to, subject, html, text);
+}
+
 export async function sendResetEmail(args: {
   senderUserId: string | null;
   to: string;
