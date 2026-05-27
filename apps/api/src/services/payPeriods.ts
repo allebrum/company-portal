@@ -246,36 +246,49 @@ export async function ensureFuturePeriods(args: {
 }
 
 /**
- * Walk all open periods in start-date order; whenever two overlap (the
+ * Walk *all* pay periods in start-date order; whenever two overlap (the
  * next period's start ≤ the prior period's end), merge them: pick a
- * keeper (more entries → newer → first wins), reassign the loser's
- * time_entries.pay_period_id to the keeper, then delete the loser.
+ * keeper, reassign the loser's `time_entries.pay_period_id` to the
+ * keeper (regardless of entry status — submitted, approved, draft all
+ * follow), then delete the loser.
+ *
+ * Status was previously a filter ("only consider open periods") which
+ * meant any pair where one side had been moved to `review` or `closed`
+ * sailed past consolidation untouched. Now status is a **keeper-pref
+ * signal** instead:
+ *
+ *   closed (3) > review (2) > open (1) → more entries → older createdAt
+ *
+ * Closed periods are payroll history and must not be deleted. If both
+ * sides of an overlap are closed we skip the pair (a true human-needs-to-
+ * look-at-this situation — two payroll runs were already executed for
+ * overlapping ranges). Otherwise the higher-status row wins and the
+ * lower-status one's entries follow it before the row is deleted.
  *
  * This is the cleanup that `regenerateFuturePeriods`'s "delete empty
- * stale rows" rule can't do on its own — when prior config drift produced
- * overlapping periods AND time entries got bucketed into BOTH of them,
- * neither half is "empty" and both survived. After consolidation we have
- * one canonical period per date range and the generator can chain off it
- * cleanly.
+ * stale rows" rule can't do on its own — when prior config drift
+ * produced overlapping periods AND admins took action on entries in
+ * either half (so neither is empty AND one or both are non-`open`),
+ * both rows used to survive. They no longer do.
  */
 export async function consolidateOverlappingPeriods(args: { whoId: string }): Promise<{
   merged: number;
 }> {
-  const openRows = await db
+  const rows = await db
     .select({
       id: payPeriods.id,
       start: payPeriods.startDate,
       end: payPeriods.endDate,
+      status: payPeriods.status,
       createdAt: payPeriods.createdAt,
     })
     .from(payPeriods)
-    .where(eq(payPeriods.status, 'open'))
     .orderBy(asc(payPeriods.startDate), asc(payPeriods.createdAt));
 
-  if (openRows.length < 2) return { merged: 0 };
+  if (rows.length < 2) return { merged: 0 };
 
   // Count entries per period so the keeper-pick prefers the better-populated
-  // row. (Two zero-entry overlaps fall back to the older createdAt.)
+  // row. (Two zero-entry overlaps fall back to status / older createdAt.)
   const entryCounts = new Map<string, number>();
   const entryRows = await db
     .select({ pid: timeEntries.payPeriodId })
@@ -286,23 +299,36 @@ export async function consolidateOverlappingPeriods(args: { whoId: string }): Pr
     entryCounts.set(r.pid, (entryCounts.get(r.pid) ?? 0) + 1);
   }
 
+  const statusRank = (s: string) => (s === 'closed' ? 3 : s === 'review' ? 2 : 1);
+
   let merged = 0;
-  // Tracks the keeper for the current overlap "cluster" — start with first
-  // row and absorb any subsequent rows that overlap with it.
-  let keeper = openRows[0];
-  for (let i = 1; i < openRows.length; i++) {
-    const cur = openRows[i];
+  // Tracks the keeper for the current overlap "cluster" — start with the
+  // first row and absorb any subsequent rows that overlap with it.
+  let keeper = rows[0];
+  for (let i = 1; i < rows.length; i++) {
+    const cur = rows[i];
     if (cur.start <= keeper.end) {
-      // Overlap. Decide which row survives.
+      // Overlap.
+      // Refuse to mutate closed-vs-closed: that's two payroll runs that
+      // already ran against overlapping ranges and needs eyes on it.
+      if (keeper.status === 'closed' && cur.status === 'closed') {
+        keeper = cur;
+        continue;
+      }
       const keeperCount = entryCounts.get(keeper.id) ?? 0;
       const curCount = entryCounts.get(cur.id) ?? 0;
+      const curRank = statusRank(cur.status);
+      const keeperRank = statusRank(keeper.status);
       const curWins =
-        curCount > keeperCount ||
-        (curCount === keeperCount && cur.createdAt < keeper.createdAt);
+        curRank > keeperRank ||
+        (curRank === keeperRank && curCount > keeperCount) ||
+        (curRank === keeperRank && curCount === keeperCount && cur.createdAt < keeper.createdAt);
       const winner = curWins ? cur : keeper;
       const loser = curWins ? keeper : cur;
 
-      // Reassign entries from loser → winner so payroll history is not lost.
+      // Reassign every entry on the loser to the winner — submitted,
+      // approved, rejected, draft all come along so admin actions
+      // already taken aren't orphaned. Then delete the loser row.
       await db
         .update(timeEntries)
         .set({ payPeriodId: winner.id, updatedAt: new Date().toISOString() })
