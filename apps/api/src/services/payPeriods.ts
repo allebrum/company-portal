@@ -1,10 +1,15 @@
-import { eq, and, gte, lte, asc } from 'drizzle-orm';
+import { eq, and, gt, gte, lte, asc, desc, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { payPeriods, payConfig, timeEntries, type PayPeriod } from '../db/schema.js';
+import {
+  payPeriods, payConfig, timeEntries, users, projects, type PayPeriod,
+} from '../db/schema.js';
 import type { PayConfigInput, PayDateRef } from '@allebrum/shared';
 import { appendActivity } from './activity.js';
 import { emit } from '../realtime/emit.js';
 import { EV } from '@allebrum/shared';
+import { getSettings } from './settings.js';
+import { sendPayrollReportEmail } from './mail.js';
+import { HttpError } from '../middleware/errorHandler.js';
 
 // ---- Date utilities (ported from project/app/data.jsx) ----
 function isoDate(d: Date): string {
@@ -49,8 +54,10 @@ export function generatePeriodSchedule(
   count = 6,
   fromDateIso?: string,
 ): GeneratedPeriod[] {
-  const processingBufferDays = cfg.processingBufferDays ?? 5;
-  const payDelayDays = cfg.payDelayDays ?? 7;
+  // Single buffer governs both the gap-to-pay-date AND the approval cutoff.
+  // period_end = pay_date − buffer. approval_cutoff = period_end (admins
+  // approve by the time the period closes; payment hits N days later).
+  const buffer = cfg.processingBufferDays ?? 5;
   const weekendRule = cfg.weekendRule ?? 'prior';
   const out: GeneratedPeriod[] = [];
   const today = fromDateIso ? new Date(fromDateIso) : new Date();
@@ -74,15 +81,14 @@ export function generatePeriodSchedule(
       for (const dayRef of sorted) {
         const rawPayDate = resolveDayOfMonth(year, month, dayRef);
         const payDate = applyWeekendRule(rawPayDate, weekendRule);
-        const periodEnd = addDays(payDate, -payDelayDays);
+        const periodEnd = addDays(payDate, -buffer);
         const periodStart = prevPeriodEnd ? addDays(prevPeriodEnd, 1) : addDays(periodEnd, -14);
-        const approvalCutoff = addDays(periodEnd, processingBufferDays);
         prevPeriodEnd = periodEnd;
         if (payDate >= today) {
           out.push({
             start: isoDate(periodStart),
             end: isoDate(periodEnd),
-            approvalCutoff: isoDate(approvalCutoff),
+            approvalCutoff: isoDate(periodEnd),
             payDate: isoDate(payDate),
             label: fmtRange(periodStart, periodEnd),
           });
@@ -97,13 +103,12 @@ export function generatePeriodSchedule(
     while (addDays(start, stepDays - 1) < today) start = addDays(start, stepDays);
     for (let i = 0; i < count; i++) {
       const end = addDays(start, stepDays - 1);
-      const rawPayDate = addDays(end, payDelayDays);
+      const rawPayDate = addDays(end, buffer);
       const payDate = applyWeekendRule(rawPayDate, weekendRule);
-      const cutoff = addDays(end, processingBufferDays);
       out.push({
         start: isoDate(start),
         end: isoDate(end),
-        approvalCutoff: isoDate(cutoff),
+        approvalCutoff: isoDate(end),
         payDate: isoDate(payDate),
         label: fmtRange(start, end),
       });
@@ -143,7 +148,6 @@ export async function generateAndInsert(args: {
       weekendRule: cfg.weekendRule,
       anchor: cfg.anchor,
       processingBufferDays: cfg.processingBufferDays,
-      payDelayDays: cfg.payDelayDays,
       autoClose: cfg.autoClose,
       approverId: cfg.approverId,
     },
@@ -182,6 +186,66 @@ export async function generateAndInsert(args: {
   return { inserted: toInsert.length };
 }
 
+/**
+ * Lazily ensure the workspace has a runway of future pay periods so
+ * admins never have to manually click "Generate". Idempotent: cheap to
+ * call on every `GET /pay-periods` request. Skips work entirely when
+ * `count` future open periods already exist.
+ *
+ * `whoId` is optional because the lazy-fill path runs in the context of
+ * whichever user happens to be loading the Approvals page; the activity
+ * log just records that user as the trigger.
+ */
+export async function ensureFuturePeriods(args: {
+  whoId?: string;
+  count?: number;
+}): Promise<{ inserted: number }> {
+  const targetCount = args.count ?? 12;
+  const today = isoDate(new Date());
+  // Count future open periods that haven't started yet.
+  const future = await db
+    .select({ start: payPeriods.startDate })
+    .from(payPeriods)
+    .where(and(eq(payPeriods.status, 'open'), gte(payPeriods.startDate, today)))
+    .orderBy(asc(payPeriods.startDate));
+  if (future.length >= 3) return { inserted: 0 };
+  // Generate forward from the latest existing end+1 (or today if none).
+  const lastEnd = await db
+    .select({ end: payPeriods.endDate })
+    .from(payPeriods)
+    .orderBy(desc(payPeriods.endDate))
+    .limit(1);
+  const fromDate = lastEnd[0]?.end ?? today;
+  const startCursor = lastEnd[0] ? addDays(new Date(lastEnd[0].end + 'T00:00:00'), 1) : new Date(today + 'T00:00:00');
+  return generateAndInsert({
+    whoId: args.whoId ?? '00000000-0000-0000-0000-000000000000',
+    count: targetCount,
+    fromDate: isoDate(startCursor),
+  });
+  // The reference to `fromDate` keeps the variable used; the generator's
+  // internal "from" cursor is what matters for the next period boundary.
+  void fromDate;
+}
+
+/**
+ * Called after `updatePayConfig` persists a new schedule. Drops every
+ * still-`open` period whose start_date is strictly in the future so the
+ * regeneration produces a clean schedule. Closed / review periods are
+ * preserved (we never retroactively rewrite payroll history).
+ */
+export async function regenerateFuturePeriods(args: { whoId: string }): Promise<{
+  deleted: number;
+  inserted: number;
+}> {
+  const today = isoDate(new Date());
+  const deletedRows = await db
+    .delete(payPeriods)
+    .where(and(eq(payPeriods.status, 'open'), gt(payPeriods.startDate, today)))
+    .returning({ id: payPeriods.id });
+  const { inserted } = await ensureFuturePeriods({ whoId: args.whoId, count: 12 });
+  return { deleted: deletedRows.length, inserted };
+}
+
 export async function moveToReview(id: string, whoId: string): Promise<void> {
   await db.update(payPeriods).set({ status: 'review', updatedAt: new Date().toISOString() }).where(eq(payPeriods.id, id));
   emit.toOrg(EV.PAY_PERIOD_UPDATED, { id, by: whoId, at: new Date().toISOString() });
@@ -208,6 +272,123 @@ export async function closePeriod(id: string, whoId: string): Promise<{ autoAppr
   }
   await appendActivity({ whoId, kind: 'period.close', target: `Pay period closed` });
   return { autoApproved: result.length };
+}
+
+/**
+ * Build a per-employee summary of a period's time entries and email it to
+ * the workspace's bookkeeper. Sender is the admin who triggered the action
+ * — their connected Gmail (F4) is the From: address. When no sender is
+ * connected, the mail service logs the body and no-ops (existing fallback
+ * pattern; never throws).
+ *
+ * 400 `bookkeeper_email_not_set` when no recipient is configured.
+ */
+export async function sendPayrollReportToBookkeeper(
+  periodId: string,
+  whoId: string,
+): Promise<{ ok: true; sentTo: string; rows: number }> {
+  const settings = await getSettings();
+  const to = settings.bookkeeperEmail;
+  if (!to || to.trim() === '') {
+    throw new HttpError(400, 'bookkeeper_email_not_set');
+  }
+  const periodRows = await db
+    .select()
+    .from(payPeriods)
+    .where(eq(payPeriods.id, periodId))
+    .limit(1);
+  const period = periodRows[0];
+  if (!period) throw new HttpError(404, 'period_not_found');
+
+  // Load entries for the period plus a denormalized user / project lookup
+  // so the email can render readable rows without an extra n+1.
+  const entries = await db
+    .select()
+    .from(timeEntries)
+    .where(eq(timeEntries.payPeriodId, periodId));
+  const userIds = [...new Set(entries.map((e) => e.userId))];
+  const approverIds = [...new Set(entries.map((e) => e.approvedBy).filter((x): x is string => !!x))];
+  const projectIds = [...new Set(entries.map((e) => e.projectId).filter((x): x is string => !!x))];
+  const allUserIds = [...new Set([...userIds, ...approverIds])];
+  const [userRows, projectRows] = await Promise.all([
+    allUserIds.length
+      ? db.select({ id: users.id, name: users.name, email: users.email, billable: users.billable }).from(users).where(inArray(users.id, allUserIds))
+      : Promise.resolve([] as Array<{ id: string; name: string; email: string; billable: string }>),
+    projectIds.length
+      ? db.select({ id: projects.id, name: projects.name, billable: projects.billable }).from(projects).where(inArray(projects.id, projectIds))
+      : Promise.resolve([] as Array<{ id: string; name: string; billable: boolean }>),
+  ]);
+  const userById = new Map(userRows.map((u) => [u.id, u]));
+  const projectById = new Map(projectRows.map((p) => [p.id, p]));
+
+  // Per-employee aggregation.
+  type Summary = {
+    userId: string;
+    name: string;
+    email: string;
+    durationMin: number;
+    revenue: number;
+    approverIds: Set<string>;
+    statuses: Set<string>;
+  };
+  const byUser = new Map<string, Summary>();
+  for (const e of entries) {
+    const u = userById.get(e.userId);
+    if (!u) continue;
+    let s = byUser.get(e.userId);
+    if (!s) {
+      s = {
+        userId: e.userId,
+        name: u.name,
+        email: u.email,
+        durationMin: 0,
+        revenue: 0,
+        approverIds: new Set(),
+        statuses: new Set(),
+      };
+      byUser.set(e.userId, s);
+    }
+    s.durationMin += e.durationMin;
+    s.statuses.add(e.status);
+    if (e.approvedBy) s.approverIds.add(e.approvedBy);
+    const proj = e.projectId ? projectById.get(e.projectId) : undefined;
+    if (proj?.billable) {
+      const rate = Number(u.billable) || 0;
+      s.revenue += (e.durationMin / 60) * rate;
+    }
+  }
+
+  const summaries = [...byUser.values()]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((s) => ({
+      name: s.name,
+      email: s.email,
+      hours: s.durationMin / 60,
+      revenue: s.revenue,
+      approvers: [...s.approverIds]
+        .map((id) => userById.get(id)?.name ?? 'Unknown')
+        .sort(),
+      statuses: [...s.statuses].sort(),
+    }));
+
+  await sendPayrollReportEmail({
+    senderUserId: whoId,
+    to,
+    period: {
+      label: period.label,
+      startDate: period.startDate,
+      endDate: period.endDate,
+      payDate: period.payDate,
+      status: period.status,
+    },
+    summaries,
+  });
+  await appendActivity({
+    whoId,
+    kind: 'pay.bookkeeper_sent',
+    target: `${period.label} → ${to}`,
+  });
+  return { ok: true, sentTo: to, rows: summaries.length };
 }
 
 export async function reopenPeriod(id: string, whoId: string): Promise<void> {
