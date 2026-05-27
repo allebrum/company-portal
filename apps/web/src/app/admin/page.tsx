@@ -26,6 +26,7 @@ import {
   usePayPeriods,
   usePayConfig,
   useUpdatePayConfig,
+  useRecalculatePayPeriods,
   useIntegrations,
   useConnectIntegration,
   useDisconnectIntegration,
@@ -644,6 +645,7 @@ function PayTab() {
   const { data: settings } = useSettings();
   const upd = useUpdatePayConfig();
   const updSettings = useUpdateSettings();
+  const recalc = useRecalculatePayPeriods();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [bookkeeperEmail, setBookkeeperEmail] = useState('');
@@ -786,8 +788,30 @@ function PayTab() {
       <Section
         title="Periods"
         action={
-          <div className="text-[11px] text-gray-400 italic">
-            Generated automatically from the schedule above.
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] text-gray-400 italic">
+              Generated automatically from the schedule above.
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                try {
+                  const r = await recalc.mutateAsync();
+                  const parts = [];
+                  if (r.deleted) parts.push(`${r.deleted} stale removed`);
+                  parts.push(`${r.inserted} generated`);
+                  if (r.preserved) parts.push(`${r.preserved} preserved`);
+                  toast.success(`Recalculated · ${parts.join(' · ')}`);
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : 'Recalculate failed');
+                }
+              }}
+              disabled={recalc.isPending}
+              title="Force-rebuild upcoming periods to match the schedule above. Periods with logged time stay; empty + future-dated ones get cleaned up."
+            >
+              Recalculate pay periods
+            </Button>
           </div>
         }
       >

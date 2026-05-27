@@ -10,6 +10,7 @@ import {
   closePeriod,
   reopenPeriod,
   ensureFuturePeriods,
+  regenerateFuturePeriods,
   sendPayrollReportToBookkeeper,
 } from '../services/payPeriods.js';
 
@@ -75,6 +76,23 @@ payPeriodsRouter.post('/:id/reopen', requirePermission('pay.manage'), async (req
     const me = req.session.user!;
     await reopenPeriod(req.params.id!, me.userId);
     res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Force a clean rebuild of upcoming pay periods. Same path that runs on
+ * pay-config save, exposed to admins as a manual button so they can clean
+ * up stale rows (e.g. periods generated under a prior `payDelayDays` /
+ * `payDates` config) without having to re-save the config. Returns
+ * `{ deleted, inserted, preserved }` so the UI can toast a summary.
+ */
+payPeriodsRouter.post('/recalculate', requirePermission('pay.manage'), async (req, res, next) => {
+  try {
+    const me = req.session.user!;
+    const result = await regenerateFuturePeriods({ whoId: me.userId });
+    res.json(result);
   } catch (e) {
     next(e);
   }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Card, Pill, Empty, Section } from '@/components/ui';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
@@ -29,7 +29,7 @@ import { useAuth } from '@/hooks/useAuth';
 import {
   fmtMins,
   fmtMoney,
-  fmtTimeRange,
+  fmtClock,
   ENTRY_STATUS_LABEL,
   ENTRY_STATUS_PILL,
   PAY_PERIOD_STATUS_LABEL,
@@ -220,17 +220,19 @@ export default function ApprovalsPage() {
           <Empty title="No entries in this period" />
         ) : (
           <Card>
-            <div className="overflow-x-auto"><table className="w-full text-sm min-w-[640px]">
+            <div className="overflow-x-auto"><table className="w-full text-sm min-w-[820px]">
               <thead className="text-left text-[11px] uppercase text-gray-400 border-b border-gray-100">
                 <tr>
-                  <th className="px-4 py-3 w-10"></th>
-                  <th className="px-4 py-3">When</th>
-                  <th className="px-4 py-3">Who</th>
-                  <th className="px-4 py-3">Project</th>
-                  <th className="px-4 py-3">Note</th>
-                  <th className="px-4 py-3 text-right">Duration</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3"></th>
+                  <th className="px-3 py-3 w-10"></th>
+                  <th className="px-3 py-3">Date</th>
+                  <th className="px-3 py-3 text-right">Start</th>
+                  <th className="px-3 py-3 text-right">End</th>
+                  <th className="px-3 py-3 text-right">Duration</th>
+                  <th className="px-3 py-3">Who</th>
+                  <th className="px-3 py-3">Project</th>
+                  <th className="px-3 py-3">Note</th>
+                  <th className="px-3 py-3">Status</th>
+                  <th className="px-3 py-3"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -244,7 +246,7 @@ export default function ApprovalsPage() {
                       className={`hover:bg-gray-50 ${selectable ? 'cursor-pointer' : ''}`}
                       onClick={() => { if (selectable) toggleRow(e.id); }}
                     >
-                      <td className="px-4 py-3" onClick={(ev) => ev.stopPropagation()}>
+                      <td className="px-3 py-3" onClick={(ev) => ev.stopPropagation()}>
                         {selectable && (
                           <input
                             type="checkbox"
@@ -254,26 +256,25 @@ export default function ApprovalsPage() {
                           />
                         )}
                       </td>
-                      <td className="px-4 py-3 text-gray-700 tabular-nums">
-                        <div>{e.startIso.slice(0, 10)}</div>
-                        <div className="text-[11px] text-gray-500">{fmtTimeRange(e.startIso, e.endIso)}</div>
-                      </td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-3 text-gray-700 tabular-nums whitespace-nowrap">{e.startIso.slice(0, 10)}</td>
+                      <td className="px-3 py-3 text-right text-gray-700 tabular-nums whitespace-nowrap">{fmtClock(e.startIso)}</td>
+                      <td className="px-3 py-3 text-right text-gray-700 tabular-nums whitespace-nowrap">{e.endIso ? fmtClock(e.endIso) : '—'}</td>
+                      <td className="px-3 py-3 text-right tabular-nums font-semibold whitespace-nowrap">{fmtMins(e.durationMin)}</td>
+                      <td className="px-3 py-3">
                         <div className="flex items-center gap-2">
                           <Avatar user={u} size={20} />
-                          <span className="text-gray-700">{u?.name}</span>
+                          <span className="text-gray-700 whitespace-nowrap">{u?.name}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-gray-700">{proj?.name ?? '—'}</td>
-                      <td className="px-4 py-3 text-gray-600 max-w-[260px]">
+                      <td className="px-3 py-3 text-gray-700">{proj?.name ?? '—'}</td>
+                      <td className="px-3 py-3 text-gray-600 max-w-[260px]">
                         <div className="truncate">{e.note}</div>
                         {e.status === 'rejected' && e.rejectionNote && (
                           <div className="text-[11px] text-red-600 mt-0.5 truncate">↩ {e.rejectionNote}</div>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums font-semibold">{fmtMins(e.durationMin)}</td>
-                      <td className="px-4 py-3"><Pill tone={ENTRY_STATUS_PILL[e.status]}>{ENTRY_STATUS_LABEL[e.status]}</Pill></td>
-                      <td className="px-4 py-3 text-right" onClick={(ev) => ev.stopPropagation()}>
+                      <td className="px-3 py-3"><Pill tone={ENTRY_STATUS_PILL[e.status]}>{ENTRY_STATUS_LABEL[e.status]}</Pill></td>
+                      <td className="px-3 py-3 text-right" onClick={(ev) => ev.stopPropagation()}>
                         {e.status === 'approved' && (
                           <Button variant="ghost" size="sm" onClick={() => run(() => reopen.mutateAsync([e.id]), 'Entry reopened')}>Reopen</Button>
                         )}
@@ -389,11 +390,13 @@ function PayrollReviewModal({
   // happen to land in the modal are equivalent.
   const usableStatuses = new Set(['submitted', 'approved']);
   type Row = {
+    userId: string;
     name: string;
     email: string;
     hours: number;
     revenue: number;
     approverNames: Set<string>;
+    entries: EntryRow[];
   };
   const byUser = new Map<string, Row>();
   for (const e of entries) {
@@ -402,10 +405,19 @@ function PayrollReviewModal({
     if (!u) continue;
     let row = byUser.get(e.userId);
     if (!row) {
-      row = { name: u.name, email: u.email, hours: 0, revenue: 0, approverNames: new Set() };
+      row = {
+        userId: e.userId,
+        name: u.name,
+        email: u.email,
+        hours: 0,
+        revenue: 0,
+        approverNames: new Set(),
+        entries: [],
+      };
       byUser.set(e.userId, row);
     }
     row.hours += e.durationMin / 60;
+    row.entries.push(e);
     const proj = e.projectId ? projects.find((p) => p.id === e.projectId) : null;
     if (proj?.billable) {
       const rate = Number(u.billable) || 0;
@@ -419,6 +431,15 @@ function PayrollReviewModal({
   const summaries = [...byUser.values()].sort((a, b) => a.name.localeCompare(b.name));
   const totalHours = summaries.reduce((s, r) => s + r.hours, 0);
   const totalRev = summaries.reduce((s, r) => s + r.revenue, 0);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpanded = (userId: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  };
 
   return (
     <Modal
@@ -461,6 +482,7 @@ function PayrollReviewModal({
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-[11px] uppercase tracking-widest text-gray-500">
               <tr>
+                <th className="px-3 py-2 text-left w-6"></th>
                 <th className="px-3 py-2 text-left">Employee</th>
                 <th className="px-3 py-2 text-right">Hours</th>
                 <th className="px-3 py-2 text-right">Billable</th>
@@ -469,25 +491,74 @@ function PayrollReviewModal({
             </thead>
             <tbody className="divide-y divide-gray-100">
               {summaries.length === 0 ? (
-                <tr><td colSpan={4} className="px-3 py-6 text-center text-gray-400">No entries to summarize in this period.</td></tr>
+                <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">No entries to summarize in this period.</td></tr>
               ) : (
-                summaries.map((r) => (
-                  <tr key={r.email}>
-                    <td className="px-3 py-2">
-                      <div className="text-gray-900 font-semibold">{r.name}</div>
-                      <div className="text-[11px] text-gray-500">{r.email}</div>
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{r.hours.toFixed(2)}h</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(r.revenue)}</td>
-                    <td className="px-3 py-2 text-[12px] text-gray-600 truncate max-w-[220px]">
-                      {[...r.approverNames].sort().join(', ') || '—'}
-                    </td>
-                  </tr>
-                ))
+                summaries.map((r) => {
+                  const isOpen = expanded.has(r.userId);
+                  return (
+                    <Fragment key={r.userId}>
+                      <tr
+                        onClick={() => toggleExpanded(r.userId)}
+                        className="cursor-pointer hover:bg-gray-50"
+                        title={isOpen ? 'Hide entry detail' : 'Show entry-by-entry timestamps'}
+                      >
+                        <td className="px-3 py-2 text-gray-400">
+                          <span className={`inline-block transition-transform ${isOpen ? 'rotate-90' : ''}`}>▸</span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="text-gray-900 font-semibold">{r.name}</div>
+                          <div className="text-[11px] text-gray-500">{r.email}</div>
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">{r.hours.toFixed(2)}h</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(r.revenue)}</td>
+                        <td className="px-3 py-2 text-[12px] text-gray-600 truncate max-w-[220px]">
+                          {[...r.approverNames].sort().join(', ') || '—'}
+                        </td>
+                      </tr>
+                      {isOpen && (
+                        <tr className="bg-gray-50/40">
+                          <td></td>
+                          <td colSpan={4} className="px-3 py-3">
+                            <table className="w-full text-[12px]">
+                              <thead className="text-[10px] uppercase tracking-widest text-gray-400">
+                                <tr>
+                                  <th className="text-left pb-1">Date</th>
+                                  <th className="text-right pb-1">Start</th>
+                                  <th className="text-right pb-1">End</th>
+                                  <th className="text-right pb-1">Duration</th>
+                                  <th className="text-left pb-1">Note</th>
+                                  <th className="text-left pb-1">Status</th>
+                                  <th className="text-left pb-1">Approver</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100">
+                                {r.entries.map((e) => {
+                                  const approver = e.approvedBy ? users.find((u) => u.id === e.approvedBy) : null;
+                                  return (
+                                    <tr key={e.id} className="hover:bg-white">
+                                      <td className="py-1 tabular-nums whitespace-nowrap">{e.startIso.slice(0, 10)}</td>
+                                      <td className="py-1 text-right tabular-nums whitespace-nowrap">{fmtClock(e.startIso)}</td>
+                                      <td className="py-1 text-right tabular-nums whitespace-nowrap">{e.endIso ? fmtClock(e.endIso) : '—'}</td>
+                                      <td className="py-1 text-right tabular-nums font-semibold whitespace-nowrap">{fmtMins(e.durationMin)}</td>
+                                      <td className="py-1 truncate max-w-[220px] text-gray-700">{e.note || '—'}</td>
+                                      <td className="py-1"><Pill tone={ENTRY_STATUS_PILL[e.status]}>{ENTRY_STATUS_LABEL[e.status]}</Pill></td>
+                                      <td className="py-1 text-gray-600 whitespace-nowrap">{approver?.name ?? '—'}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })
               )}
             </tbody>
             <tfoot className="bg-gray-50/60">
               <tr>
+                <td></td>
                 <td className="px-3 py-2 font-bold text-gray-900">Totals</td>
                 <td className="px-3 py-2 text-right tabular-nums font-bold">{totalHours.toFixed(2)}h</td>
                 <td className="px-3 py-2 text-right tabular-nums font-bold">{fmtMoney(totalRev)}</td>
@@ -498,8 +569,10 @@ function PayrollReviewModal({
         </div>
 
         <p className="text-[12px] text-gray-500">
-          "Close" auto-approves any remaining submitted entries. "Close &amp; send" additionally emails the
-          per-employee table above to <strong>{bookkeeperEmail ?? '—'}</strong> from your connected Gmail.
+          Click an employee row to expand entry-by-entry timestamps.
+          "Close" auto-approves any remaining submitted entries.
+          "Close &amp; send" additionally emails the per-employee totals above to{' '}
+          <strong>{bookkeeperEmail ?? '—'}</strong> from your connected Gmail.
         </p>
       </div>
     </Modal>
