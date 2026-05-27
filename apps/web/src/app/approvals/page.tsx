@@ -53,17 +53,29 @@ export default function ApprovalsPage() {
   const sendBookkeeper = useSendBookkeeperReport();
 
   const [periodId, setPeriodId] = useState<string>('');
-  // Auto-default to the period that contains today, falling back to the
-  // first 'review' or first 'open' period. We only set this once after the
-  // periods list arrives so manual selection isn't clobbered on refetch.
+  // Auto-default to the period the admin should be *reviewing* right now —
+  // i.e., the most recent period whose end_date is on or before today (so
+  // it's ready to be approved + closed). The period currently *in flight*
+  // (end_date in the future) is normally not what admins want here, since
+  // entries are still being submitted into it. Falls back gracefully when
+  // nothing has ended yet (fresh workspace, or all periods are still open
+  // in the future).
   useEffect(() => {
     if (periodId || periods.length === 0) return;
     const today = new Date().toISOString().slice(0, 10);
-    const current = periods.find((p) => p.startDate <= today && p.endDate >= today);
+    const endedDesc = [...periods]
+      .filter((p) => p.endDate <= today)
+      .sort((a, b) => b.endDate.localeCompare(a.endDate));
     setPeriodId(
-      current?.id
+      // 1. Most recently ended period (review-ready)
+      endedDesc[0]?.id
+        // 2. Any period flagged 'review'
         ?? periods.find((p) => p.status === 'review')?.id
+        // 3. The currently in-flight one (period contains today)
+        ?? periods.find((p) => p.startDate <= today && p.endDate >= today)?.id
+        // 4. First open going forward
         ?? periods.find((p) => p.status === 'open')?.id
+        // 5. Whatever exists
         ?? periods[0]?.id
         ?? '',
     );
@@ -128,22 +140,36 @@ export default function ApprovalsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Review time</h1>
           <p className="text-sm text-gray-500">Approve or return submitted entries by pay period.</p>
         </div>
+        {period && (
+          <div className="text-right">
+            <div className="text-[11px] uppercase tracking-widest font-bold text-gray-400">Reviewing</div>
+            <div className="text-lg font-bold text-gray-900">{period.label}</div>
+            <div className="text-sm text-gray-600">
+              Pays out <span className="font-semibold text-brand-700">{period.payDate}</span>
+              <span className="text-gray-400"> · </span>
+              <Pill tone={PAY_PERIOD_STATUS_PILL[period.status]}>{PAY_PERIOD_STATUS_LABEL[period.status]}</Pill>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {periods.map((p) => (
-          <Card key={p.id} className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm font-bold text-gray-900">{p.label}</div>
-                <div className="text-[11px] text-gray-500">Cutoff {p.approvalCutoff} · Pay {p.payDate}</div>
+          <Card key={p.id} className={`p-4 ${p.id === periodId ? 'ring-2 ring-brand-500' : ''}`}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-sm font-bold text-gray-900 truncate">{p.label}</div>
+                <div className="text-[11px] text-gray-500">
+                  Pay <span className="font-semibold text-gray-700">{p.payDate}</span>
+                  <span className="text-gray-300"> · </span>
+                  Cutoff {p.approvalCutoff}
+                </div>
               </div>
               <Pill tone={PAY_PERIOD_STATUS_PILL[p.status]}>{PAY_PERIOD_STATUS_LABEL[p.status]}</Pill>
             </div>
             <div className="mt-3 flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => { setPeriodId(p.id); setSelected(new Set()); }}>Review</Button>
               {p.status === 'open' && <Button variant="ghost" size="sm" onClick={() => run(() => toReview.mutateAsync(p.id), 'Moved to review')}>Move to review</Button>}
-              {p.status === 'review' && <Button variant="primary" size="sm" onClick={() => run(() => closeP.mutateAsync(p.id), 'Period closed')}>Close &amp; auto-approve</Button>}
               {p.status === 'closed' && can('pay.manage') && <Button variant="ghost" size="sm" onClick={() => run(() => reopenP.mutateAsync(p.id), 'Period reopened')}>Reopen</Button>}
             </div>
           </Card>
@@ -155,7 +181,9 @@ export default function ApprovalsPage() {
           <Field label="Pay period">
             <Select value={periodId} onChange={(e) => { setPeriodId(e.target.value); setSelected(new Set()); }}>
               {periods.map((p) => (
-                <option key={p.id} value={p.id}>{p.label}</option>
+                <option key={p.id} value={p.id}>
+                  {p.label} · pays {p.payDate}
+                </option>
               ))}
             </Select>
           </Field>
