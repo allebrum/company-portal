@@ -16,7 +16,7 @@ export function Modal({
   open: boolean;
   onClose: () => void;
   title?: string;
-  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | 'screen';
   footer?: React.ReactNode;
   children: React.ReactNode;
 }) {
@@ -49,6 +49,10 @@ export function Modal({
     '2xl': 'max-w-3xl',
     '3xl': 'max-w-4xl',
     '4xl': 'max-w-5xl',
+    // Near-full-page for review surfaces — entries tables, payroll review,
+    // anything that needs to feel like its own page while still being a
+    // modal. Caps at 1400px so it doesn't sprawl on ultrawide.
+    screen: 'max-w-[1400px]',
   };
 
   // Rendered into <body> so it escapes any ancestor that establishes a

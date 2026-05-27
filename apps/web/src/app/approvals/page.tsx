@@ -52,68 +52,42 @@ export default function ApprovalsPage() {
   const reopenP = useReopenPeriod();
   const sendBookkeeper = useSendBookkeeperReport();
 
-  const [periodId, setPeriodId] = useState<string>('');
-  // Auto-default to the period the admin should be *reviewing* right now —
-  // i.e., the most recent period whose end_date is on or before today (so
-  // it's ready to be approved + closed). The period currently *in flight*
-  // (end_date in the future) is normally not what admins want here, since
-  // entries are still being submitted into it. Falls back gracefully when
-  // nothing has ended yet (fresh workspace, or all periods are still open
-  // in the future).
-  useEffect(() => {
-    if (periodId || periods.length === 0) return;
+  // Which period card is currently open in the review modal (null = no
+  // modal). All the review/approve/close machinery now lives inside the
+  // modal — clicking a card opens it; closing it returns to the cards.
+  const [openPeriodId, setOpenPeriodId] = useState<string | null>(null);
+  const isPrivileged = can('time_entry.approve');
+
+  // Highlight the period the admin should land on first — most recently
+  // ended (review-ready), then 'review' status, then in-flight. Purely
+  // visual; clicking is still required to open the modal.
+  const suggestedPeriodId = useMemo(() => {
+    if (periods.length === 0) return null;
     const today = new Date().toISOString().slice(0, 10);
     const endedDesc = [...periods]
       .filter((p) => p.endDate <= today)
       .sort((a, b) => b.endDate.localeCompare(a.endDate));
-    setPeriodId(
-      // 1. Most recently ended period (review-ready)
+    return (
       endedDesc[0]?.id
-        // 2. Any period flagged 'review'
-        ?? periods.find((p) => p.status === 'review')?.id
-        // 3. The currently in-flight one (period contains today)
-        ?? periods.find((p) => p.startDate <= today && p.endDate >= today)?.id
-        // 4. First open going forward
-        ?? periods.find((p) => p.status === 'open')?.id
-        // 5. Whatever exists
-        ?? periods[0]?.id
-        ?? '',
+      ?? periods.find((p) => p.status === 'review')?.id
+      ?? periods.find((p) => p.startDate <= today && p.endDate >= today)?.id
+      ?? periods.find((p) => p.status === 'open')?.id
+      ?? periods[0]?.id
+      ?? null
     );
-  }, [periods, periodId]);
+  }, [periods]);
 
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [rejectOpen, setRejectOpen] = useState(false);
-  const [rejectNote, setRejectNote] = useState('Please double-check duration and resubmit.');
-  const [reviewOpen, setReviewOpen] = useState(false);
-
-  const isPrivileged = can('time_entry.approve');
-
-  const period = periods.find((p) => p.id === periodId);
-  const periodEntries = useMemo(
+  const openPeriod = periods.find((p) => p.id === openPeriodId) ?? null;
+  const openPeriodEntries = useMemo(
     () =>
-      entries
-        .filter((e) => e.payPeriodId === periodId)
-        .sort((a, b) => a.startIso.localeCompare(b.startIso)),
-    [entries, periodId],
+      openPeriodId
+        ? entries
+            .filter((e) => e.payPeriodId === openPeriodId)
+            .sort((a, b) => a.startIso.localeCompare(b.startIso))
+        : [],
+    [entries, openPeriodId],
   );
-  const submitted = periodEntries.filter((e) => e.status === 'submitted');
-  const totalMin = periodEntries.reduce((s, e) => s + e.durationMin, 0);
-  const billRevenue = periodEntries.reduce((s, e) => {
-    const proj = projects.find((p) => p.id === e.projectId);
-    if (!proj?.billable) return s;
-    const u = users.find((x) => x.id === e.userId);
-    const rate = u ? Number(u.billable) : 0;
-    return s + (e.durationMin / 60) * rate;
-  }, 0);
 
-  const acting = (selected.size > 0 ? [...selected] : submitted.map((e) => e.id));
-
-  const toggleRow = (id: string) => {
-    const next = new Set(selected);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelected(next);
-  };
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     try {
       await fn();
@@ -138,205 +112,110 @@ export default function ApprovalsPage() {
         <div>
           <div className="eyebrow">Approvals</div>
           <h1 className="text-2xl font-bold text-gray-900">Review time</h1>
-          <p className="text-sm text-gray-500">Approve or return submitted entries by pay period.</p>
+          <p className="text-sm text-gray-500">
+            Click a pay period card to open the full review — approve, return,
+            and close the period out to payroll.
+          </p>
         </div>
-        {period && (
-          <div className="text-right">
-            <div className="text-[11px] uppercase tracking-widest font-bold text-gray-400">Reviewing</div>
-            <div className="text-lg font-bold text-gray-900">{period.label}</div>
-            <div className="text-sm text-gray-600">
-              Pays out <span className="font-semibold text-brand-700">{period.payDate}</span>
-              <span className="text-gray-400"> · </span>
-              <Pill tone={PAY_PERIOD_STATUS_PILL[period.status]}>{PAY_PERIOD_STATUS_LABEL[period.status]}</Pill>
-            </div>
-          </div>
-        )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {periods.map((p) => (
-          <Card key={p.id} className={`p-4 ${p.id === periodId ? 'ring-2 ring-brand-500' : ''}`}>
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <div className="text-sm font-bold text-gray-900 truncate">{p.label}</div>
-                <div className="text-[11px] text-gray-500">
-                  Pay <span className="font-semibold text-gray-700">{p.payDate}</span>
-                  <span className="text-gray-300"> · </span>
-                  Cutoff {p.approvalCutoff}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {periods.map((p) => {
+          const isSuggested = p.id === suggestedPeriodId;
+          const periodEntries = entries.filter((e) => e.payPeriodId === p.id);
+          const submittedCount = periodEntries.filter((e) => e.status === 'submitted').length;
+          return (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => setOpenPeriodId(p.id)}
+              className={`text-left w-full rounded-2xl border bg-white p-4 transition-all hover:border-brand-300 hover:shadow-md ${
+                isSuggested ? 'border-brand-400 ring-2 ring-brand-100 shadow-sm' : 'border-gray-200'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-gray-900 truncate">{p.label}</div>
+                  <div className="text-[11px] text-gray-500">
+                    Pay <span className="font-semibold text-gray-700">{p.payDate}</span>
+                    <span className="text-gray-300"> · </span>
+                    Cutoff {p.approvalCutoff}
+                  </div>
                 </div>
+                <Pill tone={PAY_PERIOD_STATUS_PILL[p.status]}>{PAY_PERIOD_STATUS_LABEL[p.status]}</Pill>
               </div>
-              <Pill tone={PAY_PERIOD_STATUS_PILL[p.status]}>{PAY_PERIOD_STATUS_LABEL[p.status]}</Pill>
-            </div>
-            <div className="mt-3 flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => { setPeriodId(p.id); setSelected(new Set()); }}>Review</Button>
-              {p.status === 'open' && <Button variant="ghost" size="sm" onClick={() => run(() => toReview.mutateAsync(p.id), 'Moved to review')}>Move to review</Button>}
-              {p.status === 'closed' && can('pay.manage') && <Button variant="ghost" size="sm" onClick={() => run(() => reopenP.mutateAsync(p.id), 'Period reopened')}>Reopen</Button>}
-            </div>
-          </Card>
-        ))}
+              <div className="mt-3 flex items-center gap-2 text-[11px] text-gray-500">
+                <span className="font-semibold text-gray-700">{periodEntries.length}</span>
+                {periodEntries.length === 1 ? 'entry' : 'entries'}
+                {submittedCount > 0 && (
+                  <>
+                    <span className="text-gray-300">·</span>
+                    <span className="font-semibold text-amber-700">{submittedCount} submitted</span>
+                  </>
+                )}
+                {isSuggested && (
+                  <span className="ml-auto text-[10px] uppercase font-bold tracking-widest text-brand-700">
+                    Ready to review
+                  </span>
+                )}
+              </div>
+              {/* Quick status flips (don't open the modal) */}
+              <div className="mt-3 flex items-center gap-1.5">
+                {p.status === 'open' && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); void run(() => toReview.mutateAsync(p.id), 'Moved to review'); }}
+                    className="text-[11px] px-2 py-1 rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+                  >
+                    Move to review
+                  </button>
+                )}
+                {p.status === 'closed' && can('pay.manage') && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); void run(() => reopenP.mutateAsync(p.id), 'Period reopened'); }}
+                    className="text-[11px] px-2 py-1 rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+                  >
+                    Reopen
+                  </button>
+                )}
+              </div>
+            </button>
+          );
+        })}
+        {periods.length === 0 && (
+          <div className="col-span-full">
+            <Empty
+              title="No pay periods yet"
+              description="Set a schedule in Admin → Pay periods. Periods will appear here automatically."
+            />
+          </div>
+        )}
       </div>
 
-      <Section title={period ? `Entries in ${period.label}` : 'Entries'} eyebrow={`${submitted.length} submitted`}>
-        <Card className="p-4 flex flex-wrap items-center gap-3">
-          <Field label="Pay period">
-            <Select value={periodId} onChange={(e) => { setPeriodId(e.target.value); setSelected(new Set()); }}>
-              {periods.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label} · pays {p.payDate}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <div className="ml-auto text-sm text-gray-600">
-            <span className="font-semibold tabular-nums">{fmtMins(totalMin)}</span> · {fmtMoney(billRevenue)} billable
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" disabled={acting.length === 0 || reject.isPending} onClick={() => setRejectOpen(true)}>
-              Return {selected.size > 0 ? `(${selected.size})` : '(all)'}
-            </Button>
-            <Button
-              variant="primary"
-              disabled={acting.length === 0 || approve.isPending}
-              onClick={async () => {
-                await run(() => approve.mutateAsync(acting), `${acting.length} approved`);
-                setSelected(new Set());
-              }}
-            >
-              Approve {selected.size > 0 ? `(${selected.size})` : '(all)'}
-            </Button>
-            {period && period.status !== 'closed' && can('pay.manage') && (
-              <Button
-                variant="outline"
-                onClick={() => setReviewOpen(true)}
-                title="Review the period summary and close it out"
-              >
-                Close period…
-              </Button>
-            )}
-          </div>
-        </Card>
-
-        {periodEntries.length === 0 ? (
-          <Empty title="No entries in this period" />
-        ) : (
-          <Card>
-            <div className="overflow-x-auto"><table className="w-full text-sm min-w-[820px]">
-              <thead className="text-left text-[11px] uppercase text-gray-400 border-b border-gray-100">
-                <tr>
-                  <th className="px-3 py-3 w-10"></th>
-                  <th className="px-3 py-3">Date</th>
-                  <th className="px-3 py-3 text-right">Start</th>
-                  <th className="px-3 py-3 text-right">End</th>
-                  <th className="px-3 py-3 text-right">Duration</th>
-                  <th className="px-3 py-3">Who</th>
-                  <th className="px-3 py-3">Project</th>
-                  <th className="px-3 py-3">Note</th>
-                  <th className="px-3 py-3">Status</th>
-                  <th className="px-3 py-3"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {periodEntries.map((e) => {
-                  const u = users.find((x) => x.id === e.userId);
-                  const proj = projects.find((p) => p.id === e.projectId);
-                  const selectable = e.status === 'submitted';
-                  return (
-                    <tr
-                      key={e.id}
-                      className={`hover:bg-gray-50 ${selectable ? 'cursor-pointer' : ''}`}
-                      onClick={() => { if (selectable) toggleRow(e.id); }}
-                    >
-                      <td className="px-3 py-3" onClick={(ev) => ev.stopPropagation()}>
-                        {selectable && (
-                          <input
-                            type="checkbox"
-                            checked={selected.has(e.id)}
-                            onChange={() => toggleRow(e.id)}
-                            className="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-                          />
-                        )}
-                      </td>
-                      <td className="px-3 py-3 text-gray-700 tabular-nums whitespace-nowrap">{e.startIso.slice(0, 10)}</td>
-                      <td className="px-3 py-3 text-right text-gray-700 tabular-nums whitespace-nowrap">{fmtClock(e.startIso)}</td>
-                      <td className="px-3 py-3 text-right text-gray-700 tabular-nums whitespace-nowrap">{e.endIso ? fmtClock(e.endIso) : '—'}</td>
-                      <td className="px-3 py-3 text-right tabular-nums font-semibold whitespace-nowrap">{fmtMins(e.durationMin)}</td>
-                      <td className="px-3 py-3">
-                        <div className="flex items-center gap-2">
-                          <Avatar user={u} size={20} />
-                          <span className="text-gray-700 whitespace-nowrap">{u?.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-3 py-3 text-gray-700">{proj?.name ?? '—'}</td>
-                      <td className="px-3 py-3 text-gray-600 max-w-[260px]">
-                        <div className="truncate">{e.note}</div>
-                        {e.status === 'rejected' && e.rejectionNote && (
-                          <div className="text-[11px] text-red-600 mt-0.5 truncate">↩ {e.rejectionNote}</div>
-                        )}
-                      </td>
-                      <td className="px-3 py-3"><Pill tone={ENTRY_STATUS_PILL[e.status]}>{ENTRY_STATUS_LABEL[e.status]}</Pill></td>
-                      <td className="px-3 py-3 text-right" onClick={(ev) => ev.stopPropagation()}>
-                        {e.status === 'approved' && (
-                          <Button variant="ghost" size="sm" onClick={() => run(() => reopen.mutateAsync([e.id]), 'Entry reopened')}>Reopen</Button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table></div>
-          </Card>
-        )}
-      </Section>
-
-      <Modal
-        open={rejectOpen}
-        onClose={() => setRejectOpen(false)}
-        title="Return entries for review"
-        size="md"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setRejectOpen(false)}>Cancel</Button>
-            <Button
-              variant="danger"
-              onClick={async () => {
-                await run(() => reject.mutateAsync({ ids: acting, note: rejectNote }), `${acting.length} returned`);
-                setSelected(new Set());
-                setRejectOpen(false);
-              }}
-            >
-              Return {acting.length} {acting.length === 1 ? 'entry' : 'entries'}
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-3">
-          <p className="text-sm text-gray-600">The owner will see the note below alongside each entry.</p>
-          <Field label="Note"><Textarea value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} /></Field>
-        </div>
-      </Modal>
-
-      {period && (
-        <PayrollReviewModal
-          open={reviewOpen}
-          onClose={() => setReviewOpen(false)}
-          period={period}
-          entries={periodEntries}
+      {openPeriod && (
+        <PeriodReviewModal
+          open={!!openPeriod}
+          onClose={() => setOpenPeriodId(null)}
+          period={openPeriod}
+          entries={openPeriodEntries}
           users={users}
           projects={projects}
           bookkeeperEmail={settings?.bookkeeperEmail ?? null}
-          onCloseOnly={async () => {
-            await run(() => closeP.mutateAsync(period.id), `${period.label} closed`);
-            setReviewOpen(false);
+          canPayManage={can('pay.manage')}
+          approveMut={approve}
+          rejectMut={reject}
+          reopenMut={reopen}
+          onClosePeriod={async () => {
+            await run(() => closeP.mutateAsync(openPeriod.id), `${openPeriod.label} closed`);
+            setOpenPeriodId(null);
           }}
           onCloseAndSend={async () => {
-            // Atomic-ish: close first (auto-approves submitted), then email
-            // the report from the clicking admin's connected Gmail. The
-            // bookkeeper sees a single payroll summary per period.
             try {
-              await closeP.mutateAsync(period.id);
-              await sendBookkeeper.mutateAsync(period.id);
-              toast.success(`${period.label} closed · report emailed to bookkeeper`);
-              setReviewOpen(false);
+              await closeP.mutateAsync(openPeriod.id);
+              await sendBookkeeper.mutateAsync(openPeriod.id);
+              toast.success(`${openPeriod.label} closed · report emailed to bookkeeper`);
+              setOpenPeriodId(null);
             } catch (e) {
               const msg = e instanceof Error ? e.message : 'Action failed';
               if (msg === 'bookkeeper_email_not_set') {
@@ -346,7 +225,7 @@ export default function ApprovalsPage() {
               }
             }
           }}
-          busy={closeP.isPending || sendBookkeeper.isPending}
+          closeBusy={closeP.isPending || sendBookkeeper.isPending}
         />
       )}
     </div>
@@ -362,7 +241,22 @@ export default function ApprovalsPage() {
  * Disabled-with-hint when `bookkeeperEmail` isn't set so admins can't
  * land in the surprise-401 case from the server.
  */
-function PayrollReviewModal({
+/**
+ * Big near-full-page review modal launched from a pay-period card click.
+ * Houses the entire review workflow:
+ *
+ *  - Header band: period label, dates, pay date, status, billable totals.
+ *  - Bulk-action toolbar: Approve / Return selected (or all submitted).
+ *  - Entries table: every entry in the period with Date / Start / End /
+ *    Duration / Who / Project / Note / Status / row-level Reopen.
+ *  - Per-employee summary table: roll-up of hours / billable / approvers
+ *    for the bookkeeper-email preview, with click-to-expand entry detail.
+ *  - Footer: Cancel / Close period / Close & send to bookkeeper.
+ *
+ * Replaces the previous split UX (inline entries panel + separate
+ * PayrollReviewModal) so admins do the whole flow in one focused surface.
+ */
+function PeriodReviewModal({
   open,
   onClose,
   period,
@@ -370,9 +264,13 @@ function PayrollReviewModal({
   users,
   projects,
   bookkeeperEmail,
-  onCloseOnly,
+  canPayManage,
+  approveMut,
+  rejectMut,
+  reopenMut,
+  onClosePeriod,
   onCloseAndSend,
-  busy,
+  closeBusy,
 }: {
   open: boolean;
   onClose: () => void;
@@ -381,21 +279,71 @@ function PayrollReviewModal({
   users: UserRow[];
   projects: ProjectRow[];
   bookkeeperEmail: string | null;
-  onCloseOnly: () => Promise<void>;
+  canPayManage: boolean;
+  approveMut: ReturnType<typeof useApproveEntries>;
+  rejectMut: ReturnType<typeof useRejectEntries>;
+  reopenMut: ReturnType<typeof useReopenEntries>;
+  onClosePeriod: () => Promise<void>;
   onCloseAndSend: () => Promise<void>;
-  busy: boolean;
+  closeBusy: boolean;
 }) {
-  // Treat both 'submitted' and 'approved' rows as in-scope since "Close"
-  // auto-approves anything still submitted. Closed-period reopens that
-  // happen to land in the modal are equivalent.
+  const toast = useToast();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [rejectFormOpen, setRejectFormOpen] = useState(false);
+  const [rejectNote, setRejectNote] = useState('Please double-check duration and resubmit.');
+  // Reset row selection + return form whenever a different period opens.
+  useEffect(() => {
+    if (!open) return;
+    setSelected(new Set());
+    setRejectFormOpen(false);
+  }, [open, period.id]);
+
+  const submitted = entries.filter((e) => e.status === 'submitted');
+  const totalMin = entries.reduce((s, e) => s + e.durationMin, 0);
+  const billRevenue = entries.reduce((s, e) => {
+    const proj = projects.find((p) => p.id === e.projectId);
+    if (!proj?.billable) return s;
+    const u = users.find((x) => x.id === e.userId);
+    const rate = u ? Number(u.billable) : 0;
+    return s + (e.durationMin / 60) * rate;
+  }, 0);
+  const acting = selected.size > 0 ? [...selected] : submitted.map((e) => e.id);
+
+  const toggleRow = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const run = async (fn: () => Promise<unknown>, ok: string) => {
+    try {
+      await fn();
+      toast.success(ok);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Action failed');
+    }
+  };
+  const doApprove = async () => {
+    if (acting.length === 0) return;
+    await run(() => approveMut.mutateAsync(acting), `${acting.length} approved`);
+    setSelected(new Set());
+  };
+  const doReject = async () => {
+    if (acting.length === 0) return;
+    await run(() => rejectMut.mutateAsync({ ids: acting, note: rejectNote }), `${acting.length} returned`);
+    setSelected(new Set());
+    setRejectFormOpen(false);
+  };
+
+  // Per-employee aggregate for the "Payroll summary" panel below the
+  // entries table. Treat submitted + approved as in-scope since Close
+  // auto-approves any leftover submissions.
   const usableStatuses = new Set(['submitted', 'approved']);
   type Row = {
-    userId: string;
-    name: string;
-    email: string;
-    hours: number;
-    revenue: number;
-    approverNames: Set<string>;
+    userId: string; name: string; email: string;
+    hours: number; revenue: number; approverNames: Set<string>;
     entries: EntryRow[];
   };
   const byUser = new Map<string, Row>();
@@ -405,15 +353,7 @@ function PayrollReviewModal({
     if (!u) continue;
     let row = byUser.get(e.userId);
     if (!row) {
-      row = {
-        userId: e.userId,
-        name: u.name,
-        email: u.email,
-        hours: 0,
-        revenue: 0,
-        approverNames: new Set(),
-        entries: [],
-      };
+      row = { userId: e.userId, name: u.name, email: u.email, hours: 0, revenue: 0, approverNames: new Set(), entries: [] };
       byUser.set(e.userId, row);
     }
     row.hours += e.durationMin / 60;
@@ -440,140 +380,298 @@ function PayrollReviewModal({
       return next;
     });
   };
+  const isClosed = period.status === 'closed';
+  const canMutate = !isClosed; // approve/return only when period is still open
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={`Close ${period.label}`}
-      size="lg"
+      title={`${period.label} · pays ${period.payDate}`}
+      size="screen"
       footer={
-        <>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button variant="outline" onClick={() => void onCloseOnly()} disabled={busy} title="Close the period without emailing the bookkeeper">
-            Close period
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => void onCloseAndSend()}
-            disabled={busy || !bookkeeperEmail}
-            title={bookkeeperEmail ? `Email the report to ${bookkeeperEmail}` : 'Set a bookkeeper email in Admin → Pay periods first'}
-          >
-            Close &amp; send to bookkeeper
-          </Button>
-        </>
+        canPayManage ? (
+          <>
+            <Button variant="ghost" onClick={onClose} disabled={closeBusy}>Cancel</Button>
+            {!isClosed && (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => void onClosePeriod()}
+                  disabled={closeBusy}
+                  title="Close the period without emailing the bookkeeper"
+                >
+                  Close period
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={() => void onCloseAndSend()}
+                  disabled={closeBusy || !bookkeeperEmail}
+                  title={bookkeeperEmail ? `Email the report to ${bookkeeperEmail}` : 'Set a bookkeeper email in Admin → Pay periods first'}
+                >
+                  Close &amp; send to bookkeeper
+                </Button>
+              </>
+            )}
+            {isClosed && (
+              <span className="text-[12px] text-gray-500 italic">
+                Period is closed — reopen from the cards overview to re-edit.
+              </span>
+            )}
+          </>
+        ) : (
+          <Button variant="ghost" onClick={onClose}>Done</Button>
+        )
       }
     >
-      <div className="space-y-4">
-        <div className="text-sm text-gray-600">
-          <span className="font-semibold text-gray-900">{period.startDate}</span> – <span className="font-semibold text-gray-900">{period.endDate}</span>
-          {' · '}Pay date <span className="font-semibold text-gray-900">{period.payDate}</span>
-          {' · '}Status <Pill tone={PAY_PERIOD_STATUS_PILL[period.status]}>{PAY_PERIOD_STATUS_LABEL[period.status]}</Pill>
+      <div className="space-y-5">
+        {/* Header band: period dates + totals */}
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-50 border border-gray-100 rounded-xl px-4 py-3">
+          <div>
+            <div className="text-[11px] uppercase tracking-widest font-bold text-gray-400">Pay period</div>
+            <div className="text-sm text-gray-700">
+              <span className="font-semibold text-gray-900">{period.startDate}</span>
+              {' – '}
+              <span className="font-semibold text-gray-900">{period.endDate}</span>
+              {' · '}Pays out <span className="font-semibold text-brand-700">{period.payDate}</span>
+              {' · '}<Pill tone={PAY_PERIOD_STATUS_PILL[period.status]}>{PAY_PERIOD_STATUS_LABEL[period.status]}</Pill>
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-[11px] uppercase tracking-widest font-bold text-gray-400">Period totals</div>
+            <div className="text-sm text-gray-700">
+              <span className="font-semibold tabular-nums">{fmtMins(totalMin)}</span> · {fmtMoney(billRevenue)} billable
+            </div>
+          </div>
         </div>
 
-        {!bookkeeperEmail && (
+        {!bookkeeperEmail && !isClosed && canPayManage && (
           <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900">
-            No bookkeeper email is set. Closing the period will still work; the report just won't go out.
+            No bookkeeper email is set. You can still close the period, but the report won't be emailed.
             Add one in <span className="font-semibold">Admin → Pay periods</span>.
           </div>
         )}
 
-        <div className="border border-gray-200 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-[11px] uppercase tracking-widest text-gray-500">
-              <tr>
-                <th className="px-3 py-2 text-left w-6"></th>
-                <th className="px-3 py-2 text-left">Employee</th>
-                <th className="px-3 py-2 text-right">Hours</th>
-                <th className="px-3 py-2 text-right">Billable</th>
-                <th className="px-3 py-2 text-left">Approvers</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {summaries.length === 0 ? (
-                <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">No entries to summarize in this period.</td></tr>
-              ) : (
-                summaries.map((r) => {
-                  const isOpen = expanded.has(r.userId);
-                  return (
-                    <Fragment key={r.userId}>
+        {/* Bulk action toolbar */}
+        {canMutate && (
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-sm text-gray-600">
+              {selected.size > 0
+                ? `${selected.size} selected`
+                : `${submitted.length} submitted ${submitted.length === 1 ? 'entry' : 'entries'} pending review`}
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              <Button
+                variant="outline"
+                disabled={acting.length === 0 || rejectMut.isPending}
+                onClick={() => setRejectFormOpen((v) => !v)}
+              >
+                Return {selected.size > 0 ? `(${selected.size})` : '(all)'}
+              </Button>
+              <Button
+                variant="primary"
+                disabled={acting.length === 0 || approveMut.isPending}
+                onClick={() => void doApprove()}
+              >
+                Approve {selected.size > 0 ? `(${selected.size})` : '(all)'}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Inline reject-note form (slides open under the toolbar) */}
+        {rejectFormOpen && canMutate && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-4 space-y-2">
+            <div className="text-sm font-semibold text-amber-900">
+              Returning {acting.length} {acting.length === 1 ? 'entry' : 'entries'} to the submitter
+            </div>
+            <p className="text-[12px] text-amber-800">The owner will see the note below alongside each entry.</p>
+            <Textarea value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} rows={3} />
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="ghost" onClick={() => setRejectFormOpen(false)}>Cancel</Button>
+              <Button variant="danger" onClick={() => void doReject()}>
+                Send back {acting.length}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Entries table */}
+        <div>
+          <div className="text-[11px] uppercase tracking-widest font-bold text-gray-400 mb-1">
+            Entries · {entries.length}
+          </div>
+          {entries.length === 0 ? (
+            <Empty title="No entries in this period" />
+          ) : (
+            <Card>
+              <div className="overflow-x-auto"><table className="w-full text-sm min-w-[820px]">
+                <thead className="text-left text-[11px] uppercase text-gray-400 border-b border-gray-100">
+                  <tr>
+                    <th className="px-3 py-3 w-10"></th>
+                    <th className="px-3 py-3">Date</th>
+                    <th className="px-3 py-3 text-right">Start</th>
+                    <th className="px-3 py-3 text-right">End</th>
+                    <th className="px-3 py-3 text-right">Duration</th>
+                    <th className="px-3 py-3">Who</th>
+                    <th className="px-3 py-3">Project</th>
+                    <th className="px-3 py-3">Note</th>
+                    <th className="px-3 py-3">Status</th>
+                    <th className="px-3 py-3"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {entries.map((e) => {
+                    const u = users.find((x) => x.id === e.userId);
+                    const proj = projects.find((p) => p.id === e.projectId);
+                    const selectable = e.status === 'submitted' && canMutate;
+                    return (
                       <tr
-                        onClick={() => toggleExpanded(r.userId)}
-                        className="cursor-pointer hover:bg-gray-50"
-                        title={isOpen ? 'Hide entry detail' : 'Show entry-by-entry timestamps'}
+                        key={e.id}
+                        className={`hover:bg-gray-50 ${selectable ? 'cursor-pointer' : ''}`}
+                        onClick={() => { if (selectable) toggleRow(e.id); }}
                       >
-                        <td className="px-3 py-2 text-gray-400">
-                          <span className={`inline-block transition-transform ${isOpen ? 'rotate-90' : ''}`}>▸</span>
+                        <td className="px-3 py-3" onClick={(ev) => ev.stopPropagation()}>
+                          {selectable && (
+                            <input
+                              type="checkbox"
+                              checked={selected.has(e.id)}
+                              onChange={() => toggleRow(e.id)}
+                              className="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                            />
+                          )}
                         </td>
-                        <td className="px-3 py-2">
-                          <div className="text-gray-900 font-semibold">{r.name}</div>
-                          <div className="text-[11px] text-gray-500">{r.email}</div>
+                        <td className="px-3 py-3 text-gray-700 tabular-nums whitespace-nowrap">{e.startIso.slice(0, 10)}</td>
+                        <td className="px-3 py-3 text-right text-gray-700 tabular-nums whitespace-nowrap">{fmtClock(e.startIso)}</td>
+                        <td className="px-3 py-3 text-right text-gray-700 tabular-nums whitespace-nowrap">{e.endIso ? fmtClock(e.endIso) : '—'}</td>
+                        <td className="px-3 py-3 text-right tabular-nums font-semibold whitespace-nowrap">{fmtMins(e.durationMin)}</td>
+                        <td className="px-3 py-3">
+                          <div className="flex items-center gap-2">
+                            <Avatar user={u} size={20} />
+                            <span className="text-gray-700 whitespace-nowrap">{u?.name}</span>
+                          </div>
                         </td>
-                        <td className="px-3 py-2 text-right tabular-nums">{r.hours.toFixed(2)}h</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(r.revenue)}</td>
-                        <td className="px-3 py-2 text-[12px] text-gray-600 truncate max-w-[220px]">
-                          {[...r.approverNames].sort().join(', ') || '—'}
+                        <td className="px-3 py-3 text-gray-700">{proj?.name ?? '—'}</td>
+                        <td className="px-3 py-3 text-gray-600 max-w-[260px]">
+                          <div className="truncate">{e.note}</div>
+                          {e.status === 'rejected' && e.rejectionNote && (
+                            <div className="text-[11px] text-red-600 mt-0.5 truncate">↩ {e.rejectionNote}</div>
+                          )}
+                        </td>
+                        <td className="px-3 py-3"><Pill tone={ENTRY_STATUS_PILL[e.status]}>{ENTRY_STATUS_LABEL[e.status]}</Pill></td>
+                        <td className="px-3 py-3 text-right" onClick={(ev) => ev.stopPropagation()}>
+                          {e.status === 'approved' && canMutate && (
+                            <Button variant="ghost" size="sm" onClick={() => run(() => reopenMut.mutateAsync([e.id]), 'Entry reopened')}>Reopen</Button>
+                          )}
                         </td>
                       </tr>
-                      {isOpen && (
-                        <tr className="bg-gray-50/40">
-                          <td></td>
-                          <td colSpan={4} className="px-3 py-3">
-                            <table className="w-full text-[12px]">
-                              <thead className="text-[10px] uppercase tracking-widest text-gray-400">
-                                <tr>
-                                  <th className="text-left pb-1">Date</th>
-                                  <th className="text-right pb-1">Start</th>
-                                  <th className="text-right pb-1">End</th>
-                                  <th className="text-right pb-1">Duration</th>
-                                  <th className="text-left pb-1">Note</th>
-                                  <th className="text-left pb-1">Status</th>
-                                  <th className="text-left pb-1">Approver</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-100">
-                                {r.entries.map((e) => {
-                                  const approver = e.approvedBy ? users.find((u) => u.id === e.approvedBy) : null;
-                                  return (
-                                    <tr key={e.id} className="hover:bg-white">
-                                      <td className="py-1 tabular-nums whitespace-nowrap">{e.startIso.slice(0, 10)}</td>
-                                      <td className="py-1 text-right tabular-nums whitespace-nowrap">{fmtClock(e.startIso)}</td>
-                                      <td className="py-1 text-right tabular-nums whitespace-nowrap">{e.endIso ? fmtClock(e.endIso) : '—'}</td>
-                                      <td className="py-1 text-right tabular-nums font-semibold whitespace-nowrap">{fmtMins(e.durationMin)}</td>
-                                      <td className="py-1 truncate max-w-[220px] text-gray-700">{e.note || '—'}</td>
-                                      <td className="py-1"><Pill tone={ENTRY_STATUS_PILL[e.status]}>{ENTRY_STATUS_LABEL[e.status]}</Pill></td>
-                                      <td className="py-1 text-gray-600 whitespace-nowrap">{approver?.name ?? '—'}</td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })
-              )}
-            </tbody>
-            <tfoot className="bg-gray-50/60">
-              <tr>
-                <td></td>
-                <td className="px-3 py-2 font-bold text-gray-900">Totals</td>
-                <td className="px-3 py-2 text-right tabular-nums font-bold">{totalHours.toFixed(2)}h</td>
-                <td className="px-3 py-2 text-right tabular-nums font-bold">{fmtMoney(totalRev)}</td>
-                <td></td>
-              </tr>
-            </tfoot>
-          </table>
+                    );
+                  })}
+                </tbody>
+              </table></div>
+            </Card>
+          )}
         </div>
 
-        <p className="text-[12px] text-gray-500">
-          Click an employee row to expand entry-by-entry timestamps.
-          "Close" auto-approves any remaining submitted entries.
-          "Close &amp; send" additionally emails the per-employee totals above to{' '}
-          <strong>{bookkeeperEmail ?? '—'}</strong> from your connected Gmail.
-        </p>
+        {/* Per-employee payroll summary */}
+        {summaries.length > 0 && (
+          <div>
+            <div className="text-[11px] uppercase tracking-widest font-bold text-gray-400 mb-1">
+              Payroll summary · final check before {isClosed ? 'reopen' : 'close'}
+            </div>
+            <div className="border border-gray-200 rounded-xl overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-[11px] uppercase tracking-widest text-gray-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left w-6"></th>
+                    <th className="px-3 py-2 text-left">Employee</th>
+                    <th className="px-3 py-2 text-right">Hours</th>
+                    <th className="px-3 py-2 text-right">Billable</th>
+                    <th className="px-3 py-2 text-left">Approvers</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {summaries.map((r) => {
+                    const isExpanded = expanded.has(r.userId);
+                    return (
+                      <Fragment key={r.userId}>
+                        <tr
+                          onClick={() => toggleExpanded(r.userId)}
+                          className="cursor-pointer hover:bg-gray-50"
+                          title={isExpanded ? 'Hide entry detail' : 'Show entry-by-entry timestamps'}
+                        >
+                          <td className="px-3 py-2 text-gray-400">
+                            <span className={`inline-block transition-transform ${isExpanded ? 'rotate-90' : ''}`}>▸</span>
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="text-gray-900 font-semibold">{r.name}</div>
+                            <div className="text-[11px] text-gray-500">{r.email}</div>
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">{r.hours.toFixed(2)}h</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(r.revenue)}</td>
+                          <td className="px-3 py-2 text-[12px] text-gray-600 truncate max-w-[220px]">
+                            {[...r.approverNames].sort().join(', ') || '—'}
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr className="bg-gray-50/40">
+                            <td></td>
+                            <td colSpan={4} className="px-3 py-3">
+                              <table className="w-full text-[12px]">
+                                <thead className="text-[10px] uppercase tracking-widest text-gray-400">
+                                  <tr>
+                                    <th className="text-left pb-1">Date</th>
+                                    <th className="text-right pb-1">Start</th>
+                                    <th className="text-right pb-1">End</th>
+                                    <th className="text-right pb-1">Duration</th>
+                                    <th className="text-left pb-1">Note</th>
+                                    <th className="text-left pb-1">Status</th>
+                                    <th className="text-left pb-1">Approver</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                  {r.entries.map((e) => {
+                                    const approver = e.approvedBy ? users.find((u) => u.id === e.approvedBy) : null;
+                                    return (
+                                      <tr key={e.id} className="hover:bg-white">
+                                        <td className="py-1 tabular-nums whitespace-nowrap">{e.startIso.slice(0, 10)}</td>
+                                        <td className="py-1 text-right tabular-nums whitespace-nowrap">{fmtClock(e.startIso)}</td>
+                                        <td className="py-1 text-right tabular-nums whitespace-nowrap">{e.endIso ? fmtClock(e.endIso) : '—'}</td>
+                                        <td className="py-1 text-right tabular-nums font-semibold whitespace-nowrap">{fmtMins(e.durationMin)}</td>
+                                        <td className="py-1 truncate max-w-[220px] text-gray-700">{e.note || '—'}</td>
+                                        <td className="py-1"><Pill tone={ENTRY_STATUS_PILL[e.status]}>{ENTRY_STATUS_LABEL[e.status]}</Pill></td>
+                                        <td className="py-1 text-gray-600 whitespace-nowrap">{approver?.name ?? '—'}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+                <tfoot className="bg-gray-50/60">
+                  <tr>
+                    <td></td>
+                    <td className="px-3 py-2 font-bold text-gray-900">Totals</td>
+                    <td className="px-3 py-2 text-right tabular-nums font-bold">{totalHours.toFixed(2)}h</td>
+                    <td className="px-3 py-2 text-right tabular-nums font-bold">{fmtMoney(totalRev)}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <p className="mt-2 text-[12px] text-gray-500">
+              Click an employee row to expand entry-by-entry timestamps.
+              "Close" auto-approves any remaining submitted entries.
+              "Close &amp; send" additionally emails this per-employee table to{' '}
+              <strong>{bookkeeperEmail ?? '—'}</strong> from your connected Gmail.
+            </p>
+          </div>
+        )}
       </div>
     </Modal>
   );
