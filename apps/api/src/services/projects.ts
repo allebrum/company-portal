@@ -1,12 +1,12 @@
 import { asc, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { projects, clients, type Project } from '../db/schema.js';
+import { projects, type Project } from '../db/schema.js';
 import type { CreateProjectInput, UpdateProjectInput } from '@allebrum/shared';
 import { emit } from '../realtime/emit.js';
 import { EV } from '@allebrum/shared';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';
-import { isConnected as driveIsConnected, createFolder as driveCreateFolder } from './drive.js';
+import { isConnected as driveIsConnected, ensureProjectFolder } from './drive.js';
 
 export async function listProjects(): Promise<Project[]> {
   return db.select().from(projects).orderBy(asc(projects.name));
@@ -25,28 +25,21 @@ export async function createProject(input: CreateProjectInput, whoId: string): P
   if (!inserted) throw new Error('project insert failed');
   let row = inserted;
 
-  // Best-effort: if Drive is connected and the parent client has its own
-  // Drive folder, create a sub-folder for this project inside it. If the
-  // client has no driveFolderId (created when Drive was disconnected, or
-  // pre-feature), the project also gets no folder — same "going forward
-  // only" rule we apply at the client level.
+  // Best-effort: create the project's Drive folder. `ensureProjectFolder`
+  // is race-safe — it backfills the parent client folder if missing (via
+  // `ensureClientFolder`) and uses conditional UPDATEs that trash the
+  // losing thread's orphan if two requests race. If Drive isn't connected
+  // or the chain fails, `driveFolderId` stays null and uploads will
+  // lazily try again later.
   try {
     if (await driveIsConnected()) {
-      const [parent] = await db
-        .select({ driveFolderId: clients.driveFolderId })
-        .from(clients)
-        .where(eq(clients.id, row.clientId))
+      await ensureProjectFolder(row.id);
+      const [updated] = await db
+        .select()
+        .from(projects)
+        .where(eq(projects.id, row.id))
         .limit(1);
-      const parentFolderId = parent?.driveFolderId;
-      if (parentFolderId) {
-        const folder = await driveCreateFolder(parentFolderId, row.name);
-        const [updated] = await db
-          .update(projects)
-          .set({ driveFolderId: folder.id, updatedAt: new Date().toISOString() })
-          .where(eq(projects.id, row.id))
-          .returning();
-        if (updated) row = updated;
-      }
+      if (updated) row = updated;
     }
   } catch (e) {
     // eslint-disable-next-line no-console
