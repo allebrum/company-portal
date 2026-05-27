@@ -88,9 +88,18 @@ export function generatePeriodSchedule(
         const rawPayDate = resolveDayOfMonth(year, month, dayRef);
         const payDate = applyWeekendRule(rawPayDate, weekendRule);
         const periodEnd = addDays(payDate, -buffer);
-        const periodStart = prevPeriodEnd ? addDays(prevPeriodEnd, 1) : addDays(periodEnd, -14);
-        prevPeriodEnd = periodEnd;
+        // Only advance the chain when we actually emit a period. The loop
+        // warm-starts at `today.month - 1` to walk past pay dates that are
+        // earlier than `today`; if we advanced `prevPeriodEnd` for those
+        // skipped iterations we'd overwrite the seed passed in by
+        // `ensureFuturePeriods` (= the latest existing period's end), which
+        // is exactly how a duplicate of an already-closed period would be
+        // re-emitted: the first pushable period would chain off some
+        // stale skipped end instead of the closed period's real end.
         if (payDate >= today) {
+          const periodStart = prevPeriodEnd
+            ? addDays(prevPeriodEnd, 1)
+            : addDays(periodEnd, -14);
           out.push({
             start: isoDate(periodStart),
             end: isoDate(periodEnd),
@@ -98,6 +107,7 @@ export function generatePeriodSchedule(
             payDate: isoDate(payDate),
             label: fmtRange(periodStart, periodEnd),
           });
+          prevPeriodEnd = periodEnd;
           if (out.length >= count) break;
         }
       }
@@ -171,10 +181,18 @@ export async function generateAndInsert(args: {
     args.prevPeriodEnd,
   );
 
-  const existing = await db.select({ s: payPeriods.startDate }).from(payPeriods);
-  const have = new Set(existing.map((r) => r.s));
+  // Dedup by BOTH startDate and payDate. The payDate check is what keeps
+  // a buffer change (e.g. 5 → 4) from regenerating a duplicate of an
+  // already-closed pay run: the closed period already owns pay-date Jun 1,
+  // even though the new schedule wants to emit a period with a different
+  // start (May 12 vs May 11) for the same Jun 1 pay run.
+  const existing = await db
+    .select({ s: payPeriods.startDate, p: payPeriods.payDate })
+    .from(payPeriods);
+  const haveStart = new Set(existing.map((r) => r.s));
+  const havePayDate = new Set(existing.map((r) => r.p));
   const toInsert = schedule
-    .filter((s) => !have.has(s.start))
+    .filter((s) => !haveStart.has(s.start) && !havePayDate.has(s.payDate))
     .map((s) => ({
       label: s.label,
       startDate: s.start,
