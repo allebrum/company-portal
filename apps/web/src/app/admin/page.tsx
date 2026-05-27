@@ -799,6 +799,7 @@ function PayTab() {
                 try {
                   const r = await recalc.mutateAsync();
                   const parts = [];
+                  if (r.merged) parts.push(`${r.merged} overlapping merged`);
                   if (r.deleted) parts.push(`${r.deleted} stale removed`);
                   parts.push(`${r.inserted} generated`);
                   if (r.preserved) parts.push(`${r.preserved} preserved`);

@@ -18,6 +18,7 @@ import {
   useClosePeriod,
   useMovePeriodToReview,
   useReopenPeriod,
+  useRecalculatePayPeriods,
   useSendBookkeeperReport,
   useSettings,
   type PayPeriodRow,
@@ -51,6 +52,11 @@ export default function ApprovalsPage() {
   const toReview = useMovePeriodToReview();
   const reopenP = useReopenPeriod();
   const sendBookkeeper = useSendBookkeeperReport();
+  const recalc = useRecalculatePayPeriods();
+  // Gate the Recalculate button to the same permission that backs the
+  // server route (`pay.manage`). Owners and Bookkeepers have it; regular
+  // approvers don't — they shouldn't be rebuilding the schedule.
+  const canRecalc = can('pay.manage');
 
   // Which period card is currently open in the review modal (null = no
   // modal). All the review/approve/close machinery now lives inside the
@@ -117,6 +123,29 @@ export default function ApprovalsPage() {
             and close the period out to payroll.
           </p>
         </div>
+        {canRecalc && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={recalc.isPending}
+            onClick={async () => {
+              try {
+                const r = await recalc.mutateAsync();
+                const parts: string[] = [];
+                if (r.merged) parts.push(`${r.merged} overlapping merged`);
+                if (r.deleted) parts.push(`${r.deleted} stale removed`);
+                parts.push(`${r.inserted} generated`);
+                if (r.preserved) parts.push(`${r.preserved} preserved`);
+                toast.success(`Recalculated · ${parts.join(' · ')}`);
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : 'Recalculate failed');
+              }
+            }}
+            title="Clean up overlapping and stale pay periods, then rebuild upcoming periods from the current schedule. Periods with logged time are merged or preserved."
+          >
+            Recalculate pay periods
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

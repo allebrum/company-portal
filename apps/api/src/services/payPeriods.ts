@@ -53,6 +53,7 @@ export function generatePeriodSchedule(
   cfg: PayConfigInput,
   count = 6,
   fromDateIso?: string,
+  prevPeriodEndIso?: string,
 ): GeneratedPeriod[] {
   // Single buffer governs both the gap-to-pay-date AND the approval cutoff.
   // period_end = pay_date − buffer. approval_cutoff = period_end (admins
@@ -73,7 +74,12 @@ export function generatePeriodSchedule(
     });
 
     let cursorMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-    let prevPeriodEnd: Date | null = null;
+    // Seed the chain off the latest existing period's end date when one was
+    // provided; otherwise we'd compute the first period's start by guessing
+    // (end − 14d) and overlap whatever was in the DB.
+    let prevPeriodEnd: Date | null = prevPeriodEndIso
+      ? new Date(prevPeriodEndIso + 'T00:00:00')
+      : null;
     let safety = 0;
     while (out.length < count && safety++ < 60) {
       const year = cursorMonth.getFullYear();
@@ -99,8 +105,16 @@ export function generatePeriodSchedule(
     }
   } else {
     const stepDays = cfg.cadence === 'weekly' ? 7 : 14;
-    let start = cfg.anchor ? new Date(cfg.anchor + 'T00:00:00') : new Date(today);
-    while (addDays(start, stepDays - 1) < today) start = addDays(start, stepDays);
+    // Chain off the previous period when we have one — guarantees no overlap.
+    // Otherwise anchor (or today) is the starting point, advanced forward in
+    // step-sized hops until the current period covers today.
+    let start: Date;
+    if (prevPeriodEndIso) {
+      start = addDays(new Date(prevPeriodEndIso + 'T00:00:00'), 1);
+    } else {
+      start = cfg.anchor ? new Date(cfg.anchor + 'T00:00:00') : new Date(today);
+      while (addDays(start, stepDays - 1) < today) start = addDays(start, stepDays);
+    }
     for (let i = 0; i < count; i++) {
       const end = addDays(start, stepDays - 1);
       const rawPayDate = addDays(end, buffer);
@@ -137,6 +151,7 @@ export async function generateAndInsert(args: {
   whoId: string;
   count: number;
   fromDate?: string;
+  prevPeriodEnd?: string;
 }): Promise<{ inserted: number }> {
   const cfgRows = await db.select().from(payConfig).limit(1);
   const cfg = cfgRows[0];
@@ -153,6 +168,7 @@ export async function generateAndInsert(args: {
     },
     args.count,
     args.fromDate,
+    args.prevPeriodEnd,
   );
 
   const existing = await db.select({ s: payPeriods.startDate }).from(payPeriods);
@@ -210,43 +226,134 @@ export async function ensureFuturePeriods(args: {
     .orderBy(asc(payPeriods.startDate));
   if (future.length >= 3) return { inserted: 0 };
   // Generate forward from the latest existing end+1 (or today if none).
+  // Critically: also pass `prevPeriodEnd` to the schedule generator so the
+  // first new period's start is `lastEnd+1` instead of (end − 14d), which
+  // is how we used to overlap the most recent existing period.
   const lastEnd = await db
     .select({ end: payPeriods.endDate })
     .from(payPeriods)
     .orderBy(desc(payPeriods.endDate))
     .limit(1);
-  const fromDate = lastEnd[0]?.end ?? today;
-  const startCursor = lastEnd[0] ? addDays(new Date(lastEnd[0].end + 'T00:00:00'), 1) : new Date(today + 'T00:00:00');
+  const startCursor = lastEnd[0]
+    ? addDays(new Date(lastEnd[0].end + 'T00:00:00'), 1)
+    : new Date(today + 'T00:00:00');
   return generateAndInsert({
     whoId: args.whoId ?? '00000000-0000-0000-0000-000000000000',
     count: targetCount,
     fromDate: isoDate(startCursor),
+    prevPeriodEnd: lastEnd[0]?.end,
   });
-  // The reference to `fromDate` keeps the variable used; the generator's
-  // internal "from" cursor is what matters for the next period boundary.
-  void fromDate;
+}
+
+/**
+ * Walk all open periods in start-date order; whenever two overlap (the
+ * next period's start ≤ the prior period's end), merge them: pick a
+ * keeper (more entries → newer → first wins), reassign the loser's
+ * time_entries.pay_period_id to the keeper, then delete the loser.
+ *
+ * This is the cleanup that `regenerateFuturePeriods`'s "delete empty
+ * stale rows" rule can't do on its own — when prior config drift produced
+ * overlapping periods AND time entries got bucketed into BOTH of them,
+ * neither half is "empty" and both survived. After consolidation we have
+ * one canonical period per date range and the generator can chain off it
+ * cleanly.
+ */
+export async function consolidateOverlappingPeriods(args: { whoId: string }): Promise<{
+  merged: number;
+}> {
+  const openRows = await db
+    .select({
+      id: payPeriods.id,
+      start: payPeriods.startDate,
+      end: payPeriods.endDate,
+      createdAt: payPeriods.createdAt,
+    })
+    .from(payPeriods)
+    .where(eq(payPeriods.status, 'open'))
+    .orderBy(asc(payPeriods.startDate), asc(payPeriods.createdAt));
+
+  if (openRows.length < 2) return { merged: 0 };
+
+  // Count entries per period so the keeper-pick prefers the better-populated
+  // row. (Two zero-entry overlaps fall back to the older createdAt.)
+  const entryCounts = new Map<string, number>();
+  const entryRows = await db
+    .select({ pid: timeEntries.payPeriodId })
+    .from(timeEntries)
+    .where(isNotNull(timeEntries.payPeriodId));
+  for (const r of entryRows) {
+    if (!r.pid) continue;
+    entryCounts.set(r.pid, (entryCounts.get(r.pid) ?? 0) + 1);
+  }
+
+  let merged = 0;
+  // Tracks the keeper for the current overlap "cluster" — start with first
+  // row and absorb any subsequent rows that overlap with it.
+  let keeper = openRows[0];
+  for (let i = 1; i < openRows.length; i++) {
+    const cur = openRows[i];
+    if (cur.start <= keeper.end) {
+      // Overlap. Decide which row survives.
+      const keeperCount = entryCounts.get(keeper.id) ?? 0;
+      const curCount = entryCounts.get(cur.id) ?? 0;
+      const curWins =
+        curCount > keeperCount ||
+        (curCount === keeperCount && cur.createdAt < keeper.createdAt);
+      const winner = curWins ? cur : keeper;
+      const loser = curWins ? keeper : cur;
+
+      // Reassign entries from loser → winner so payroll history is not lost.
+      await db
+        .update(timeEntries)
+        .set({ payPeriodId: winner.id, updatedAt: new Date().toISOString() })
+        .where(eq(timeEntries.payPeriodId, loser.id));
+      await db.delete(payPeriods).where(eq(payPeriods.id, loser.id));
+
+      entryCounts.set(winner.id, keeperCount + curCount);
+      keeper = winner;
+      merged++;
+    } else {
+      keeper = cur;
+    }
+  }
+
+  if (merged > 0) {
+    await appendActivity({
+      whoId: args.whoId,
+      kind: 'period.consolidate',
+      target: `Merged ${merged} overlapping pay period${merged === 1 ? '' : 's'}`,
+    });
+  }
+  return { merged };
 }
 
 /**
  * Called after `updatePayConfig` persists a new schedule AND from the
- * manual "Recalculate pay periods" admin button. Drops every open period
- * that **either** (a) starts in the future, **or** (b) has zero time
- * entries linked. Either condition makes it a stale row safe to discard.
+ * manual "Recalculate pay periods" admin button.
+ *
+ * Three-phase cleanup so duplicates from prior config drift can't survive:
+ *
+ *   1. Consolidate overlapping open periods (merge entries, keep one row).
+ *   2. Drop every open period that **either** (a) starts in the future,
+ *      **or** (b) has zero time entries linked.
+ *   3. Refill the runway via `ensureFuturePeriods`, which now chains the
+ *      schedule off the latest existing period so newly generated rows
+ *      can't overlap the surviving ones.
  *
  * Periods with any time entries are preserved unconditionally so we
  * don't retroactively rewrite payroll history; closed / review periods
  * are also never touched.
- *
- * After cleanup, `ensureFuturePeriods` fills the runway from the new
- * config. Returns counts so the manual route can toast a summary.
  */
 export async function regenerateFuturePeriods(args: { whoId: string }): Promise<{
   deleted: number;
   inserted: number;
   preserved: number;
+  merged: number;
 }> {
+  const { merged } = await consolidateOverlappingPeriods({ whoId: args.whoId });
+
   const today = isoDate(new Date());
-  // All currently-open periods.
+  // All currently-open periods (post-consolidation).
   const openRows = await db
     .select({ id: payPeriods.id, start: payPeriods.startDate })
     .from(payPeriods)
@@ -267,7 +374,7 @@ export async function regenerateFuturePeriods(args: { whoId: string }): Promise<
     await db.delete(payPeriods).where(inArray(payPeriods.id, toDelete));
   }
   const { inserted } = await ensureFuturePeriods({ whoId: args.whoId, count: 12 });
-  return { deleted: toDelete.length, inserted, preserved };
+  return { deleted: toDelete.length, inserted, preserved, merged };
 }
 
 export async function moveToReview(id: string, whoId: string): Promise<void> {
