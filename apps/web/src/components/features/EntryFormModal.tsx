@@ -87,6 +87,11 @@ export function EntryFormModal({
 
   const projectsForClient = projects.filter((p) => p.clientId === clientId);
   const isDraft = entry?.status === 'draft';
+  // Field-edit policy: only `draft` and `rejected` (the user is fixing
+  // returned work) accept patches. Submitted / approved entries are
+  // read-only at the field level — but the Delete button is always
+  // available so the user can withdraw the entry entirely.
+  const fieldsEditable = !isEdit || isDraft || entry?.status === 'rejected';
 
   const durationMin = useMemo(() => {
     const ms = new Date(end).getTime() - new Date(start).getTime();
@@ -119,12 +124,29 @@ export function EntryFormModal({
 
   const onDelete = async () => {
     if (!entry) return;
+    // Soft confirm for non-draft entries. Drafts are routinely deleted
+    // while logging; submitted/approved entries are workflow actions
+    // worth a second click before the row goes away.
+    if (entry.status !== 'draft') {
+      const ok = window.confirm(
+        `Delete this ${entry.status} entry? It will be removed from any pay-period totals and approval queues.`,
+      );
+      if (!ok) return;
+    }
     try {
       await del.mutateAsync(entry.id);
       toast.success('Entry deleted');
       onClose();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Delete failed');
+      // Surface the closed-period guard with a friendlier message than
+      // the raw 409 code.
+      const msg =
+        e instanceof Error && /entry_in_closed_period/.test(e.message)
+          ? 'This entry is in a closed pay period and can’t be deleted. Ask an admin to reopen the period first.'
+          : e instanceof Error
+            ? e.message
+            : 'Delete failed';
+      toast.error(msg);
     }
   };
 
@@ -138,15 +160,27 @@ export function EntryFormModal({
       size="md"
       footer={
         <>
-          {isEdit && isDraft && (
-            <Button variant="danger" onClick={onDelete} disabled={busy} className="mr-auto">
+          {isEdit && (
+            <Button
+              variant="danger"
+              onClick={onDelete}
+              disabled={busy}
+              className="mr-auto"
+              title={
+                isDraft
+                  ? 'Delete this draft entry'
+                  : 'Delete this entry. It will be removed from pay-period totals and approval queues.'
+              }
+            >
               Delete
             </Button>
           )}
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={onSave} disabled={!durationValid || busy}>
-            {isEdit ? 'Save changes' : 'Add entry'}
-          </Button>
+          <Button variant="ghost" onClick={onClose}>{fieldsEditable ? 'Cancel' : 'Close'}</Button>
+          {fieldsEditable && (
+            <Button variant="primary" onClick={onSave} disabled={!durationValid || busy}>
+              {isEdit ? 'Save changes' : 'Add entry'}
+            </Button>
+          )}
         </>
       }
     >
@@ -157,14 +191,27 @@ export function EntryFormModal({
             {entry.rejectionNote}
           </div>
         )}
+        {isEdit && !fieldsEditable && (
+          <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
+            This entry has been {entry?.status}. Fields are read-only; use Delete below if you need to retract it.
+          </div>
+        )}
         <Field label="Client">
-          <Select value={clientId} onChange={(e) => { setClientId(e.target.value); setProjectId(''); }}>
+          <Select
+            value={clientId}
+            onChange={(e) => { setClientId(e.target.value); setProjectId(''); }}
+            disabled={!fieldsEditable}
+          >
             <option value="">— Pick a client —</option>
             {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
         </Field>
         <Field label="Project">
-          <Select value={projectId} onChange={(e) => setProjectId(e.target.value)} disabled={!clientId}>
+          <Select
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            disabled={!fieldsEditable || !clientId}
+          >
             <option value="">— Pick a project —</option>
             {projectsForClient.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </Select>
@@ -174,6 +221,7 @@ export function EntryFormModal({
             <Input
               type="datetime-local"
               value={start}
+              disabled={!fieldsEditable}
               onChange={(e) => {
                 const v = e.target.value;
                 setStart(v);
@@ -182,7 +230,13 @@ export function EntryFormModal({
             />
           </Field>
           <Field label="End">
-            <Input type="datetime-local" value={end} min={start} onChange={(e) => setEnd(e.target.value)} />
+            <Input
+              type="datetime-local"
+              value={end}
+              min={start}
+              disabled={!fieldsEditable}
+              onChange={(e) => setEnd(e.target.value)}
+            />
           </Field>
         </div>
         <div className={`text-sm ${durationValid ? 'text-gray-600' : 'text-red-600'}`}>
@@ -191,7 +245,14 @@ export function EntryFormModal({
             {durationValid ? fmtMins(durationMin) : durationMin <= 0 ? 'end must be after start' : 'exceeds 24h'}
           </span>
         </div>
-        <Field label="Note"><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="What did you do?" /></Field>
+        <Field label="Note">
+          <Input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="What did you do?"
+            disabled={!fieldsEditable}
+          />
+        </Field>
       </div>
     </Modal>
   );

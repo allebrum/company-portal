@@ -4,6 +4,7 @@ import {
   timeEntries,
   activeTimers,
   todos,
+  payPeriods,
   type TimeEntry,
   type ActiveTimer,
 } from '../db/schema.js';
@@ -206,10 +207,44 @@ export async function deleteEntry(id: string, viewerId: string, canManageAll: bo
   const rows = await db.select().from(timeEntries).where(eq(timeEntries.id, id)).limit(1);
   const row = rows[0];
   if (!row) throw new HttpError(404, 'entry_not_found');
-  const canDel = row.userId === viewerId && row.status === 'draft';
-  if (!canDel && !canManageAll) throw new HttpError(403, 'forbidden');
+
+  // Ownership / permission gate. The status check that previously
+  // restricted self-delete to drafts is gone — users can delete any of
+  // their own entries (draft, submitted, rejected, approved) so they
+  // can correct mistakes without waiting on an admin. Admins with
+  // `time_entry.delete` can still purge anyone's entries.
+  const isOwner = row.userId === viewerId;
+  if (!isOwner && !canManageAll) throw new HttpError(403, 'forbidden');
+
+  // Closed-period guard. The period has been sealed (admin clicked
+  // "Close period" — payroll math + bookkeeper email + paid totals
+  // are now historical record). Deleting an entry inside it would
+  // retroactively change the closed period's totals, which is a data-
+  // integrity violation we won't paper over. An admin who really needs
+  // to remove such an entry must reopen the period first.
+  if (row.payPeriodId) {
+    const periodRows = await db
+      .select({ status: payPeriods.status })
+      .from(payPeriods)
+      .where(eq(payPeriods.id, row.payPeriodId))
+      .limit(1);
+    if (periodRows[0]?.status === 'closed') {
+      throw new HttpError(409, 'entry_in_closed_period');
+    }
+  }
+
   await db.delete(timeEntries).where(eq(timeEntries.id, id));
   emit.toUser(row.userId, EV.ENTRY_DELETED, { id: row.id, by: viewerId, at: new Date().toISOString() });
+  // Audit non-draft deletes so the activity feed shows that a user
+  // withdrew an already-submitted/approved entry. Draft deletes happen
+  // routinely while logging — too noisy to log.
+  if (row.status !== 'draft') {
+    await appendActivity({
+      whoId: viewerId,
+      kind: 'time.delete',
+      target: `Deleted ${row.status} entry · ${row.durationMin}m`,
+    });
+  }
 }
 
 // ---- Workflow ----

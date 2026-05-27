@@ -61,8 +61,12 @@ export default function TimePage() {
 
   const openCreate = () => { setEditing(null); setModalOpen(true); };
   const openEdit = (e: EntryRow) => {
-    const editable = (e.userId === me?.id && (e.status === 'draft' || e.status === 'rejected')) || isAdmin;
-    if (!editable) return;
+    // Any owned entry opens — the modal handles the edit-vs-delete-only
+    // shape internally (fields locked when not draft/rejected, but the
+    // Delete button is always available so users can retract submitted
+    // or approved entries they need to correct).
+    const canOpen = e.userId === me?.id || isAdmin;
+    if (!canOpen) return;
     setEditing(e);
     setModalOpen(true);
   };
