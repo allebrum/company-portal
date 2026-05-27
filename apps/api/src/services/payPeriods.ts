@@ -496,7 +496,10 @@ export async function sendPayrollReportToBookkeeper(
   const userById = new Map(userRows.map((u) => [u.id, u]));
   const projectById = new Map(projectRows.map((p) => [p.id, p]));
 
-  // Per-employee aggregation.
+  // Per-employee aggregation. We collect the raw entry rows alongside
+  // the totals so the bookkeeper email can render an entry-by-entry
+  // detail table beneath each summary row — matches the in-app
+  // PeriodReviewModal's expanded view.
   type Summary = {
     userId: string;
     name: string;
@@ -505,6 +508,7 @@ export async function sendPayrollReportToBookkeeper(
     revenue: number;
     approverIds: Set<string>;
     statuses: Set<string>;
+    rawEntries: typeof entries;
   };
   const byUser = new Map<string, Summary>();
   for (const e of entries) {
@@ -520,18 +524,29 @@ export async function sendPayrollReportToBookkeeper(
         revenue: 0,
         approverIds: new Set(),
         statuses: new Set(),
+        rawEntries: [],
       };
       byUser.set(e.userId, s);
     }
     s.durationMin += e.durationMin;
     s.statuses.add(e.status);
     if (e.approvedBy) s.approverIds.add(e.approvedBy);
+    s.rawEntries.push(e);
     const proj = e.projectId ? projectById.get(e.projectId) : undefined;
     if (proj?.billable) {
       const rate = Number(u.billable) || 0;
       s.revenue += (e.durationMin / 60) * rate;
     }
   }
+
+  // Clock formatter — match the in-app `fmtClock` (HH:MM in the
+  // viewer's local TZ). The bookkeeper email is rendered server-side
+  // in the API server's TZ; that's the same TZ admins see when
+  // reviewing, so the numbers line up.
+  const fmtClock = (iso: string): string => {
+    const d = new Date(iso);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
 
   const summaries = [...byUser.values()]
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -544,6 +559,19 @@ export async function sendPayrollReportToBookkeeper(
         .map((id) => userById.get(id)?.name ?? 'Unknown')
         .sort(),
       statuses: [...s.statuses].sort(),
+      entries: s.rawEntries
+        .slice()
+        .sort((a, b) => a.startIso.localeCompare(b.startIso))
+        .map((e) => ({
+          date: e.startIso.slice(0, 10),
+          start: fmtClock(e.startIso),
+          end: e.endIso ? fmtClock(e.endIso) : '—',
+          durationMin: e.durationMin,
+          project: e.projectId ? projectById.get(e.projectId)?.name ?? '—' : '—',
+          note: e.note ?? '',
+          status: e.status,
+          approver: e.approvedBy ? userById.get(e.approvedBy)?.name ?? '—' : '—',
+        })),
     }));
 
   await sendPayrollReportEmail({
