@@ -1,5 +1,19 @@
 // Mirrors helpers from project/app/data.jsx so visuals match the prototype.
 
+/**
+ * Monday-anchored start-of-week — the workspace standard. Used by the
+ * Dashboard's "Where the hours went" rollup and the Clients directory's
+ * "This week" stat so both surfaces report on the same window.
+ */
+export function startOfWeek(d: Date): Date {
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day; // Monday
+  const out = new Date(d);
+  out.setDate(d.getDate() + diff);
+  out.setHours(0, 0, 0, 0);
+  return out;
+}
+
 export function fmtMins(m: number): string {
   const h = Math.floor(m / 60);
   const mm = Math.round(m % 60);

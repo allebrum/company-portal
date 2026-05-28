@@ -20,16 +20,7 @@ import {
   type TodoRow,
   type GoalRow,
 } from '@/hooks/useResources';
-import { fmtMins, fmtMoney, relativeFromIso, PRIORITY_DOT } from '@/lib/formatters';
-
-function startOfWeek(d: Date): Date {
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day; // Monday
-  const out = new Date(d);
-  out.setDate(d.getDate() + diff);
-  out.setHours(0, 0, 0, 0);
-  return out;
-}
+import { fmtMins, fmtMoney, relativeFromIso, startOfWeek, PRIORITY_DOT } from '@/lib/formatters';
 
 export default function DashboardPage() {
   const { me } = useAuth();

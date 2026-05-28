@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Clock, CheckSquare, Target, Shield, BarChart3, Settings, FolderOpen } from 'lucide-react';
+import { Home, Briefcase, Clock, CheckSquare, Target, Shield, BarChart3, Settings, FolderOpen } from 'lucide-react';
 import type { Permission } from '@allebrum/shared';
 import { useEntries, useAuthConfig } from '@/hooks/useResources';
 import { useAuth } from '@/hooks/useAuth';
@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 
 const NAV: { id: string; href: string; label: string; Icon: typeof Home; anyPerm?: Permission[] }[] = [
   { id: 'dashboard', href: '/dashboard', label: 'Dashboard', Icon: Home },
+  { id: 'clients', href: '/clients', label: 'Clients', Icon: Briefcase },
   { id: 'time', href: '/time', label: 'Time tracking', Icon: Clock },
   { id: 'todos', href: '/todos', label: 'To-dos', Icon: CheckSquare },
   { id: 'roadmap', href: '/roadmap', label: 'Roadmap', Icon: Target },
