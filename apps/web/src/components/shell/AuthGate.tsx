@@ -8,6 +8,7 @@ import { useBootstrap } from '@/hooks/useResources';
 import { Sidebar } from './Sidebar';
 import { TimerBar } from './TimerBar';
 import { ClientSpaceOverlay } from '@/components/space/ClientSpaceOverlay';
+import { UploadTray } from '@/components/upload/UploadTray';
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
@@ -61,6 +62,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
           when context's openScope is non-null. Lives alongside the shell so
           it sits above sidebar + content but inside the auth gate. */}
       <ClientSpaceOverlay />
+      {/* Background upload manager UI — fixed bottom-left card. Persists
+          across Space-overlay open/close and route changes; users can
+          drop files, navigate elsewhere, and watch progress complete. */}
+      <UploadTray />
     </>
   );
 }

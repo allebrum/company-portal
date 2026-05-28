@@ -14,7 +14,8 @@ import {
   useUpdateGoal, useUpdateTodo, useStartTimer, useStopTimer,
   type GoalRow, type TodoRow, type ProjectRow, type ClientRow,
 } from '@/hooks/useResources';
-import { useUploadSpaceFile, useDriveStatus, driveConnectUrl } from '@/hooks/useDrive';
+import { useDriveStatus, driveConnectUrl } from '@/hooks/useDrive';
+import { useUploadManager } from '@/contexts/UploadManagerContext';
 import { useMyTimer } from '@/hooks/useTimer';
 import { useToast } from '@/components/ui/Toast';
 import { Button } from '@/components/ui/Button';
@@ -687,7 +688,7 @@ function FilesTab({
   const { data: driveStatus } = useDriveStatus();
   const { data: goals = [] } = useGoals();
   const { data: projects = [] } = useProjects();
-  const upload = useUploadSpaceFile();
+  const { enqueue } = useUploadManager();
   const setFiles = useUpdateSpaceFiles(scope);
   const toast = useToast();
   const { me } = useAuth();
@@ -725,17 +726,22 @@ function FilesTab({
       );
   }, [scope, projects]);
 
-  const onUploadFile = async (file: File) => {
+  // Hand the file(s) to the app-level UploadManager — it owns the queue,
+  // concurrency, progress, and per-file errors. The FilesTab no longer
+  // awaits or surfaces individual upload results; the tray (mounted in
+  // AuthGate) renders them and survives Space-overlay teardown.
+  const onUploadFiles = (files: File[]) => {
+    if (files.length === 0) return;
     if (!driveConnected) {
       toast.error('Connect Google Drive first');
       return;
     }
-    try {
-      await upload.mutateAsync({ scopeKind: scope.kind, scopeId: scope.id, file });
-      toast.success(`Uploaded ${file.name}`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Upload failed');
-    }
+    const scopeLabel =
+      scope.kind === 'project'
+        ? `${data.project?.name ?? 'Project'}${data.client?.name ? ` · ${data.client.name}` : ''}`
+        : data.client?.name ?? 'Client';
+    enqueue({ scopeKind: scope.kind, scopeId: scope.id, scopeLabel, files });
+    toast.success(`${files.length} file${files.length === 1 ? '' : 's'} queued`);
   };
 
   const onPasteLink = async (v: EmbedDialogValue) => {
@@ -774,8 +780,7 @@ function FilesTab({
           e.preventDefault();
           setDragging(false);
           if (!driveConnected) return;
-          const files = Array.from(e.dataTransfer.files);
-          for (const f of files) void onUploadFile(f);
+          onUploadFiles(Array.from(e.dataTransfer.files));
         }}
         className={`rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors ${
           driveConnected
@@ -830,8 +835,7 @@ function FilesTab({
           multiple
           className="hidden"
           onChange={(e) => {
-            const files = Array.from(e.target.files ?? []);
-            for (const f of files) void onUploadFile(f);
+            onUploadFiles(Array.from(e.target.files ?? []));
             e.target.value = '';
           }}
         />
