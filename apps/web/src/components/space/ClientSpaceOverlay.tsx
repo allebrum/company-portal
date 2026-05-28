@@ -740,7 +740,11 @@ function FilesTab({
       scope.kind === 'project'
         ? `${data.project?.name ?? 'Project'}${data.client?.name ? ` · ${data.client.name}` : ''}`
         : data.client?.name ?? 'Client';
-    enqueue({ scopeKind: scope.kind, scopeId: scope.id, scopeLabel, files });
+    enqueue({
+      target: { kind: 'space', scopeKind: scope.kind, scopeId: scope.id },
+      scopeLabel,
+      files,
+    });
     toast.success(`${files.length} file${files.length === 1 ? '' : 's'} queued`);
   };
 

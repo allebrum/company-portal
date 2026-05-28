@@ -44,10 +44,27 @@ const MAX_FILE_BYTES = 100 * 1024 * 1024;
 
 export type UploadStatus = 'queued' | 'uploading' | 'done' | 'failed' | 'cancelled';
 
+/**
+ * Where an enqueued file should land. Two flavours today:
+ *
+ * - `space` — atomic upload to a Client/Project Space (Drive upload +
+ *   spaceFiles JSONB append via F17A's `/api/spaces/...` endpoint).
+ *   Used by the FilesTab inside `ClientSpaceOverlay`.
+ * - `drive` — direct upload to an arbitrary Drive folder via the
+ *   generic `/api/integrations/drive/upload` endpoint. Used by the
+ *   Media manager so it can drop into any folder the admin is
+ *   browsing, including ones not linked to a client/project.
+ *
+ * Captured at enqueue time so the destination doesn't change if the
+ * user navigates away — uploads keep going to where they started.
+ */
+export type UploadTarget =
+  | { kind: 'space'; scopeKind: 'client' | 'project'; scopeId: string }
+  | { kind: 'drive'; folderId: string };
+
 export type UploadItem = {
   id: string;
-  scopeKind: 'client' | 'project';
-  scopeId: string;
+  target: UploadTarget;
   /** Display label captured at enqueue time; survives Space-overlay teardown. */
   scopeLabel: string;
   file: File;
@@ -62,8 +79,7 @@ export type UploadItem = {
 };
 
 type EnqueueArgs = {
-  scopeKind: 'client' | 'project';
-  scopeId: string;
+  target: UploadTarget;
   scopeLabel: string;
   files: File[];
 };
@@ -175,7 +191,13 @@ export function UploadManagerProvider({ children }: { children: ReactNode }) {
     (item: UploadItem) => {
       const xhr = new XMLHttpRequest();
       xhrs.current.set(item.id, xhr);
-      const url = `${API_URL}/api/spaces/${item.scopeKind}/${item.scopeId}/files`;
+      // Route + form body depend on target kind. Cache invalidation does
+      // too — Space uploads also touch clients/projects rows; Drive
+      // uploads only refresh the drive listings.
+      const url =
+        item.target.kind === 'space'
+          ? `${API_URL}/api/spaces/${item.target.scopeKind}/${item.target.scopeId}/files`
+          : `${API_URL}/api/integrations/drive/upload`;
 
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
@@ -187,17 +209,25 @@ export function UploadManagerProvider({ children }: { children: ReactNode }) {
         if (xhr.status >= 200 && xhr.status < 300) {
           let driveFileId: string | undefined;
           try {
-            const body = JSON.parse(xhr.responseText) as { file?: { url?: string; meta?: string } };
-            // Server stores `Drive · <id>` in meta. Optional, just for display.
-            const match = body?.file?.meta?.match(/Drive · (\S+)/);
-            driveFileId = match?.[1];
+            const body = JSON.parse(xhr.responseText) as {
+              file?: { url?: string; meta?: string };
+              id?: string;
+            };
+            if (item.target.kind === 'space') {
+              const match = body?.file?.meta?.match(/Drive · (\S+)/);
+              driveFileId = match?.[1];
+            } else {
+              // Drive upload returns the DriveEntry shape with `id`.
+              driveFileId = body?.id;
+            }
           } catch {
-            /* ignore parse failure — success status is the source of truth */
+            /* parse failure — success status is the source of truth */
           }
           dispatch({ type: 'done', id: item.id, driveFileId, finishedAt: Date.now() });
-          // Refresh the Space query so the new file shows up in the Files tab.
-          qc.invalidateQueries({ queryKey: qk.clients });
-          qc.invalidateQueries({ queryKey: qk.projects });
+          if (item.target.kind === 'space') {
+            qc.invalidateQueries({ queryKey: qk.clients });
+            qc.invalidateQueries({ queryKey: qk.projects });
+          }
           qc.invalidateQueries({ queryKey: ['driveList'] });
         } else {
           let errMsg = `HTTP ${xhr.status}`;
@@ -223,6 +253,11 @@ export function UploadManagerProvider({ children }: { children: ReactNode }) {
       xhr.withCredentials = true;
 
       const fd = new FormData();
+      // The Drive endpoint expects a `parentId` field alongside `file`;
+      // the Spaces endpoint encodes the target in the URL path.
+      if (item.target.kind === 'drive') {
+        fd.append('parentId', item.target.folderId);
+      }
       fd.append('file', item.file);
       dispatch({ type: 'start', id: item.id, startedAt: Date.now() });
       xhr.send(fd);
@@ -240,15 +275,14 @@ export function UploadManagerProvider({ children }: { children: ReactNode }) {
     next.forEach(startUpload);
   }, [items, startUpload]);
 
-  const enqueue = useCallback(({ scopeKind, scopeId, scopeLabel, files }: EnqueueArgs) => {
+  const enqueue = useCallback(({ target, scopeLabel, files }: EnqueueArgs) => {
     if (files.length === 0) return;
     const newItems: UploadItem[] = files.map((file) => {
       // Preflight the size cap so we don't waste bytes only to be 413'd.
       if (file.size > MAX_FILE_BYTES) {
         return {
           id: nextId(),
-          scopeKind,
-          scopeId,
+          target,
           scopeLabel,
           file,
           status: 'failed' as const,
@@ -259,8 +293,7 @@ export function UploadManagerProvider({ children }: { children: ReactNode }) {
       }
       return {
         id: nextId(),
-        scopeKind,
-        scopeId,
+        target,
         scopeLabel,
         file,
         status: 'queued' as const,
