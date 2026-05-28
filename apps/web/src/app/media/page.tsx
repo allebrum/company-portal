@@ -23,7 +23,6 @@ import {
   useDriveStatus,
   useDriveList,
   useCreateDriveFolder,
-  useUploadDriveFile,
   useDeleteDriveEntry,
   useDisconnectDrive,
   driveConnectUrl,
@@ -31,6 +30,7 @@ import {
   previewUrl,
   type DriveEntry,
 } from '@/hooks/useDrive';
+import { useUploadManager } from '@/contexts/UploadManagerContext';
 
 export default function MediaPage() {
   const { can } = useAuth();
@@ -40,13 +40,14 @@ export default function MediaPage() {
   const connected = !!status?.connected;
   const { data: listing, isFetching } = useDriveList(folderId, connected);
   const createFolder = useCreateDriveFolder();
-  const uploadFile = useUploadDriveFile();
+  const { enqueue } = useUploadManager();
   const delEntry = useDeleteDriveEntry();
   const disconnect = useDisconnectDrive();
 
   const [newFolder, setNewFolder] = useState('');
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [preview, setPreview] = useState<DriveEntry | null>(null);
+  const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const handledDriveParam = useRef(false);
 
@@ -88,14 +89,22 @@ export default function MediaPage() {
     }
   };
 
-  const onUpload = async (file: File) => {
-    if (!currentParent) return;
-    try {
-      await uploadFile.mutateAsync({ parentId: currentParent, file });
-      toast.success(`Uploaded ${file.name}`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Upload failed');
+  // Hand off to the shared upload manager so progress + cancel + retry
+  // live in the persistent bottom-left tray and uploads continue running
+  // if the user navigates away from /media. Captures the current folder
+  // ID at enqueue time so navigating into a different folder mid-upload
+  // doesn't redirect in-flight files.
+  const onUploadFiles = (files: File[]) => {
+    if (files.length === 0) return;
+    if (!currentParent) {
+      toast.error('Folder list is still loading — try again in a moment');
+      return;
     }
+    const path = listing?.path ?? [];
+    const scopeLabel =
+      path.length <= 1 ? 'Shared' : path[path.length - 1]?.name ?? 'Drive';
+    enqueue({ target: { kind: 'drive', folderId: currentParent }, scopeLabel, files });
+    toast.success(`${files.length} file${files.length === 1 ? '' : 's'} queued`);
   };
 
   return (
@@ -178,26 +187,57 @@ export default function MediaPage() {
               <input
                 ref={fileRef}
                 type="file"
+                multiple
                 className="hidden"
                 onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void onUpload(f);
+                  onUploadFiles(Array.from(e.target.files ?? []));
                   e.target.value = '';
                 }}
               />
-              <Button variant="primary" size="sm" onClick={() => fileRef.current?.click()} disabled={uploadFile.isPending}>
-                <Upload className="w-4 h-4" /> {uploadFile.isPending ? 'Uploading…' : 'Upload'}
+              <Button variant="primary" size="sm" onClick={() => fileRef.current?.click()}>
+                <Upload className="w-4 h-4" /> Upload
               </Button>
             </div>
           </Card>
 
           <Section>
+            <div
+              onDragOver={(e) => {
+                if (!currentParent) return;
+                e.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={(e) => {
+                // Only flip off when leaving the wrapper itself, not on
+                // child enter/leave (DOM bubbles dragleave on every child).
+                if (e.currentTarget === e.target) setDragging(false);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragging(false);
+                onUploadFiles(Array.from(e.dataTransfer.files));
+              }}
+              className={`rounded-2xl transition-colors ${
+                dragging ? 'ring-2 ring-brand-500 ring-offset-2 ring-offset-gray-50' : ''
+              }`}
+            >
             <Card>
+              {dragging && (
+                <div className="p-6 text-center bg-brand-50 border-b border-brand-100">
+                  <Upload className="w-6 h-6 mx-auto mb-1.5 text-brand-600" />
+                  <div className="text-sm font-semibold text-brand-800">
+                    Drop to upload into this folder
+                  </div>
+                </div>
+              )}
               {isFetching && !listing ? (
                 <div className="p-8 text-center text-gray-500 text-sm">Loading…</div>
               ) : (listing?.entries.length ?? 0) === 0 ? (
                 <div className="p-8">
-                  <Empty title="Empty folder" description="Create a sub-folder or upload a file." />
+                  <Empty
+                    title="Empty folder"
+                    description="Drop files here, or use New folder / Upload to get started."
+                  />
                 </div>
               ) : (
                 <ul className="divide-y divide-gray-100">
@@ -265,6 +305,7 @@ export default function MediaPage() {
                 </ul>
               )}
             </Card>
+            </div>
           </Section>
         </>
       )}
