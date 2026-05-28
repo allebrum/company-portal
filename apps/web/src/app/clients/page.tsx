@@ -1,7 +1,7 @@
 'use client';
 
-import { useMemo } from 'react';
-import { AlertTriangle, ArrowRight, CheckCircle2, Layers } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, ArrowRight, Briefcase, CheckCircle2, FolderKanban, Layers, Search } from 'lucide-react';
 import { Card, Section, Empty } from '@/components/ui';
 import { AvatarStack, type AvatarUser } from '@/components/ui/Avatar';
 import {
@@ -66,13 +66,16 @@ export default function ClientsPage() {
 
   return (
     <div className="space-y-7">
-      <div>
-        <div className="eyebrow">Workspaces</div>
-        <h1 className="text-3xl font-bold text-gray-900">Clients</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          {clients.length} {clients.length === 1 ? 'client' : 'clients'} · {projects.length}{' '}
-          {projects.length === 1 ? 'project' : 'projects'} · open any card to jump into its space.
-        </p>
+      <div className="flex items-end justify-between gap-4 flex-wrap">
+        <div>
+          <div className="eyebrow">Workspaces</div>
+          <h1 className="text-3xl font-bold text-gray-900">Clients</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            {clients.length} {clients.length === 1 ? 'client' : 'clients'} · {projects.length}{' '}
+            {projects.length === 1 ? 'project' : 'projects'} · open any card to jump into its space.
+          </p>
+        </div>
+        <QuickOpenSearch clients={clients} projects={projects} />
       </div>
 
       <RecentsRow clients={clients} projects={projects} />
@@ -95,6 +98,197 @@ export default function ClientsPage() {
               users={users}
             />
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Quick-open search ------------------------------------------------
+
+/**
+ * Search input + dropdown that lets the user jump straight into any
+ * Client or Project space without scrolling the directory.
+ *
+ * - Case-insensitive substring match on client and project names.
+ * - Top 10 results, clients first then projects (clients first so the
+ *   most common "I'm looking for this client" path hits sooner).
+ * - Enter opens the top match; arrow keys move the selection; Esc /
+ *   click-outside / blur close.
+ */
+function QuickOpenSearch({
+  clients,
+  projects,
+}: {
+  clients: ClientRow[];
+  projects: ProjectRow[];
+}) {
+  const { openSpace } = useSpace();
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Close on click outside the wrapper. Use mousedown so we beat onClick
+  // handlers inside the dropdown firing twice.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!wrapperRef.current) return;
+      if (!wrapperRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  type Result =
+    | { kind: 'client'; client: ClientRow }
+    | { kind: 'project'; project: ProjectRow; client: ClientRow | null };
+
+  const results = useMemo((): Result[] => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const out: Result[] = [];
+    for (const c of clients) {
+      if (c.name.toLowerCase().includes(q)) out.push({ kind: 'client', client: c });
+    }
+    const clientById = new Map(clients.map((c) => [c.id, c]));
+    for (const p of projects) {
+      if (p.name.toLowerCase().includes(q)) {
+        out.push({ kind: 'project', project: p, client: clientById.get(p.clientId) ?? null });
+      }
+    }
+    return out.slice(0, 10);
+  }, [query, clients, projects]);
+
+  // Reset selection any time the result set changes.
+  useEffect(() => {
+    setActiveIdx(0);
+  }, [results]);
+
+  const openResult = (r: Result) => {
+    if (r.kind === 'client') {
+      openSpace({ kind: 'client', id: r.client.id } as Scope);
+    } else {
+      openSpace({ kind: 'project', id: r.project.id } as Scope);
+    }
+    setQuery('');
+    setOpen(false);
+  };
+
+  return (
+    <div ref={wrapperRef} className="relative w-full sm:w-80">
+      <div className="relative">
+        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              setOpen(false);
+              (e.target as HTMLInputElement).blur();
+            } else if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              if (results.length > 0) setActiveIdx((i) => (i + 1) % results.length);
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              if (results.length > 0) {
+                setActiveIdx((i) => (i - 1 + results.length) % results.length);
+              }
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              const r = results[activeIdx];
+              if (r) openResult(r);
+            }
+          }}
+          placeholder="Search clients or projects…"
+          className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-brand-200 focus:border-brand-400"
+        />
+      </div>
+
+      {open && query.trim() !== '' && (
+        <div className="absolute right-0 left-0 mt-1.5 max-h-[60vh] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl z-30">
+          {results.length === 0 ? (
+            <div className="px-4 py-3 text-[13px] text-gray-500">No matches</div>
+          ) : (
+            <ul>
+              {results.map((r, i) => {
+                const isActive = i === activeIdx;
+                if (r.kind === 'client') {
+                  const k = kindFor(r.client.kind);
+                  return (
+                    <li key={`c-${r.client.id}`}>
+                      <button
+                        type="button"
+                        // Use mousedown so the outside-click listener (also
+                        // mousedown) doesn't pre-empt the click.
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          openResult(r);
+                        }}
+                        onMouseEnter={() => setActiveIdx(i)}
+                        className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${
+                          isActive ? 'bg-brand-50' : 'hover:bg-gray-50'
+                        }`}
+                      >
+                        <span
+                          className="w-7 h-7 rounded-md text-white text-[11px] font-bold flex items-center justify-center shrink-0"
+                          style={{ backgroundColor: r.client.color }}
+                        >
+                          {initials(r.client.name)}
+                        </span>
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-[13px] font-semibold text-gray-900 truncate">
+                            {r.client.name}
+                          </span>
+                          <span className="block text-[11px] text-gray-500 truncate">
+                            Client · {k.label}
+                          </span>
+                        </span>
+                        <Briefcase className="w-3.5 h-3.5 text-gray-300 shrink-0" />
+                      </button>
+                    </li>
+                  );
+                }
+                return (
+                  <li key={`p-${r.project.id}`}>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        openResult(r);
+                      }}
+                      onMouseEnter={() => setActiveIdx(i)}
+                      className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${
+                        isActive ? 'bg-brand-50' : 'hover:bg-gray-50'
+                      }`}
+                    >
+                      <span
+                        className="w-7 h-7 rounded-md text-white text-[11px] font-bold flex items-center justify-center shrink-0"
+                        style={{ backgroundColor: r.project.color }}
+                      >
+                        {(r.project.code || initials(r.project.name)).slice(0, 2).toUpperCase()}
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-[13px] font-semibold text-gray-900 truncate">
+                          {r.project.name}
+                        </span>
+                        <span className="block text-[11px] text-gray-500 truncate">
+                          Project{r.client ? ` · in ${r.client.name}` : ''}
+                        </span>
+                      </span>
+                      <FolderKanban className="w-3.5 h-3.5 text-gray-300 shrink-0" />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
       )}
     </div>
