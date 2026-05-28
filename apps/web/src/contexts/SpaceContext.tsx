@@ -20,19 +20,33 @@ import type { Scope } from '@/lib/roadmap';
  */
 type SpaceCtx = {
   openScope: Scope | null;
+  /**
+   * LRU of recently-opened Spaces — newest first, deduped by (kind, id),
+   * capped at 6. In-memory only (no persistence across reload). Powers
+   * the Clients directory's "Jump back in" row.
+   */
+  recentSpaces: Scope[];
   openSpace: (scope: Scope) => void;
   closeSpace: () => void;
 };
+
+const RECENTS_MAX = 6;
 
 const Ctx = createContext<SpaceCtx | null>(null);
 
 export function SpaceProvider({ children }: { children: ReactNode }) {
   const [openScope, setOpenScope] = useState<Scope | null>(null);
+  const [recentSpaces, setRecentSpaces] = useState<Scope[]>([]);
 
   const openSpace = useCallback((scope: Scope) => {
     // The "All clients" scope has no space — refuse it defensively.
     if (scope.kind === 'all') return;
     setOpenScope(scope);
+    // Update recents LRU — push to front, dedupe by (kind, id), cap.
+    setRecentSpaces((prev) => {
+      const without = prev.filter((s) => !(s.kind === scope.kind && 'id' in s && 'id' in scope && s.id === scope.id));
+      return [scope, ...without].slice(0, RECENTS_MAX);
+    });
   }, []);
   const closeSpace = useCallback(() => setOpenScope(null), []);
 
@@ -49,7 +63,9 @@ export function SpaceProvider({ children }: { children: ReactNode }) {
     };
   }, [openScope]);
 
-  return <Ctx.Provider value={{ openScope, openSpace, closeSpace }}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider value={{ openScope, recentSpaces, openSpace, closeSpace }}>{children}</Ctx.Provider>
+  );
 }
 
 export function useSpace(): SpaceCtx {
