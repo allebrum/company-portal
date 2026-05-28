@@ -8,6 +8,7 @@ import { EV, type ActivityPayload, type TimerPayload } from '@allebrum/shared';
 import { AuthProvider } from '@/hooks/useAuth';
 import { ToastProvider } from '@/components/ui/Toast';
 import { SpaceProvider } from '@/contexts/SpaceContext';
+import { UploadManagerProvider } from '@/contexts/UploadManagerContext';
 
 function LiveEventBindings(): null {
   const qc = useQueryClient();
@@ -105,8 +106,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <ToastProvider>
         <AuthProvider>
           <SpaceProvider>
-            <LiveEventBindings />
-            {children}
+            <UploadManagerProvider>
+              <LiveEventBindings />
+              {children}
+            </UploadManagerProvider>
           </SpaceProvider>
         </AuthProvider>
       </ToastProvider>
