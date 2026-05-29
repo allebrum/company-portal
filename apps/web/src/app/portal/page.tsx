@@ -1,35 +1,28 @@
 'use client';
 
+import { Suspense, useEffect } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowRight, Calendar, FileText, Target } from 'lucide-react';
 import { usePortalMe, usePortalOverview } from '@/hooks/usePortal';
 import { PortalHeader } from '@/components/portal/PortalHeader';
 
-/**
- * F23 — public client portal **overview**. Hero card (client name +
- * project count), in-flight goals, upcoming milestones, projects strip.
- * Reads /api/portal/overview in one shot to keep the public surface
- * chatter low.
- */
-export default function PortalOverviewPage() {
-  const params = useParams<{ slug: string }>();
-  const slug = params.slug;
+function Page() {
+  const search = useSearchParams();
+  const slug = search?.get('slug') ?? '';
   const router = useRouter();
   const meQuery = usePortalMe();
   const me = meQuery.data ?? null;
   const overview = usePortalOverview(!!me);
+  const q = `?slug=${encodeURIComponent(slug)}`;
 
-  // Redirect unauth → /portal/{slug}/login. The lookup happens up here
-  // because the layout is shared with login/check-email/access pages.
   useEffect(() => {
     if (meQuery.isLoading) return;
-    if (!me) router.replace(`/portal/${slug}/login`);
-  }, [meQuery.isLoading, me, slug, router]);
+    if (!me) router.replace(`/portal/login${q}`);
+  }, [meQuery.isLoading, me, slug, router, q]);
 
   if (meQuery.isLoading || !me) {
-    return <PortalLoading slug={slug} me={null} />;
+    return <PortalLoading slug={slug} />;
   }
 
   const data = overview.data;
@@ -65,7 +58,6 @@ export default function PortalOverviewPage() {
           </div>
         </div>
 
-        {/* Projects strip */}
         <Section title="Projects" icon={<Target className="w-4 h-4" />}>
           {!data ? (
             <SkeletonBlock />
@@ -76,7 +68,7 @@ export default function PortalOverviewPage() {
               {data.projects.map((p) => (
                 <Link
                   key={p.id}
-                  href={`/portal/${slug}/projects#${p.id}`}
+                  href={`/portal/projects${q}#${p.id}`}
                   className="group rounded-xl border border-gray-200 bg-white p-4 hover:border-brand-300 hover:shadow-sm transition-all"
                 >
                   <div className="flex items-center gap-2.5">
@@ -108,7 +100,6 @@ export default function PortalOverviewPage() {
           )}
         </Section>
 
-        {/* Goals in flight */}
         <Section title="Goals in flight" icon={<Target className="w-4 h-4" />}>
           {!data ? (
             <SkeletonBlock />
@@ -144,7 +135,6 @@ export default function PortalOverviewPage() {
           )}
         </Section>
 
-        {/* Upcoming milestones */}
         <Section title="Upcoming milestones" icon={<Calendar className="w-4 h-4" />}>
           {!data ? (
             <SkeletonBlock />
@@ -167,10 +157,9 @@ export default function PortalOverviewPage() {
           )}
         </Section>
 
-        {/* Files CTA */}
         {data && data.fileCount > 0 && (
           <Link
-            href={`/portal/${slug}/files`}
+            href={`/portal/files${q}`}
             className="inline-flex items-center gap-2 text-sm font-semibold text-brand-700 hover:underline"
           >
             <FileText className="w-4 h-4" />
@@ -215,13 +204,21 @@ function SkeletonBlock() {
   return <div className="rounded-xl bg-gray-100 animate-pulse h-24" />;
 }
 
-function PortalLoading({ slug, me }: { slug: string; me: null }) {
+function PortalLoading({ slug }: { slug: string }) {
   return (
     <>
-      <PortalHeader slug={slug} me={me} active={null} />
+      <PortalHeader slug={slug} me={null} active={null} />
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 text-center text-sm text-gray-400">
         Loading…
       </div>
     </>
+  );
+}
+
+export default function PortalOverviewPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-gray-400 p-8 text-center">Loading…</div>}>
+      <Page />
+    </Suspense>
   );
 }

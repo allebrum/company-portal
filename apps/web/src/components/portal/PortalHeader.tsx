@@ -8,8 +8,10 @@ import { useLogoutPortal, type PortalMe } from '@/hooks/usePortal';
 /**
  * F23 — branded header for the public client portal. Inherits workspace
  * branding from F8 (`portalName` / `brandPrimaryColor` / `brandLogoDataUrl`)
- * and pairs it with the client's own name + accent color. No staff
- * sidebar / TimerBar / UploadTray — the portal is its own bubble.
+ * and pairs it with the client's own name + accent color.
+ *
+ * Routes use `?slug=` query params because the portal lives outside the
+ * static-export `[slug]` dynamic segment (see layout.tsx comment).
  */
 export function PortalHeader({
   slug,
@@ -25,18 +27,18 @@ export function PortalHeader({
   const workspaceName = cfg?.portalName ?? 'Allebrum';
   const brandColor = cfg?.brandPrimaryColor ?? '#9333ea';
   const logo = cfg?.brandLogoDataUrl;
+  const q = `?slug=${encodeURIComponent(slug)}`;
 
   const nav: { id: typeof active; label: string; href: string }[] = [
-    { id: 'overview', label: 'Overview', href: `/portal/${slug}` },
-    { id: 'projects', label: 'Projects', href: `/portal/${slug}/projects` },
-    { id: 'files', label: 'Files', href: `/portal/${slug}/files` },
+    { id: 'overview', label: 'Overview', href: `/portal${q}` },
+    { id: 'projects', label: 'Projects', href: `/portal/projects${q}` },
+    { id: 'files', label: 'Files', href: `/portal/files${q}` },
   ];
 
   return (
     <header className="bg-white border-b border-gray-200">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center gap-4">
-        {/* Workspace badge */}
-        <Link href={`/portal/${slug}`} className="flex items-center gap-2 shrink-0">
+        <Link href={`/portal${q}`} className="flex items-center gap-2 shrink-0">
           {logo ? (
             <img src={logo} alt={workspaceName} className="w-8 h-8 rounded-lg object-cover" />
           ) : (
@@ -52,7 +54,6 @@ export function PortalHeader({
           </span>
         </Link>
 
-        {/* Client divider + accent */}
         {me && (
           <>
             <span className="text-gray-300">/</span>
@@ -68,7 +69,6 @@ export function PortalHeader({
           </>
         )}
 
-        {/* Nav */}
         {me && (
           <nav className="ml-auto hidden sm:flex items-center gap-1">
             {nav.map((n) => (
@@ -87,7 +87,6 @@ export function PortalHeader({
           </nav>
         )}
 
-        {/* Identity / sign-out */}
         {me ? (
           <div className="ml-auto sm:ml-3 flex items-center gap-2">
             <span className="hidden md:flex flex-col items-end leading-tight">
@@ -106,7 +105,7 @@ export function PortalHeader({
           </div>
         ) : (
           <Link
-            href={`/portal/${slug}/login`}
+            href={`/portal/login${q}`}
             className="ml-auto text-sm font-semibold hover:underline"
             style={{ color: brandColor }}
           >
@@ -115,7 +114,6 @@ export function PortalHeader({
         )}
       </div>
 
-      {/* Mobile nav */}
       {me && (
         <nav className="sm:hidden border-t border-gray-100 flex items-center justify-around">
           {nav.map((n) => (

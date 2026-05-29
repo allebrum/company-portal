@@ -1,21 +1,23 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { Suspense, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { FileText, ExternalLink } from 'lucide-react';
 import { usePortalMe, usePortalFiles } from '@/hooks/usePortal';
 import { PortalHeader } from '@/components/portal/PortalHeader';
 
-export default function PortalFilesPage() {
-  const params = useParams<{ slug: string }>();
-  const slug = params.slug;
+function Inner() {
+  const search = useSearchParams();
+  const slug = search?.get('slug') ?? '';
   const router = useRouter();
   const meQuery = usePortalMe();
   const me = meQuery.data ?? null;
   const files = usePortalFiles(!!me);
 
   useEffect(() => {
-    if (!meQuery.isLoading && !me) router.replace(`/portal/${slug}/login`);
+    if (!meQuery.isLoading && !me) {
+      router.replace(`/portal/login?slug=${encodeURIComponent(slug)}`);
+    }
   }, [meQuery.isLoading, me, slug, router]);
 
   return (
@@ -58,5 +60,13 @@ export default function PortalFilesPage() {
         )}
       </div>
     </>
+  );
+}
+
+export default function PortalFilesPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-gray-400 p-8 text-center">Loading…</div>}>
+      <Inner />
+    </Suspense>
   );
 }

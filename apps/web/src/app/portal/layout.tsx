@@ -1,8 +1,8 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useAuthConfig } from '@/hooks/useResources';
 
 /**
@@ -12,13 +12,15 @@ import { useAuthConfig } from '@/hooks/useResources';
  * (login / check-email / access) can render their own simpler hero
  * without the post-login nav.
  *
- * Static export note: this is a client component; we read `params.slug`
- * via `useParams()` so the route can be statically rendered without
- * hitting `params.slug?` Promise typing.
+ * Static export note: portal URLs use `?slug=` query params rather
+ * than a `[slug]` dynamic segment. `output: export` requires every
+ * dynamic segment to have a `generateStaticParams()` enumerated at
+ * build time — slugs aren't known then, so query params keep the
+ * routes statically exportable with no hosting gymnastics.
  */
-export default function PortalLayout({ children }: { children: ReactNode }) {
-  const params = useParams<{ slug?: string }>();
-  const slug = params?.slug ?? '';
+function LayoutInner({ children }: { children: ReactNode }) {
+  const search = useSearchParams();
+  const slug = search?.get('slug') ?? '';
   const { data: cfg } = useAuthConfig();
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -47,5 +49,13 @@ export default function PortalLayout({ children }: { children: ReactNode }) {
         </div>
       </footer>
     </div>
+  );
+}
+
+export default function PortalLayout({ children }: { children: ReactNode }) {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
+      <LayoutInner>{children}</LayoutInner>
+    </Suspense>
   );
 }
