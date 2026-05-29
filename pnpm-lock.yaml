@@ -86,6 +86,9 @@ importers:
       socket.io:
         specifier: 4.8.0
         version: 4.8.0
+      ua-parser-js:
+        specifier: ^2.0.10
+        version: 2.0.10
       zod:
         specifier: 3.23.8
         version: 3.23.8
@@ -114,6 +117,9 @@ importers:
       '@types/qrcode':
         specifier: ^1.5.6
         version: 1.5.6
+      '@types/ua-parser-js':
+        specifier: ^0.7.39
+        version: 0.7.39
       drizzle-kit:
         specifier: 0.28.1
         version: 0.28.1
@@ -150,6 +156,9 @@ importers:
       posthog-js:
         specifier: ^1.376.4
         version: 1.376.4
+      qrcode.react:
+        specifier: ^4.2.0
+        version: 4.2.0(react@18.3.1)
       react:
         specifier: 18.3.1
         version: 18.3.1
@@ -987,6 +996,9 @@ packages:
   '@types/trusted-types@2.0.7':
     resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
 
+  '@types/ua-parser-js@0.7.39':
+    resolution: {integrity: sha512-P/oDfpofrdtF5xw433SPALpdSchtJmY7nsJItf8h3KXqOslkbySh8zq4dSWXH2oTjRvJ5PczVEoCZPow6GicLg==}
+
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
@@ -1252,6 +1264,9 @@ packages:
   destroy@1.2.0:
     resolution: {integrity: sha512-2sJGJTaXIIaR1w4iJSNoN0hnMY7Gpc/n8D4qSCJw8QqFWXf7cuAgnEHxBpweaVcPevC2l3KpjYCx3NypQQgaJg==}
     engines: {node: '>= 0.8', npm: 1.2.8000 || >= 1.4.16}
+
+  detect-europe-js@0.1.2:
+    resolution: {integrity: sha512-lgdERlL3u0aUdHocoouzT10d9I89VVhk0qNRmll7mXdGfJT1/wqZ2ZLA4oJAjeACPY5fT1wsbq2AT+GkuInsow==}
 
   didyoumean@1.2.2:
     resolution: {integrity: sha512-gxtyfqMg7GKyhQmb056K7M3xszy/myH8w+B4RT+QXBQsvAOdc3XymqDDPHx1BgPgsdAA5SIifona89YtRATDzw==}
@@ -1652,6 +1667,9 @@ packages:
     resolution: {integrity: sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng==}
     engines: {node: '>=0.12.0'}
 
+  is-standalone-pwa@0.1.1:
+    resolution: {integrity: sha512-9Cbovsa52vNQCjdXOzeQq5CnCbAcRk05aU62K20WO372NrTv0NxibLFCK6lQ4/iZEFdEA3p3t2VNOn8AJ53F5g==}
+
   jiti@1.21.7:
     resolution: {integrity: sha512-/imKNG4EbWNrVjoNC/1H5/9GFy+tqjGBHCaSsN+P2RnPqjsLmv6UD3Ej+Kj8nBWaRAwyk7kK5ZUc+OEatnTR3A==}
     hasBin: true
@@ -2000,6 +2018,11 @@ packages:
     resolution: {integrity: sha512-KTqnxsgGiQ6ZAzZCVlJH5eOjSnvlyEgx1m8bkRJfOhmGRqfo5KLvmAlACQkrjEtOQ4B7wF9TdSLIs9O90MX9xA==}
     engines: {node: '>=16.0.0'}
 
+  qrcode.react@4.2.0:
+    resolution: {integrity: sha512-QpgqWi8rD9DsS9EP3z7BT+5lY5SFhsqGjpgW5DY/i3mK4M9DTBNz3ErMi8BWYEfI3L0d8GIbGmcdFAS1uIRGjA==}
+    peerDependencies:
+      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+
   qrcode@1.5.4:
     resolution: {integrity: sha512-1ca71Zgiu6ORjHqFBDpnSMTR2ReToX4l1Au1VFLyVeBTFavzQnv5JxMFr3ukHVKpSrSA2MCk0lNJSykjUfz7Zg==}
     engines: {node: '>=10.13.0'}
@@ -2276,6 +2299,13 @@ packages:
   typescript@5.6.3:
     resolution: {integrity: sha512-hjcS1mhfuyi4WW8IWtjP7brDrG2cuDZukyrYrSauoXGNgx0S7zceP07adYkJycEr56BOUTNPzbInooiN3fn1qw==}
     engines: {node: '>=14.17'}
+    hasBin: true
+
+  ua-is-frozen@0.1.2:
+    resolution: {integrity: sha512-RwKDW2p3iyWn4UbaxpP2+VxwqXh0jpvdxsYpZ5j/MLLiQOfbsV5shpgQiw93+KMYQPcteeMQ289MaAFzs3G9pw==}
+
+  ua-parser-js@2.0.10:
+    resolution: {integrity: sha512-t+3Ktbq0Ies2vaSezfOaWiolH4OigQIO1dk+1xDpOydB1COVPocVYOrEV5rqZ0kFY9XYG1v9LutCyMgYBpABcw==}
     hasBin: true
 
   uid-safe@2.1.5:
@@ -3004,6 +3034,8 @@ snapshots:
   '@types/trusted-types@2.0.7':
     optional: true
 
+  '@types/ua-parser-js@0.7.39': {}
+
   '@types/ws@8.18.1':
     dependencies:
       '@types/node': 20.16.10
@@ -3246,6 +3278,8 @@ snapshots:
   depd@2.0.0: {}
 
   destroy@1.2.0: {}
+
+  detect-europe-js@0.1.2: {}
 
   didyoumean@1.2.2: {}
 
@@ -3698,6 +3732,8 @@ snapshots:
 
   is-number@7.0.0: {}
 
+  is-standalone-pwa@0.1.1: {}
+
   jiti@1.21.7: {}
 
   joycon@3.1.1: {}
@@ -4039,6 +4075,10 @@ snapshots:
 
   pvutils@1.1.5: {}
 
+  qrcode.react@4.2.0(react@18.3.1):
+    dependencies:
+      react: 18.3.1
+
   qrcode@1.5.4:
     dependencies:
       dijkstrajs: 1.0.3
@@ -4370,6 +4410,14 @@ snapshots:
   typedarray@0.0.6: {}
 
   typescript@5.6.3: {}
+
+  ua-is-frozen@0.1.2: {}
+
+  ua-parser-js@2.0.10:
+    dependencies:
+      detect-europe-js: 0.1.2
+      is-standalone-pwa: 0.1.1
+      ua-is-frozen: 0.1.2
 
   uid-safe@2.1.5:
     dependencies:
