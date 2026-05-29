@@ -15,3 +15,4 @@ export * from './schemas/entry';
 export * from './schemas/payPeriod';
 export * from './schemas/integration';
 export * from './schemas/space';
+export * from './schemas/portal';

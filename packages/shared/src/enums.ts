@@ -15,6 +15,11 @@ export const PERMISSIONS = [
   'goals.manage',
   'integrations.manage',
   'media.manage',
+  // F23 client portal — manage portal configuration (slug, publish flag,
+  // contacts) per client. Staff with this perm can also view + reply to
+  // tickets across all clients.
+  'portal.manage',
+  'tickets.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -31,6 +36,7 @@ export const PERMISSION_CATEGORIES: Record<string, Permission[]> = {
   Payroll: ['pay.manage'],
   People: ['users.manage', 'groups.manage'],
   Workspace: ['clients.manage', 'projects.manage', 'goals.manage', 'integrations.manage', 'media.manage'],
+  'Client portal': ['portal.manage', 'tickets.manage'],
 };
 
 export const PERMISSION_LABELS: Record<Permission, string> = {
@@ -49,6 +55,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'goals.manage': 'Manage roadmap goals',
   'integrations.manage': 'Manage integrations',
   'media.manage': 'Manage media / Drive',
+  'portal.manage': 'Configure client portal (slug, publish, contacts)',
+  'tickets.manage': 'Triage, reply, and close client tickets',
 };
 
 // Built-in starter groups (seeded; users get mapped onto these).

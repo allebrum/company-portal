@@ -81,7 +81,7 @@ export async function inviteUser(args: {
   if (args.sendInvite !== false) {
     try {
       const inviter = await getUser(args.whoId);
-      const { rawToken, expiresAt } = await issueToken(row.id, 'invite', INVITE_TTL_MS);
+      const { rawToken, expiresAt } = await issueToken({ kind: 'user', userId: row.id }, 'invite', INVITE_TTL_MS);
       const acceptUrl = `${env.WEB_ORIGIN}/accept-invite?token=${encodeURIComponent(rawToken)}`;
       await sendInviteEmail({
         senderUserId: args.whoId,
@@ -106,7 +106,7 @@ export async function resendInvite(userId: string, whoId: string): Promise<void>
   if (target.status !== 'invited') throw new HttpError(400, 'user_already_active');
   await invalidateTokensFor(target.id, 'invite');
   const inviter = await getUser(whoId);
-  const { rawToken, expiresAt } = await issueToken(target.id, 'invite', INVITE_TTL_MS);
+  const { rawToken, expiresAt } = await issueToken({ kind: 'user', userId: target.id }, 'invite', INVITE_TTL_MS);
   const acceptUrl = `${env.WEB_ORIGIN}/accept-invite?token=${encodeURIComponent(rawToken)}`;
   await sendInviteEmail({
     senderUserId: whoId,

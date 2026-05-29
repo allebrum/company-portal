@@ -15,6 +15,10 @@ declare module 'express-session' {
     // also uses `oauthState`) can't collide. Also carries `returnTo` so
     // the JIT connect flow can come back to where the user was.
     gmailOauthState?: { state: string; returnTo?: string };
+    // F23 public client portal — sibling of `user`, never set at the same
+    // time. Identifies an external client contact who consumed a magic
+    // link. Scoped to one client; cross-client API calls return 403.
+    clientPortalSession?: { contactId: string; clientId: string; slug: string };
   }
 }
 
