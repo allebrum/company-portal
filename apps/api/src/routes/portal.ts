@@ -1,11 +1,18 @@
 import { Router } from 'express';
-import { eq, and, isNotNull } from 'drizzle-orm';
+import { eq, and, isNotNull, inArray, gte, asc } from 'drizzle-orm';
 import {
   PortalRequestAccessSchema,
   PortalExchangeSchema,
 } from '@allebrum/shared';
 import { db } from '../db/client.js';
-import { clients, clientContacts } from '../db/schema.js';
+import {
+  clients,
+  clientContacts,
+  projects,
+  goals,
+  milestones,
+  todos,
+} from '../db/schema.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { findContactByEmail, resendContactInvite } from '../services/clientContacts.js';
@@ -198,4 +205,209 @@ portalRouter.get('/me', requireClientPortalAuth, async (req, res, next) => {
 portalRouter.post('/logout', requireClientPortalAuth, (req, res) => {
   req.session.clientPortalSession = undefined;
   res.json({ ok: true });
+});
+
+// ---- Session-gated read endpoints (curated portal view) ---------------
+//
+// Every endpoint scopes its queries to `req.session.clientPortalSession.clientId`.
+// Cross-client probes (passing an explicit clientId in the body or query)
+// are ignored — the session is the only authority.
+//
+// Field sanitization: goals expose `id, projectId, title, status,
+// progress, dueDate` only — internal flags (health, owner, dependsOn,
+// tag, checklist, resources) stay private. Projects expose the
+// dashboard-shaped rollup; files come from `client.spaceFiles` (Phase 4
+// will gate on a per-file `sharedWithClient` flag).
+
+type RollupProjectRow = {
+  id: string;
+  name: string;
+  code: string;
+  color: string;
+  goalCount: number;
+  openTodoCount: number;
+  avgProgress: number;
+};
+
+async function buildProjectRollup(clientId: string): Promise<RollupProjectRow[]> {
+  const projectRows = await db
+    .select({
+      id: projects.id,
+      name: projects.name,
+      code: projects.code,
+      color: projects.color,
+    })
+    .from(projects)
+    .where(eq(projects.clientId, clientId))
+    .orderBy(asc(projects.name));
+  if (projectRows.length === 0) return [];
+
+  const projectIds = projectRows.map((p) => p.id);
+  const goalRows = await db
+    .select({
+      projectId: goals.projectId,
+      progress: goals.progress,
+    })
+    .from(goals)
+    .where(inArray(goals.projectId, projectIds));
+  const todoRows = await db
+    .select({ projectId: todos.projectId, status: todos.status })
+    .from(todos)
+    .where(inArray(todos.projectId, projectIds));
+
+  return projectRows.map((p) => {
+    const goalsForProject = goalRows.filter((g) => g.projectId === p.id);
+    const openTodos = todoRows.filter((t) => t.projectId === p.id && t.status === 'open').length;
+    const avg =
+      goalsForProject.length > 0
+        ? Math.round(
+            goalsForProject.reduce((s, g) => s + (g.progress ?? 0), 0) / goalsForProject.length,
+          )
+        : 0;
+    return {
+      id: p.id,
+      name: p.name,
+      code: p.code,
+      color: p.color,
+      goalCount: goalsForProject.length,
+      openTodoCount: openTodos,
+      avgProgress: avg,
+    };
+  });
+}
+
+portalRouter.get('/overview', requireClientPortalAuth, async (req, res, next) => {
+  try {
+    const sess = req.session.clientPortalSession!;
+    const [client] = await db
+      .select({ id: clients.id, name: clients.name, color: clients.color, slug: clients.portalSlug, spaceFiles: clients.spaceFiles })
+      .from(clients)
+      .where(eq(clients.id, sess.clientId))
+      .limit(1);
+    if (!client) {
+      res.status(404).json({ error: 'client_not_found' });
+      return;
+    }
+    const projectRollup = await buildProjectRollup(sess.clientId);
+
+    // In-flight goals: status not 'done' and health (if present) not 'done'.
+    const goalRows = await db
+      .select({
+        id: goals.id,
+        projectId: goals.projectId,
+        title: goals.title,
+        status: goals.status,
+        progress: goals.progress,
+        endDate: goals.endDate,
+        health: goals.health,
+      })
+      .from(goals)
+      .where(eq(goals.clientId, sess.clientId));
+    const inFlightGoals = goalRows
+      .filter((g) => g.status !== 'done' && g.health !== 'done')
+      .slice(0, 12)
+      .map((g) => ({
+        id: g.id,
+        projectId: g.projectId,
+        title: g.title,
+        status: g.status,
+        progress: g.progress,
+        dueDate: g.endDate,
+      }));
+
+    // Upcoming milestones (next 90 days) for this client's projects.
+    const projectIds = projectRollup.map((p) => p.id);
+    const today = new Date().toISOString().slice(0, 10);
+    const milestoneRows = projectIds.length
+      ? await db
+          .select({
+            id: milestones.id,
+            projectId: milestones.projectId,
+            title: milestones.title,
+            date: milestones.date,
+            kind: milestones.kind,
+          })
+          .from(milestones)
+          .where(and(inArray(milestones.projectId, projectIds), gte(milestones.date, today)))
+          .orderBy(asc(milestones.date))
+      : [];
+
+    res.json({
+      client: { id: client.id, name: client.name, color: client.color, slug: client.slug },
+      projects: projectRollup,
+      inFlightGoals,
+      upcomingMilestones: milestoneRows.slice(0, 6),
+      fileCount: Array.isArray(client.spaceFiles) ? client.spaceFiles.length : 0,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+portalRouter.get('/projects', requireClientPortalAuth, async (req, res, next) => {
+  try {
+    const sess = req.session.clientPortalSession!;
+    res.json(await buildProjectRollup(sess.clientId));
+  } catch (e) {
+    next(e);
+  }
+});
+
+portalRouter.get('/goals', requireClientPortalAuth, async (req, res, next) => {
+  try {
+    const sess = req.session.clientPortalSession!;
+    const rows = await db
+      .select({
+        id: goals.id,
+        projectId: goals.projectId,
+        title: goals.title,
+        status: goals.status,
+        progress: goals.progress,
+        endDate: goals.endDate,
+      })
+      .from(goals)
+      .where(eq(goals.clientId, sess.clientId))
+      .orderBy(asc(goals.title));
+    res.json(
+      rows.map((g) => ({
+        id: g.id,
+        projectId: g.projectId,
+        title: g.title,
+        status: g.status,
+        progress: g.progress,
+        dueDate: g.endDate,
+      })),
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
+portalRouter.get('/files', requireClientPortalAuth, async (req, res, next) => {
+  try {
+    const sess = req.session.clientPortalSession!;
+    const [client] = await db
+      .select({ spaceFiles: clients.spaceFiles })
+      .from(clients)
+      .where(eq(clients.id, sess.clientId))
+      .limit(1);
+    if (!client) {
+      res.json([]);
+      return;
+    }
+    // Phase 4 will gate on a per-file `sharedWithClient` flag; for v1 we
+    // expose the whole array. Internal staff today only put client-
+    // appropriate files in Spaces, but make this opt-in before merging
+    // Phase 4 so existing rows don't leak retroactively.
+    const files = (Array.isArray(client.spaceFiles) ? client.spaceFiles : []) as Array<{
+      id: string;
+      title: string;
+      url: string;
+      meta?: string;
+      addedAt: string;
+    }>;
+    res.json(files.map((f) => ({ id: f.id, title: f.title, url: f.url, meta: f.meta, addedAt: f.addedAt })));
+  } catch (e) {
+    next(e);
+  }
 });

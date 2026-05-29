@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X, Layers, Target, CheckSquare, FileText, Play, Square,
-  Upload, ExternalLink, Trash2, Link2, Plus, FolderOpen,
+  Upload, ExternalLink, Trash2, Link2, Plus, FolderOpen, Globe,
 } from 'lucide-react';
 import { useSpace } from '@/contexts/SpaceContext';
 import { useSpaceData, useUpdateSpaceFiles } from '@/hooks/useSpace';
@@ -26,11 +26,12 @@ import type { SpaceFile } from '@allebrum/shared';
 import type { Scope } from '@/lib/roadmap';
 import { NotesTab } from './NotesTab';
 import { EmbedDialog, type EmbedDialogValue } from './pickers/EmbedDialog';
+import { PortalTab } from './PortalTab';
 
 // Narrowed scope (the overlay never opens for 'all').
 type OpenScope = Exclude<Scope, { kind: 'all' }>;
 
-type TabKey = 'notes' | 'goals' | 'todos' | 'files';
+type TabKey = 'notes' | 'goals' | 'todos' | 'files' | 'portal';
 
 /**
  * The full-screen Client/Project Space overlay.
@@ -106,6 +107,9 @@ export function ClientSpaceOverlay() {
           )}
           {tab === 'files' && (
             <FilesTab scope={narrowed} data={data} />
+          )}
+          {tab === 'portal' && narrowed.kind === 'client' && data.client && (
+            <PortalTab client={data.client} />
           )}
         </div>
       </div>
@@ -278,9 +282,13 @@ function SpaceTabs({
 }) {
   const { data: goals = [] } = useGoals();
   const { data: todos = [] } = useTodos();
+  const { can } = useAuth();
   const scopedGoals = goals.filter((g) => goalInScope(g, data));
   const scopedOpenTodos = todos.filter((t) => todoInScope(t, data) && t.status === 'open');
   const filesCount = data.spaceFiles.length;
+  // Portal tab only at client scope, and only for staff with the F23
+  // `portal.manage` permission. Projects don't have their own portal.
+  const showPortalTab = !!data.client && !data.project && can('portal.manage');
 
   const Tab = ({ k, label, count, icon: Icon }: { k: TabKey; label: string; count?: number; icon: typeof Target }) => (
     <button
@@ -306,6 +314,7 @@ function SpaceTabs({
       <Tab k="goals" label="Goals" icon={Target} count={scopedGoals.length} />
       <Tab k="todos" label="To-dos" icon={CheckSquare} count={scopedOpenTodos.length} />
       <Tab k="files" label="Files" icon={Upload} count={filesCount} />
+      {showPortalTab && <Tab k="portal" label="Portal" icon={Globe} />}
       <div className="ml-auto text-[11px] text-gray-400 italic">
         Auto-linked to <span className="font-semibold text-gray-600">{data.client?.name ?? '—'}</span>
       </div>
