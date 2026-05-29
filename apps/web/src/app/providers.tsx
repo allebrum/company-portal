@@ -9,6 +9,7 @@ import { AuthProvider } from '@/hooks/useAuth';
 import { ToastProvider } from '@/components/ui/Toast';
 import { SpaceProvider } from '@/contexts/SpaceContext';
 import { UploadManagerProvider } from '@/contexts/UploadManagerContext';
+import { PostHogBindings } from '@/components/analytics/PostHogBindings';
 
 function LiveEventBindings(): null {
   const qc = useQueryClient();
@@ -108,6 +109,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           <SpaceProvider>
             <UploadManagerProvider>
               <LiveEventBindings />
+              <PostHogBindings />
               {children}
             </UploadManagerProvider>
           </SpaceProvider>
