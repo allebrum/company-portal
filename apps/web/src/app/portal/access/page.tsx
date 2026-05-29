@@ -2,21 +2,14 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { useAuthConfig } from '@/hooks/useResources';
 import { useExchangePortalToken } from '@/hooks/usePortal';
 
-/**
- * F23 magic-link landing. Reads `?token=…` off the URL, posts to
- * /api/portal/exchange, then redirects to the portal overview on
- * success. Failures surface a "request a fresh link" prompt rather
- * than dumping the raw error.
- */
 function Inner() {
-  const params = useParams<{ slug: string }>();
-  const slug = params.slug;
   const search = useSearchParams();
+  const slug = search?.get('slug') ?? '';
   const token = search?.get('token');
   const router = useRouter();
   const exchange = useExchangePortalToken();
@@ -26,14 +19,14 @@ function Inner() {
   const [done, setDone] = useState(false);
 
   useEffect(() => {
-    if (!token || done) return;
+    if (!token || !slug || done) return;
     let cancelled = false;
     (async () => {
       try {
         await exchange.mutateAsync({ slug, token });
         if (!cancelled) {
           setDone(true);
-          router.replace(`/portal/${slug}`);
+          router.replace(`/portal?slug=${encodeURIComponent(slug)}`);
         }
       } catch (e) {
         if (!cancelled) {
@@ -44,12 +37,10 @@ function Inner() {
     return () => {
       cancelled = true;
     };
-    // We deliberately only depend on token/slug — re-running this on
-    // every render of the exchange mutation would cycle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, token]);
 
-  if (!token) {
+  if (!token || !slug) {
     return (
       <div className="max-w-md mx-auto pt-16 px-4 text-center">
         <h1 className="text-xl font-bold text-gray-900">Missing access token</h1>
@@ -57,7 +48,7 @@ function Inner() {
           This link didn&apos;t carry a sign-in token. Try opening the link from your invite
           email again, or{' '}
           <Link
-            href={`/portal/${slug}/login`}
+            href={`/portal/login?slug=${encodeURIComponent(slug)}`}
             className="hover:underline"
             style={{ color: brandColor }}
           >
@@ -78,7 +69,7 @@ function Inner() {
           they&apos;re issued.
         </p>
         <Link
-          href={`/portal/${slug}/login`}
+          href={`/portal/login?slug=${encodeURIComponent(slug)}`}
           className="inline-block mt-4 text-sm font-semibold hover:underline"
           style={{ color: brandColor }}
         >

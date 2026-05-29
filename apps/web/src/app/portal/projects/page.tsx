@@ -1,20 +1,22 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { Suspense, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { usePortalMe, usePortalProjects } from '@/hooks/usePortal';
 import { PortalHeader } from '@/components/portal/PortalHeader';
 
-export default function PortalProjectsPage() {
-  const params = useParams<{ slug: string }>();
-  const slug = params.slug;
+function Inner() {
+  const search = useSearchParams();
+  const slug = search?.get('slug') ?? '';
   const router = useRouter();
   const meQuery = usePortalMe();
   const me = meQuery.data ?? null;
   const projects = usePortalProjects(!!me);
 
   useEffect(() => {
-    if (!meQuery.isLoading && !me) router.replace(`/portal/${slug}/login`);
+    if (!meQuery.isLoading && !me) {
+      router.replace(`/portal/login?slug=${encodeURIComponent(slug)}`);
+    }
   }, [meQuery.isLoading, me, slug, router]);
 
   return (
@@ -76,5 +78,13 @@ export default function PortalProjectsPage() {
         )}
       </div>
     </>
+  );
+}
+
+export default function PortalProjectsPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-gray-400 p-8 text-center">Loading…</div>}>
+      <Inner />
+    </Suspense>
   );
 }

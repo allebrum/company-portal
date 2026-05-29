@@ -102,7 +102,7 @@ export function ClientFormModal({
   };
 
   const busy = create.isPending || update.isPending;
-  const portalUrl = portalSlug && slugValid ? `${API_URL.replace(/\/api$/, '')}/portal/${portalSlug}` : '';
+  const portalUrl = portalSlug && slugValid ? `${API_URL.replace(/\/api$/, '')}/portal/?slug=${encodeURIComponent(portalSlug)}` : '';
 
   return (
     <Modal

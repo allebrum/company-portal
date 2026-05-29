@@ -30,11 +30,12 @@ function slugify(s: string): string {
 function portalOriginFor(slug: string): string {
   // API_URL is like "https://rc.allebrum.com/api"; the portal page lives
   // at the bare origin (same domain as the staff app, since both ship in
-  // the same static export).
+  // the same static export). Slug rides as a query param so the routes
+  // stay statically exportable.
   if (typeof window !== 'undefined') {
-    return `${window.location.origin}/portal/${slug}`;
+    return `${window.location.origin}/portal/?slug=${encodeURIComponent(slug)}`;
   }
-  return `${API_URL.replace(/\/api$/, '')}/portal/${slug}`;
+  return `${API_URL.replace(/\/api$/, '')}/portal/?slug=${encodeURIComponent(slug)}`;
 }
 
 /**

@@ -24,11 +24,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
     '/reset-password',
     '/accept-invite',
   ]);
-  // F23 client portal — everything under /portal/ is its own auth track
+  // F23 client portal — everything under /portal is its own auth track
   // (sibling clientPortalSession on the express-session). The staff
   // AuthGate stays out of the way so the portal layout can render its
-  // own branded shell + run its own session check.
-  const isPortal = pathname.startsWith('/portal/') || pathname === '/portal';
+  // own branded shell + run its own session check. Slug is a query
+  // param (not a path segment) so this prefix matches every portal route.
+  const isPortal = pathname === '/portal' || pathname.startsWith('/portal/');
   const isPublic = PUBLIC_ROUTES.has(pathname) || isPortal;
   const isRoot = pathname === '/' || rawPathname === '';
 

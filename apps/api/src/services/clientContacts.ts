@@ -113,9 +113,13 @@ export async function inviteContact(args: {
     'portal-magic',
     PORTAL_MAGIC_TTL_MS,
   );
+  // Portal routes use ?slug= query params (not /portal/[slug]/) so the
+  // statically exported Next.js bundle doesn't need build-time slug
+  // enumeration. See apps/web/src/app/portal/layout.tsx for the rationale.
   const inviteUrl =
-    `${env.WEB_ORIGIN}/portal/${encodeURIComponent(client.portalSlug)}/access` +
-    `?token=${encodeURIComponent(rawToken)}`;
+    `${env.WEB_ORIGIN}/portal/access` +
+    `?slug=${encodeURIComponent(client.portalSlug)}` +
+    `&token=${encodeURIComponent(rawToken)}`;
 
   // Send via system-sender Gmail (F4). Log + no-op if not connected.
   const settings = await getSettings();
@@ -164,8 +168,9 @@ export async function resendContactInvite(args: {
     PORTAL_MAGIC_TTL_MS,
   );
   const inviteUrl =
-    `${env.WEB_ORIGIN}/portal/${encodeURIComponent(client.portalSlug)}/access` +
-    `?token=${encodeURIComponent(rawToken)}`;
+    `${env.WEB_ORIGIN}/portal/access` +
+    `?slug=${encodeURIComponent(client.portalSlug)}` +
+    `&token=${encodeURIComponent(rawToken)}`;
 
   const settings = await getSettings();
   const inviter = await getUser(args.whoId);

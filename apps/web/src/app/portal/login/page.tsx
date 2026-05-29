@@ -1,29 +1,34 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthConfig } from '@/hooks/useResources';
 import { usePortalLookup, useRequestPortalAccess } from '@/hooks/usePortal';
 import { Mail } from 'lucide-react';
 
-/**
- * Public sign-in form for the client portal. Asks for an email; on
- * submit, hits POST /api/portal/request-access (anti-enumeration: always
- * 200, magic-link emailed only if the email is a known contact) and
- * redirects to the check-email confirmation page.
- */
-export default function PortalLoginPage() {
-  const params = useParams<{ slug: string }>();
-  const slug = params.slug;
+function Inner() {
+  const search = useSearchParams();
+  const slug = search?.get('slug') ?? '';
   const router = useRouter();
   const { data: cfg } = useAuthConfig();
-  const lookup = usePortalLookup(slug);
+  const lookup = usePortalLookup(slug || null);
   const request = useRequestPortalAccess();
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const brandColor = cfg?.brandPrimaryColor ?? '#9333ea';
+
+  if (!slug) {
+    return (
+      <div className="max-w-md mx-auto p-8 mt-16 text-center">
+        <h1 className="text-xl font-bold text-gray-900 mb-2">Missing portal</h1>
+        <p className="text-sm text-gray-500">
+          Open the link from your invite email. The URL should include a portal name.
+        </p>
+      </div>
+    );
+  }
 
   if (lookup.isLoading) {
     return <div className="grid place-items-center min-h-[60vh] text-sm text-gray-400">Loading…</div>;
@@ -49,7 +54,9 @@ export default function PortalLoginPage() {
     if (!email.trim()) return;
     try {
       await request.mutateAsync({ slug, email: email.trim() });
-      router.push(`/portal/${slug}/check-email?email=${encodeURIComponent(email.trim())}`);
+      router.push(
+        `/portal/check-email?slug=${encodeURIComponent(slug)}&email=${encodeURIComponent(email.trim())}`,
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not send sign-in link.');
     }
@@ -106,5 +113,13 @@ export default function PortalLoginPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function PortalLoginPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-gray-400 p-8 text-center">Loading…</div>}>
+      <Inner />
+    </Suspense>
   );
 }

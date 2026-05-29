@@ -1,14 +1,14 @@
 'use client';
 
-import Link from 'next/link';
-import { useParams, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { MailCheck } from 'lucide-react';
 import { useAuthConfig } from '@/hooks/useResources';
 
 function Inner() {
-  const params = useParams<{ slug: string }>();
   const search = useSearchParams();
+  const slug = search?.get('slug') ?? '';
   const email = search?.get('email');
   const { data: cfg } = useAuthConfig();
   const brandColor = cfg?.brandPrimaryColor ?? '#9333ea';
@@ -29,7 +29,7 @@ function Inner() {
         <p className="text-[12px] text-gray-500 mt-3">
           Didn&apos;t get it? Check spam, or{' '}
           <Link
-            href={`/portal/${params.slug}/login`}
+            href={`/portal/login?slug=${encodeURIComponent(slug)}`}
             className="hover:underline"
             style={{ color: brandColor }}
           >
