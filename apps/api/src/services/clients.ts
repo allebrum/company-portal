@@ -54,6 +54,12 @@ export async function updateClient(
   if (patch.color !== undefined) upd.color = patch.color;
   if (patch.spaceBlocks !== undefined) upd.spaceBlocks = patch.spaceBlocks;
   if (patch.spaceFiles !== undefined) upd.spaceFiles = patch.spaceFiles;
+  // F23 client portal config — slug uniqueness is enforced by the
+  // DB; PG returns 23505 on collision which the error handler maps to
+  // a friendly 409. portalPublishedAt is the publish toggle (null =
+  // draft / 404 publicly, non-null = live).
+  if (patch.portalSlug !== undefined) upd.portalSlug = patch.portalSlug;
+  if (patch.portalPublishedAt !== undefined) upd.portalPublishedAt = patch.portalPublishedAt;
   const [row] = await db.update(clients).set(upd).where(eq(clients.id, id)).returning();
   if (!row) throw new HttpError(404, 'client_not_found');
   emit.toOrg(EV.CLIENT_UPDATED, { id: row.id, by: whoId, at: new Date().toISOString() });

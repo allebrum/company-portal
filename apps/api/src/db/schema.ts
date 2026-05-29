@@ -144,8 +144,14 @@ export const webauthnCredentials = pgTable('webauthn_credentials', {
 // `usedAt` marker for single-use revocation.
 export const authTokens = pgTable('auth_tokens', {
   id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  kind: text('kind').notNull(),                                // 'invite' | 'reset'
+  // Subject is exactly one of userId (internal staff) or contactId
+  // (external client portal contact). Enforced by a CHECK constraint in
+  // the migration; both columns are nullable at the schema level so the
+  // discriminated subject can live in one table.
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  contactId: uuid('contact_id').references(() => clientContacts.id, { onDelete: 'cascade' }),
+  // 'invite' | 'reset' (staff, F1) | 'portal-magic' (client portal, F23).
+  kind: text('kind').notNull(),
   tokenHash: text('token_hash').notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'string' }).notNull(),
   usedAt: timestamp('used_at', { withTimezone: true, mode: 'string' }),
@@ -153,6 +159,7 @@ export const authTokens = pgTable('auth_tokens', {
 }, (t) => ({
   hashIdx: uniqueIndex('auth_tokens_token_hash_idx').on(t.tokenHash),
   userKindIdx: index('auth_tokens_user_kind_idx').on(t.userId, t.kind, t.usedAt),
+  contactKindIdx: index('auth_tokens_contact_kind_idx').on(t.contactId, t.kind, t.usedAt),
 }));
 
 // ---- RBAC: permissions catalog, groups, membership, overrides ----
@@ -211,9 +218,36 @@ export const clients = pgTable('clients', {
   // projects.statuses (small array, fold into parent, no diffing).
   spaceBlocks: jsonb('space_blocks').notNull().default(sql`'[]'::jsonb`),
   spaceFiles: jsonb('space_files').notNull().default(sql`'[]'::jsonb`),
+  // Public client portal (F23) — staff-set URL-safe slug; portal lives at
+  // /portal/{portalSlug}. `portalPublishedAt` gates public visibility:
+  // null = draft (slug exists but portal returns 404 to the public),
+  // non-null = published.
+  portalSlug: text('portal_slug').unique(),
+  portalPublishedAt: timestamp('portal_published_at', { withTimezone: true, mode: 'string' }),
   createdAt: ts(),
   updatedAt: updTs(),
 });
+
+// External contacts at a client — separate from internal `users`. Granted
+// access to one client's public portal via magic-link email invites
+// (F23 Phase 1). Has no permissions catalog entry; visibility is implied
+// by row ownership (contact_id → client_id).
+export const clientContacts = pgTable('client_contacts', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  // Stored lowercased by the service layer for case-insensitive matching
+  // without needing the citext extension on the DB.
+  email: text('email').notNull(),
+  role: text('role').notNull().default('viewer'),  // 'primary' | 'viewer'
+  invitedAt: timestamp('invited_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true, mode: 'string' }),
+  lastActiveAt: timestamp('last_active_at', { withTimezone: true, mode: 'string' }),
+  createdAt: ts(),
+}, (t) => ({
+  clientEmailUnique: uniqueIndex('client_contacts_client_email_unique').on(t.clientId, t.email),
+  emailIdx: index('client_contacts_email_idx').on(t.email),
+}));
 
 // ---- Projects ----
 export const projects = pgTable('projects', {
@@ -477,6 +511,7 @@ export type WebauthnCredential = typeof webauthnCredentials.$inferSelect;
 export type Group = typeof groups.$inferSelect;
 export type Permission = typeof permissions.$inferSelect;
 export type Client = typeof clients.$inferSelect;
+export type ClientContact = typeof clientContacts.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export type Goal = typeof goals.$inferSelect;
 export type GoalResource = typeof goalResources.$inferSelect;

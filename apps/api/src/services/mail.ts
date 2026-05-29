@@ -83,6 +83,59 @@ export async function sendInviteEmail(args: {
 }
 
 /**
+ * F23 — magic-link email for an external client contact. Single-use
+ * 30-day URL that auto-signs them into their workspace's public portal
+ * at /portal/{slug}. Sent via the workspace's system-sender Gmail
+ * account (F4); falls back to log-only if not connected.
+ */
+export async function sendClientPortalInviteEmail(args: {
+  senderUserId: string | null;
+  to: string;
+  contactName: string;
+  clientName: string;
+  inviterName: string;
+  portalUrl: string;
+  expiresAt: Date;
+}): Promise<void> {
+  const subject = `Your ${args.clientName} portal is ready`;
+  const expiresStr = args.expiresAt.toUTCString();
+  const text = [
+    `Hi ${args.contactName},`,
+    '',
+    `${args.inviterName} set up a portal for ${args.clientName} where you can`,
+    'see project status, milestones, and submit tickets.',
+    '',
+    'Open your portal:',
+    args.portalUrl,
+    '',
+    `This sign-in link expires on ${expiresStr}. If it expires, request a new one`,
+    "from the portal's sign-in page.",
+    '',
+    `— The ${args.clientName} team at Allebrum`,
+  ].join('\n');
+  const html = wrap(`
+    <h2 style="margin:0 0 12px 0;font-size:20px;color:#111;">
+      Your ${esc(args.clientName)} portal is ready
+    </h2>
+    <p style="margin:0 0 16px 0;color:#374151;">
+      Hi ${esc(args.contactName)} — <strong>${esc(args.inviterName)}</strong> set up a portal
+      for ${esc(args.clientName)} where you can see project status, milestones,
+      and open tickets. Click below to sign in.
+    </p>
+    ${button(args.portalUrl, 'Open my portal')}
+    <p style="margin:24px 0 0 0;font-size:13px;color:#6b7280;">
+      This sign-in link expires on ${esc(expiresStr)}. If it expires you can request
+      a new one from the portal's sign-in page.
+    </p>
+    <p style="margin:8px 0 0 0;font-size:12px;color:#9ca3af;">
+      Trouble with the button? Paste this URL into your browser:<br>
+      <span style="word-break:break-all;">${esc(args.portalUrl)}</span>
+    </p>
+  `);
+  await send(args.senderUserId, args.to, subject, html, text);
+}
+
+/**
  * Payroll-summary email to the bookkeeper. Per-employee table inline in
  * the body (HTML + plain-text). Fires from the admin who clicked the
  * "Close & send" CTA — the From: is their connected Gmail.

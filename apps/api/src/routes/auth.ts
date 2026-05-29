@@ -224,7 +224,7 @@ authRouter.post(
         // Invalidate any prior unused reset tokens so older email links
         // can't be replayed after a new reset request.
         await invalidateTokensFor(user.id, 'reset');
-        const { rawToken, expiresAt } = await issueToken(user.id, 'reset', RESET_TTL_MS);
+        const { rawToken, expiresAt } = await issueToken({ kind: 'user', userId: user.id }, 'reset', RESET_TTL_MS);
         const resetUrl = `${env.WEB_ORIGIN}/reset-password?token=${encodeURIComponent(rawToken)}`;
         // No session here — use the workspace's designated system sender
         // (an admin who connected their Gmail in Settings). If unset, the
@@ -262,7 +262,13 @@ authRouter.post(
         return;
       }
       const { token, password } = getValidated<typeof ResetPasswordSchema._type>(req);
-      const { userId } = await consumeToken(token, 'reset');
+      const subject = await consumeToken(token, 'reset');
+      if (subject.kind !== 'user') {
+        // Defensive: 'reset' is a staff-only kind; mixed-subject token is malformed.
+        res.status(400).json({ error: 'invalid_token' });
+        return;
+      }
+      const { userId } = subject;
       const passwordHash = await argon2.hash(password);
       await db
         .update(users)
@@ -288,7 +294,13 @@ authRouter.post(
         return;
       }
       const { token, password } = getValidated<typeof AcceptInviteSchema._type>(req);
-      const { userId } = await consumeToken(token, 'invite');
+      const subject = await consumeToken(token, 'invite');
+      if (subject.kind !== 'user') {
+        // Defensive: 'invite' is a staff-only kind.
+        res.status(400).json({ error: 'invalid_token' });
+        return;
+      }
+      const { userId } = subject;
       const passwordHash = await argon2.hash(password);
       // Accept-invite both sets the password AND flips the user to `active`
       // — the legacy "first login flips invited→active" branch in

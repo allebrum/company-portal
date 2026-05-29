@@ -62,6 +62,21 @@ export type ClientRow = {
   // Always arrays — server defaults to [] on insert; never null.
   spaceBlocks: SpaceBlock[];
   spaceFiles: SpaceFile[];
+  /** F23 client portal — staff-set URL-safe slug. Null = no portal yet. */
+  portalSlug: string | null;
+  /** ISO timestamp string; null = unpublished (slug exists but lookup 404s). */
+  portalPublishedAt: string | null;
+};
+export type ClientContactRow = {
+  id: string;
+  clientId: string;
+  name: string;
+  email: string;
+  role: 'primary' | 'viewer';
+  invitedAt: string;
+  acceptedAt: string | null;
+  lastActiveAt: string | null;
+  createdAt: string;
 };
 export type ProjectStatusRow = { id: string; label: string; tone: string };
 export type ProjectRow = {
@@ -313,6 +328,49 @@ export function useUpdateClient() {
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.clients }),
   });
 }
+
+// ---- F23 client portal contacts (staff side) -------------------------
+export function useClientContacts(clientId: string | null) {
+  return useQuery({
+    queryKey: ['clientContacts', clientId ?? ''],
+    queryFn: () => api.get<ClientContactRow[]>(`/clients/${clientId}/contacts`),
+    enabled: !!clientId,
+  });
+}
+export function useInviteClientContact() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ clientId, input }: { clientId: string; input: { name: string; email: string; role?: 'primary' | 'viewer' } }) =>
+      api.post<ClientContactRow>(`/clients/${clientId}/contacts`, input),
+    onSuccess: (_data, vars) =>
+      qc.invalidateQueries({ queryKey: ['clientContacts', vars.clientId] }),
+  });
+}
+export function useUpdateClientContact() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ clientId, contactId, patch }: { clientId: string; contactId: string; patch: { name?: string; role?: 'primary' | 'viewer' } }) =>
+      api.patch<ClientContactRow>(`/clients/${clientId}/contacts/${contactId}`, patch),
+    onSuccess: (_data, vars) =>
+      qc.invalidateQueries({ queryKey: ['clientContacts', vars.clientId] }),
+  });
+}
+export function useResendClientInvite() {
+  return useMutation({
+    mutationFn: ({ clientId, contactId }: { clientId: string; contactId: string }) =>
+      api.post<{ ok: true }>(`/clients/${clientId}/contacts/${contactId}/resend`),
+  });
+}
+export function useRemoveClientContact() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ clientId, contactId }: { clientId: string; contactId: string }) =>
+      api.del<{ ok: true }>(`/clients/${clientId}/contacts/${contactId}`),
+    onSuccess: (_data, vars) =>
+      qc.invalidateQueries({ queryKey: ['clientContacts', vars.clientId] }),
+  });
+}
+
 export function useProjects() {
   return useQuery({ queryKey: qk.projects, queryFn: () => api.get<ProjectRow[]>('/projects') });
 }
