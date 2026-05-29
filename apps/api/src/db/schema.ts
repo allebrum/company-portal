@@ -502,6 +502,57 @@ export const driveItems = pgTable('drive_items', {
   modified: date('modified'),
 });
 
+// ---- F24 QR Code Generator (Tools) ----
+// Staff-owned trackable QR codes. Each code mints a short URL that hits
+// /api/q/{short_code}, logs an `qr_scans` row (with IP-derived geo + UA
+// parsing), and 302-redirects to `target_url`. `visibility` is binary:
+// `private` = only owner sees it, `workspace` = every signed-in staffer
+// can view + scan dashboard, only owner can mutate.
+export const qrCodes = pgTable('qr_codes', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  ownerUserId: uuid('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  label: text('label').notNull().default(''),
+  targetUrl: text('target_url').notNull(),
+  shortCode: text('short_code').notNull().unique(),
+  // 'private' (default) | 'workspace'. CHECK constraint added in the migration.
+  visibility: text('visibility').notNull().default('private'),
+  // QR styling — client renders these into qrcode.react; server-side
+  // PNG download mirrors color + ec level (skips logo overlay).
+  foregroundColor: text('foreground_color').notNull().default('#000000'),
+  backgroundColor: text('background_color').notNull().default('#FFFFFF'),
+  errorCorrection: text('error_correction').notNull().default('M'), // 'L'|'M'|'Q'|'H'
+  // Optional center-logo data URL. ~80KB cap enforced at the zod layer.
+  logoDataUrl: text('logo_data_url'),
+  createdAt: ts(),
+  updatedAt: updTs(),
+  // Soft-delete so historical scan rows stay queryable for audit.
+  archivedAt: timestamp('archived_at', { withTimezone: true, mode: 'string' }),
+}, (t) => ({
+  ownerIdx: index('qr_codes_owner_idx').on(t.ownerUserId),
+  visibilityIdx: index('qr_codes_visibility_idx').on(t.visibility),
+}));
+
+export const qrScans = pgTable('qr_scans', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  qrCodeId: uuid('qr_code_id').notNull().references(() => qrCodes.id, { onDelete: 'cascade' }),
+  scannedAt: timestamp('scanned_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  ip: text('ip'),
+  userAgent: text('user_agent'),
+  referer: text('referer'),
+  browser: text('browser'),
+  os: text('os'),
+  device: text('device'),
+  // Geo from ip-api.com (best-effort; null on rate-limit or any failure).
+  country: text('country'),
+  countryCode: text('country_code'),
+  region: text('region'),
+  city: text('city'),
+  latitude: numeric('latitude', { precision: 9, scale: 6 }),
+  longitude: numeric('longitude', { precision: 9, scale: 6 }),
+}, (t) => ({
+  codeTimeIdx: index('qr_scans_code_time_idx').on(t.qrCodeId, t.scannedAt),
+}));
+
 // ---- Type exports ----
 export type User = typeof users.$inferSelect;
 export type AppSettingsRow = typeof appSettings.$inferSelect;
@@ -527,3 +578,5 @@ export type Integration = typeof integrations.$inferSelect;
 export type DriveFolder = typeof driveLinkedFolders.$inferSelect;
 export type DriveItem = typeof driveItems.$inferSelect;
 export type AuthToken = typeof authTokens.$inferSelect;
+export type QrCode = typeof qrCodes.$inferSelect;
+export type QrScan = typeof qrScans.$inferSelect;

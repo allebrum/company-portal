@@ -99,6 +99,13 @@
       "when": 1780081141182,
       "tag": "0013_superb_moonstone",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1780086526525,
+      "tag": "0014_stale_killraven",
+      "breakpoints": true
     }
   ]
 }

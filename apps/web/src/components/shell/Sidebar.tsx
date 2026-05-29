@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Briefcase, Clock, CheckSquare, Target, Shield, BarChart3, Settings, FolderOpen } from 'lucide-react';
+import { Home, Briefcase, Clock, CheckSquare, Target, Shield, BarChart3, Settings, FolderOpen, Wrench } from 'lucide-react';
 import type { Permission } from '@allebrum/shared';
 import { useEntries, useAuthConfig } from '@/hooks/useResources';
 import { useAuth } from '@/hooks/useAuth';
@@ -19,6 +19,7 @@ const NAV: { id: string; href: string; label: string; Icon: typeof Home; anyPerm
   { id: 'media', href: '/media', label: 'Media', Icon: FolderOpen, anyPerm: ['media.manage', 'integrations.manage'] },
   { id: 'approvals', href: '/approvals', label: 'Approvals', Icon: Shield },
   { id: 'reports', href: '/reports', label: 'Reports', Icon: BarChart3 },
+  { id: 'tools', href: '/tools', label: 'Tools', Icon: Wrench },
   { id: 'admin', href: '/admin', label: 'Admin', Icon: Settings },
 ];
 
