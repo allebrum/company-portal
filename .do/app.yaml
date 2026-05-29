@@ -60,10 +60,22 @@ static_sites:
       corepack enable
       pnpm install --frozen-lockfile
       pnpm --filter @allebrum/shared build
-      NEXT_PUBLIC_API_URL=${APP_URL} pnpm --filter @allebrum/web build
+      NEXT_PUBLIC_API_URL=${APP_URL} \
+        NEXT_PUBLIC_POSTHOG_KEY=${NEXT_PUBLIC_POSTHOG_KEY} \
+        NEXT_PUBLIC_POSTHOG_HOST=${NEXT_PUBLIC_POSTHOG_HOST} \
+        pnpm --filter @allebrum/web build
     output_dir: apps/web/out
     envs:
       - { key: NEXT_PUBLIC_API_URL, value: ${APP_URL} }
+      # PostHog public project key. Set in the DigitalOcean dashboard
+      # (App Platform → Settings → Components → web → Environment
+      # Variables). When unset, the SDK init is a no-op so the app keeps
+      # working — analytics just doesn't fire.
+      - { key: NEXT_PUBLIC_POSTHOG_KEY, value: '', scope: BUILD_TIME }
+      # Optional host override (default https://us.i.posthog.com). Set
+      # to https://eu.i.posthog.com if the project is in the EU region,
+      # or to a self-hosted PostHog URL.
+      - { key: NEXT_PUBLIC_POSTHOG_HOST, value: '', scope: BUILD_TIME }
 
 databases:
   # Both databases are production-tier managed clusters pre-created once
