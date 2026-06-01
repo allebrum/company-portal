@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { Trash2, Download, Mail, X } from 'lucide-react';
+import { useMemo, useState, useEffect, useRef } from 'react';
+import { ChevronDown, ChevronRight, Plus, Search, Trash2, Download, Mail, Users as UsersIcon, X } from 'lucide-react';
 import { API_URL } from '@/lib/env';
 import { Card, Section, Pill, Empty, Tile } from '@/components/ui';
 import {
@@ -10,8 +10,9 @@ import {
   useConnectedGmailUsers,
   gmailConnectUrl,
 } from '@/hooks/useGmail';
-import { Avatar } from '@/components/ui/Avatar';
+import { Avatar, AvatarStack } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
+import { Popover } from '@/components/ui/Popover';
 import { Field, Input, Select, Checkbox } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { UserFormModal } from '@/components/features/UserFormModal';
@@ -40,6 +41,9 @@ import {
   useUpdateGroup,
   useDeleteGroup,
   useSetGroupPermissions,
+  useGroupMembers,
+  useAddUserToGroup,
+  useRemoveUserFromGroup,
   type UserRow,
   useSettings,
   useUpdateSettings,
@@ -166,22 +170,29 @@ function UsersTab() {
   );
 }
 
+/**
+ * F25 — redesigned Groups & Permissions tab.
+ *
+ * - Each group is a collapsible card; collapsed shows name + counts + 2FA pill.
+ * - Expanded reveals three sub-sections: Permissions (removable pills + "+ Add"
+ *   Popover grouped by category), Members (AvatarStack + "+ Add member"
+ *   Popover with searchable user list + per-avatar remove), Settings
+ *   (Require 2FA + Delete).
+ * - Top of tab: "+ New group" + filter input.
+ *
+ * Reuses existing hooks: `useGroups`, `usePermissionsCatalog`,
+ * `useSetGroupPermissions`. Adds F25 hooks `useGroupMembers`,
+ * `useAddUserToGroup`, `useRemoveUserFromGroup`.
+ */
 function GroupsTab() {
   const { can } = useAuth();
   const toast = useToast();
   const { data: groups = [] } = useGroups();
   const { data: catalog = [] } = usePermissionsCatalog();
   const createGroup = useCreateGroup();
-  const updateGroup = useUpdateGroup();
-  const deleteGroup = useDeleteGroup();
-  const setPerms = useSetGroupPermissions();
   const canManage = can('groups.manage');
   const [newName, setNewName] = useState('');
-
-  const byCategory = catalog.reduce<Record<string, typeof catalog>>((acc, p) => {
-    (acc[p.category || 'Other'] ||= []).push(p);
-    return acc;
-  }, {});
+  const [filter, setFilter] = useState('');
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     try {
@@ -196,88 +207,395 @@ function GroupsTab() {
     return <Empty title="Permission required" description="You need the 'Manage groups & permissions' permission." />;
   }
 
-  const togglePerm = (g: GroupRow, perm: string, on: boolean) => {
-    const next = on ? [...g.permissions, perm] : g.permissions.filter((p) => p !== perm);
-    return run(
-      () => setPerms.mutateAsync({ id: g.id, permissions: next as Permission[] }),
-      'Permissions updated',
-    );
-  };
+  const visibleGroups = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    return q ? groups.filter((g) => g.name.toLowerCase().includes(q)) : groups;
+  }, [groups, filter]);
 
   return (
     <Section
       title="Groups & Permissions"
       action={
         <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <Input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter groups…"
+              className="w-44 pl-7"
+            />
+          </div>
           <Input
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             placeholder="New group name"
-            className="w-48"
+            className="w-44"
           />
           <Button
             variant="primary"
             disabled={!newName.trim() || createGroup.isPending}
             onClick={async () => {
-              await run(() => createGroup.mutateAsync({ name: newName.trim(), description: '', require2fa: false }), 'Group created');
+              // F25: new groups require 2FA by default — matches the
+              // column default introduced in migration 0015.
+              await run(
+                () => createGroup.mutateAsync({ name: newName.trim(), description: '', require2fa: true }),
+                'Group created',
+              );
               setNewName('');
             }}
           >
-            Add group
+            <Plus className="w-3.5 h-3.5" /> Add group
           </Button>
         </div>
       }
     >
-      <div className="space-y-4">
-        {groups.map((g) => (
-          <Card key={g.id} className="p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold text-gray-900">{g.name}</span>
-                  {g.isSystem && <Pill tone="gray">system</Pill>}
-                </div>
-                <div className="text-[12px] text-gray-500">{g.description || '—'}</div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  label="Require 2FA"
-                  checked={g.require2fa}
-                  onChange={(v) => run(() => updateGroup.mutateAsync({ id: g.id, patch: { require2fa: v } }), 'Group updated')}
-                />
-                {!g.isSystem && (
-                  <button
-                    onClick={() => run(() => deleteGroup.mutateAsync(g.id), 'Group deleted')}
-                    className="text-gray-300 hover:text-red-600"
-                    title="Delete group"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
-              {Object.entries(byCategory).map(([cat, perms]) => (
-                <div key={cat}>
-                  <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold mb-1.5">{cat}</div>
-                  <div className="space-y-1">
-                    {perms.map((p) => (
-                      <Checkbox
-                        key={p.key}
-                        label={p.label}
-                        checked={g.permissions.includes(p.key)}
-                        onChange={(on) => togglePerm(g, p.key, on)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
+      <div className="space-y-3">
+        {visibleGroups.map((g) => (
+          <GroupCard key={g.id} group={g} catalog={catalog} run={run} />
         ))}
-        {groups.length === 0 && <Empty title="No groups yet" description="Create a group to start assigning permissions." />}
+        {visibleGroups.length === 0 && groups.length === 0 && (
+          <Empty title="No groups yet" description="Create a group to start assigning permissions." />
+        )}
+        {visibleGroups.length === 0 && groups.length > 0 && (
+          <Empty title="No matches" description={`No group matches "${filter}".`} />
+        )}
       </div>
     </Section>
+  );
+}
+
+/**
+ * F25 — single collapsible group card. Expand/collapse state is local
+ * (collapsed by default). Owns its own member-load query so a tab with 30
+ * groups doesn't fan out 30 requests on mount; the query is gated on
+ * expanded state via `useGroupMembers(expanded ? id : null)`.
+ */
+function GroupCard({
+  group,
+  catalog,
+  run,
+}: {
+  group: GroupRow;
+  catalog: { key: string; label: string; category: string }[];
+  run: (fn: () => Promise<unknown>, ok: string) => Promise<void>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const updateGroup = useUpdateGroup();
+  const deleteGroup = useDeleteGroup();
+  const setPerms = useSetGroupPermissions();
+  const addUser = useAddUserToGroup();
+  const removeUser = useRemoveUserFromGroup();
+  const { data: users = [] } = useUsers();
+  const { data: memberIds = [] } = useGroupMembers(expanded ? group.id : null);
+
+  const byCategory = useMemo(() => {
+    return catalog.reduce<Record<string, typeof catalog>>((acc, p) => {
+      (acc[p.category || 'Other'] ||= []).push(p);
+      return acc;
+    }, {});
+  }, [catalog]);
+
+  const members = useMemo(
+    () => memberIds.map((id) => users.find((u) => u.id === id)).filter(Boolean) as UserRow[],
+    [memberIds, users],
+  );
+
+  const togglePerm = (perm: string, on: boolean) => {
+    const next = on ? [...group.permissions, perm] : group.permissions.filter((p) => p !== perm);
+    return run(
+      () => setPerms.mutateAsync({ id: group.id, permissions: next as Permission[] }),
+      'Permissions updated',
+    );
+  };
+
+  const removePerm = (perm: string) => {
+    const next = group.permissions.filter((p) => p !== perm);
+    return run(
+      () => setPerms.mutateAsync({ id: group.id, permissions: next as Permission[] }),
+      'Permission removed',
+    );
+  };
+
+  const permLabel = (key: string): string => catalog.find((p) => p.key === key)?.label ?? key;
+
+  return (
+    <Card className="overflow-hidden">
+      {/* Collapsed header — clickable. */}
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        className="w-full flex items-center gap-3 p-4 text-left hover:bg-gray-50 transition-colors"
+      >
+        {expanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-bold text-gray-900">{group.name}</span>
+            {group.isSystem && <Pill tone="gray">system</Pill>}
+            {group.require2fa && <Pill tone="yellow">2FA</Pill>}
+          </div>
+          {group.description && (
+            <div className="text-[12px] text-gray-500 truncate">{group.description}</div>
+          )}
+        </div>
+        <span className="text-[11px] font-semibold text-gray-500 tabular-nums">
+          {group.permissions.length} {group.permissions.length === 1 ? 'permission' : 'permissions'}
+        </span>
+        <span className="text-[11px] font-semibold text-gray-500 tabular-nums">
+          {expanded ? `${memberIds.length} ${memberIds.length === 1 ? 'member' : 'members'}` : '· members'}
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-gray-100 p-5 space-y-6 bg-gray-50/40">
+          {/* Permissions — pills + add Popover. */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Permissions</h3>
+              <AddPermissionButton
+                byCategory={byCategory}
+                assigned={group.permissions}
+                onAdd={(perm) => togglePerm(perm, true)}
+              />
+            </div>
+            {group.permissions.length === 0 ? (
+              <div className="text-[12px] text-gray-400 italic">No permissions yet — click "+ Add" to grant the first.</div>
+            ) : (
+              <PermissionPillCloud
+                permissions={group.permissions}
+                permLabel={permLabel}
+                onRemove={removePerm}
+              />
+            )}
+          </div>
+
+          {/* Members — AvatarStack + add Popover + per-avatar remove. */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Members</h3>
+              <AddMemberButton
+                groupId={group.id}
+                users={users}
+                memberIds={memberIds}
+                onAdd={(userId) =>
+                  run(() => addUser.mutateAsync({ groupId: group.id, userId }), 'User added to group')
+                }
+              />
+            </div>
+            {members.length === 0 ? (
+              <div className="text-[12px] text-gray-400 italic">No members yet.</div>
+            ) : (
+              <div className="flex items-center gap-3 flex-wrap">
+                {members.map((m) => (
+                  <div key={m.id} className="group inline-flex items-center gap-1.5">
+                    <Avatar user={m} size={28} />
+                    <span className="text-[12px] font-semibold text-gray-700">{m.name}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        run(
+                          () => removeUser.mutateAsync({ groupId: group.id, userId: m.id }),
+                          `Removed ${m.name} from group`,
+                        )
+                      }
+                      className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-red-600"
+                      title={`Remove ${m.name}`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Settings — 2FA toggle + delete (system groups can't be deleted). */}
+          <div>
+            <h3 className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-2">Settings</h3>
+            <div className="flex items-center gap-4">
+              <Checkbox
+                label="Require 2FA"
+                checked={group.require2fa}
+                onChange={(v) =>
+                  run(() => updateGroup.mutateAsync({ id: group.id, patch: { require2fa: v } }), 'Group updated')
+                }
+              />
+              {!group.isSystem && (
+                <button
+                  type="button"
+                  onClick={() => run(() => deleteGroup.mutateAsync(group.id), 'Group deleted')}
+                  className="ml-auto inline-flex items-center gap-1.5 text-[12px] font-semibold text-gray-400 hover:text-red-600"
+                  title="Delete group"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Delete group
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * Pills for assigned permissions, grouped by category. Each pill has an
+ * "x" to remove. Lays out compactly so a 30-perm group still scans well.
+ */
+function PermissionPillCloud({
+  permissions,
+  permLabel,
+  onRemove,
+}: {
+  permissions: string[];
+  permLabel: (key: string) => string;
+  onRemove: (perm: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {permissions.map((perm) => (
+        <span
+          key={perm}
+          className="inline-flex items-center gap-1 rounded-full bg-brand-50 border border-brand-200 text-brand-800 px-2.5 py-0.5 text-[11px] font-semibold"
+        >
+          {permLabel(perm)}
+          <button
+            type="button"
+            onClick={() => onRemove(perm)}
+            className="text-brand-400 hover:text-red-600"
+            aria-label={`Remove ${permLabel(perm)}`}
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function AddPermissionButton({
+  byCategory,
+  assigned,
+  onAdd,
+}: {
+  byCategory: Record<string, { key: string; label: string; category: string }[]>;
+  assigned: string[];
+  onAdd: (perm: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <button
+        ref={anchor}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex items-center gap-1 rounded-full border border-dashed border-gray-300 text-gray-500 hover:text-brand-700 hover:border-brand-300 px-2.5 py-0.5 text-[11px] font-semibold"
+      >
+        <Plus className="w-3 h-3" /> Add permission
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchor} align="end" width={320}>
+        <div className="w-80 max-h-80 overflow-y-auto p-3 space-y-3">
+          {Object.entries(byCategory).map(([cat, perms]) => {
+            const unassigned = perms.filter((p) => !assigned.includes(p.key));
+            if (unassigned.length === 0) return null;
+            return (
+              <div key={cat}>
+                <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-1">{cat}</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {unassigned.map((p) => (
+                    <button
+                      key={p.key}
+                      type="button"
+                      onClick={() => {
+                        onAdd(p.key);
+                        // Leave popover open so admins can grant several at once.
+                      }}
+                      className="inline-flex items-center gap-1 rounded-full border border-gray-200 hover:border-brand-300 hover:bg-brand-50 text-gray-700 hover:text-brand-700 px-2.5 py-0.5 text-[11px] font-semibold"
+                    >
+                      <Plus className="w-3 h-3" /> {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Popover>
+    </>
+  );
+}
+
+function AddMemberButton({
+  groupId,
+  users,
+  memberIds,
+  onAdd,
+}: {
+  groupId: string;
+  users: UserRow[];
+  memberIds: string[];
+  onAdd: (userId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const anchor = useRef<HTMLButtonElement>(null);
+  const candidates = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return users.filter(
+      (u) =>
+        !memberIds.includes(u.id) &&
+        (!needle || u.name.toLowerCase().includes(needle) || u.email.toLowerCase().includes(needle)),
+    );
+  }, [users, memberIds, q]);
+  return (
+    <>
+      <button
+        ref={anchor}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex items-center gap-1 rounded-full border border-dashed border-gray-300 text-gray-500 hover:text-brand-700 hover:border-brand-300 px-2.5 py-0.5 text-[11px] font-semibold"
+      >
+        <Plus className="w-3 h-3" /> Add member
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchor} align="end" width={280}>
+        <div className="w-72 flex flex-col">
+          <div className="p-2 border-b border-gray-100">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search teammates…"
+              autoFocus
+              className="w-full px-2 py-1.5 text-sm outline-none placeholder:text-gray-400"
+            />
+          </div>
+          <div className="max-h-64 overflow-y-auto py-1">
+            {candidates.length === 0 ? (
+              <div className="px-3 py-2 text-sm text-gray-400">
+                {users.length === memberIds.length ? 'Everyone is already in this group.' : 'No matches.'}
+              </div>
+            ) : (
+              candidates.map((u) => (
+                <button
+                  key={u.id}
+                  type="button"
+                  onClick={() => {
+                    onAdd(u.id);
+                    // Leave open so admins can add several in a row.
+                    setQ('');
+                  }}
+                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 inline-flex items-center gap-2"
+                >
+                  <Avatar user={u} size={20} />
+                  <span className="truncate">{u.name}</span>
+                  <span className="ml-auto text-[10px] text-gray-400 truncate">{u.email}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      </Popover>
+    </>
   );
 }
 

@@ -1,4 +1,4 @@
-import { eq, asc } from 'drizzle-orm';
+import { eq, asc, and } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
   permissions,
@@ -103,6 +103,50 @@ export async function setUserGroups(userId: string, groupIds: string[], whoId: s
     }
   });
   emit.toOrg(EV.USER_UPDATED, { id: userId, by: whoId, at: new Date().toISOString() });
+}
+
+/**
+ * F25: list the userIds currently in `groupId`. Used by the redesigned
+ * GroupsTab to render the per-group Members section.
+ */
+export async function listGroupMembers(groupId: string): Promise<string[]> {
+  const rows = await db
+    .select({ userId: userGroups.userId })
+    .from(userGroups)
+    .where(eq(userGroups.groupId, groupId));
+  return rows.map((r) => r.userId);
+}
+
+/**
+ * F25: add a single user to a group. Idempotent — a duplicate `(userId,
+ * groupId)` is a no-op via ON CONFLICT DO NOTHING. Emits USER_UPDATED so
+ * permission rollups on the client refresh.
+ */
+export async function addUserToGroup(userId: string, groupId: string, whoId: string): Promise<void> {
+  const g = await db.select().from(groups).where(eq(groups.id, groupId)).limit(1);
+  if (!g[0]) throw new HttpError(404, 'group_not_found');
+  await db
+    .insert(userGroups)
+    .values({ userId, groupId })
+    .onConflictDoNothing();
+  emit.toOrg(EV.USER_UPDATED, { id: userId, by: whoId, at: new Date().toISOString() });
+  emit.toOrg(EV.GROUP_UPDATED, { id: groupId, by: whoId, at: new Date().toISOString() });
+  await appendActivity({ whoId, kind: 'group.member_add', target: `User added to group "${g[0].name}"` });
+}
+
+/**
+ * F25: remove a single user from a group. Idempotent — silently succeeds
+ * if the user wasn't in the group.
+ */
+export async function removeUserFromGroup(userId: string, groupId: string, whoId: string): Promise<void> {
+  const g = await db.select().from(groups).where(eq(groups.id, groupId)).limit(1);
+  if (!g[0]) throw new HttpError(404, 'group_not_found');
+  await db
+    .delete(userGroups)
+    .where(and(eq(userGroups.userId, userId), eq(userGroups.groupId, groupId)));
+  emit.toOrg(EV.USER_UPDATED, { id: userId, by: whoId, at: new Date().toISOString() });
+  emit.toOrg(EV.GROUP_UPDATED, { id: groupId, by: whoId, at: new Date().toISOString() });
+  await appendActivity({ whoId, kind: 'group.member_remove', target: `User removed from group "${g[0].name}"` });
 }
 
 export async function getUserOverrides(userId: string) {
