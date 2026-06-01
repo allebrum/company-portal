@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PRIORITIES, TODO_STATUSES } from '../enums';
+import { SpaceFileSchema } from './space';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD');
 
@@ -16,7 +17,11 @@ export type ChecklistItem = z.infer<typeof ChecklistItemSchema>;
 export const CreateTodoSchema = z.object({
   title: z.string().min(1).max(280),
   description: z.string().max(10_000).nullable().optional(),
+  // F25: assignee is EITHER a user OR a group (or null). The DB CHECK
+  // constraint rejects mixed assignments; callers must clear one when
+  // setting the other.
   assigneeId: z.string().uuid().nullable().optional(),
+  assigneeGroupId: z.string().uuid().nullable().optional(),
   clientId: z.string().uuid().nullable().optional(),
   projectId: z.string().uuid().nullable().optional(),
   goalId: z.string().uuid().nullable().optional(),
@@ -26,6 +31,9 @@ export const CreateTodoSchema = z.object({
   tags: z.array(z.string().max(40)).default([]),
   private: z.boolean().default(false),
   checklist: z.array(ChecklistItemSchema).max(50).default([]),
+  // F25: file attachments on the todo. Full-replace on update; uploads
+  // append atomically via POST /api/todos/:id/files.
+  attachments: z.array(SpaceFileSchema).max(50).default([]),
 });
 // Use z.input so callers may omit fields that have defaults (estimateMin,
 // priority, tags, private, checklist) — the server applies them via zod.

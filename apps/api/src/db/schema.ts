@@ -174,7 +174,9 @@ export const groups = pgTable('groups', {
   name: text('name').notNull(),
   description: text('description').notNull().default(''),
   isSystem: boolean('is_system').notNull().default(false),
-  require2fa: boolean('require_2fa').notNull().default(false),
+  // F25: new groups require 2FA by default. Existing rows untouched by the
+  // 0015 migration (only the DEFAULT changes; per-group toggle still works).
+  require2fa: boolean('require_2fa').notNull().default(true),
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
@@ -287,6 +289,10 @@ export const goals = pgTable('goals', {
   // valid.
   status: text('status').notNull().default('backlog'),
   ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+  // F25: a goal can be owned by a group instead of a user. The 0015
+  // migration adds a XOR CHECK so at most one of ownerId / ownerGroupId
+  // is set at a time.
+  ownerGroupId: uuid('owner_group_id').references(() => groups.id, { onDelete: 'set null' }),
   startDate: date('start_date'),
   endDate: date('end_date'),
   priority: priorityEnum('priority').notNull().default('medium'),
@@ -360,6 +366,10 @@ export const todos = pgTable('todos', {
   id: uuid('id').defaultRandom().primaryKey(),
   title: text('title').notNull(),
   assigneeId: uuid('assignee_id').references(() => users.id, { onDelete: 'set null' }),
+  // F25: a todo can be assigned to a group instead of a user. The 0015
+  // migration adds a XOR CHECK so at most one of assigneeId / assigneeGroupId
+  // is set at a time.
+  assigneeGroupId: uuid('assignee_group_id').references(() => groups.id, { onDelete: 'set null' }),
   clientId: uuid('client_id').references(() => clients.id, { onDelete: 'set null' }),
   projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
   goalId: uuid('goal_id').references(() => goals.id, { onDelete: 'set null' }),
@@ -375,10 +385,15 @@ export const todos = pgTable('todos', {
   // can keep the whole list with the row; server treats it as a full
   // replace on update (no diffing).
   checklist: jsonb('checklist').notNull().default(sql`'[]'::jsonb`),
+  // F25: file attachments on the todo itself. Array of SpaceFile shapes
+  // (same as clients.spaceFiles / projects.spaceFiles); full-replace on
+  // update; atomic JSONB `||` append on upload.
+  attachments: jsonb('attachments').notNull().default(sql`'[]'::jsonb`),
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
   assigneeIdx: index('todos_assignee_idx').on(t.assigneeId),
+  assigneeGroupIdx: index('todos_assignee_group_idx').on(t.assigneeGroupId),
   statusIdx: index('todos_status_idx').on(t.status),
 }));
 

@@ -1,16 +1,16 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X, Layers, Target, CheckSquare, FileText, Play, Square,
-  Upload, ExternalLink, Trash2, Link2, Plus, FolderOpen, Globe,
+  Upload, ExternalLink, Trash2, Link2, Plus, FolderOpen, Globe, Pencil,
 } from 'lucide-react';
 import { useSpace } from '@/contexts/SpaceContext';
 import { useSpaceData, useUpdateSpaceFiles } from '@/hooks/useSpace';
 import { useAuth } from '@/hooks/useAuth';
 import {
-  useGoals, useTodos, useUsers, useProjects, useEpics, useCreateGoal, useCreateTodo,
+  useGoals, useTodos, useUsers, useGroups, useProjects, useEpics, useCreateGoal, useCreateTodo,
   useUpdateGoal, useUpdateTodo, useStartTimer, useStopTimer,
   type GoalRow, type TodoRow, type ProjectRow, type ClientRow,
 } from '@/hooks/useResources';
@@ -20,6 +20,7 @@ import { useMyTimer } from '@/hooks/useTimer';
 import { useToast } from '@/components/ui/Toast';
 import { Button } from '@/components/ui/Button';
 import { Avatar } from '@/components/ui/Avatar';
+import { AssigneeCell } from '@/components/ui/AssigneeCell';
 import { fmtTimer, parseLocalDate, PRIORITY_DOT } from '@/lib/formatters';
 import { rollupProgress, HEALTH_TONE } from '@/lib/roadmap';
 import type { SpaceFile } from '@allebrum/shared';
@@ -27,6 +28,29 @@ import type { Scope } from '@/lib/roadmap';
 import { NotesTab } from './NotesTab';
 import { EmbedDialog, type EmbedDialogValue } from './pickers/EmbedDialog';
 import { PortalTab } from './PortalTab';
+import { ItemComposer } from '@/components/features/ItemComposer';
+import { ProjectFormModal } from '@/components/features/ProjectFormModal';
+import { ClientFormModal } from '@/components/features/ClientFormModal';
+
+// ============================================================================
+// Internal context — modal openers shared by every child of the overlay so
+// any tab/card can pop ItemComposer / ProjectFormModal / ClientFormModal
+// without prop drilling. F25.
+// ============================================================================
+
+type SpaceModals = {
+  editTodo: (row: TodoRow) => void;
+  editGoal: (row: GoalRow) => void;
+  addProject: () => void;
+  addClient: () => void;
+};
+
+const SpaceModalsCtx = createContext<SpaceModals | null>(null);
+function useSpaceModals(): SpaceModals {
+  const v = useContext(SpaceModalsCtx);
+  if (!v) throw new Error('useSpaceModals must be inside ClientSpaceOverlay');
+  return v;
+}
 
 // Narrowed scope (the overlay never opens for 'all').
 type OpenScope = Exclude<Scope, { kind: 'all' }>;
@@ -47,7 +71,7 @@ type TabKey = 'notes' | 'goals' | 'todos' | 'files' | 'portal';
  * the `data-space-modal-open` body attribute they own).
  */
 export function ClientSpaceOverlay() {
-  const { openScope, closeSpace } = useSpace();
+  const { openScope, openSpace, closeSpace } = useSpace();
   const data = useSpaceData(openScope);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -57,6 +81,22 @@ export function ClientSpaceOverlay() {
   useEffect(() => {
     setTab('notes');
   }, [openScope?.kind === 'client' || openScope?.kind === 'project' ? openScope.id : null]);
+
+  // F25 — universal modals. State lives at the overlay level so children
+  // can pop modals without prop drilling; cleared on overlay close.
+  const [editingTodo, setEditingTodo] = useState<TodoRow | null>(null);
+  const [editingGoal, setEditingGoal] = useState<GoalRow | null>(null);
+  const [addingProject, setAddingProject] = useState(false);
+  const [addingClient, setAddingClient] = useState(false);
+  const modals = useMemo<SpaceModals>(
+    () => ({
+      editTodo: (row) => setEditingTodo(row),
+      editGoal: (row) => setEditingGoal(row),
+      addProject: () => setAddingProject(true),
+      addClient: () => setAddingClient(true),
+    }),
+    [],
+  );
 
   useEffect(() => {
     if (!openScope) return;
@@ -85,35 +125,73 @@ export function ClientSpaceOverlay() {
   }
 
   return createPortal(
-    <div
-      className="fixed inset-0 z-[200] bg-white flex flex-col"
-      data-screen-label="Project Space"
-      role="dialog"
-      aria-modal="true"
-    >
-      <SpaceHeader scope={narrowed} data={data} onClose={closeSpace} />
-      <SpaceTabs tab={tab} onTab={setTab} data={data} />
-      {narrowed.kind === 'client' && data.client && (
-        <ProjectsStrip client={data.client} />
-      )}
-      <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className="max-w-5xl mx-auto px-6 py-6">
-          {tab === 'notes' && <NotesTab scope={narrowed} />}
-          {tab === 'goals' && (
-            <GoalsTab scope={narrowed} clientId={data.clientId} projectId={data.projectId} />
-          )}
-          {tab === 'todos' && (
-            <TodosTab scope={narrowed} clientId={data.clientId} projectId={data.projectId} />
-          )}
-          {tab === 'files' && (
-            <FilesTab scope={narrowed} data={data} />
-          )}
-          {tab === 'portal' && narrowed.kind === 'client' && data.client && (
-            <PortalTab client={data.client} />
-          )}
+    <SpaceModalsCtx.Provider value={modals}>
+      <div
+        className="fixed inset-0 z-[200] bg-white flex flex-col"
+        data-screen-label="Project Space"
+        role="dialog"
+        aria-modal="true"
+      >
+        <SpaceHeader scope={narrowed} data={data} onClose={closeSpace} />
+        <SpaceTabs tab={tab} onTab={setTab} data={data} />
+        {narrowed.kind === 'client' && data.client && (
+          <ProjectsStrip client={data.client} />
+        )}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="max-w-5xl mx-auto px-6 py-6">
+            {tab === 'notes' && <NotesTab scope={narrowed} />}
+            {tab === 'goals' && (
+              <GoalsTab scope={narrowed} clientId={data.clientId} projectId={data.projectId} />
+            )}
+            {tab === 'todos' && (
+              <TodosTab scope={narrowed} clientId={data.clientId} projectId={data.projectId} />
+            )}
+            {tab === 'files' && (
+              <FilesTab scope={narrowed} data={data} />
+            )}
+            {tab === 'portal' && narrowed.kind === 'client' && data.client && (
+              <PortalTab client={data.client} />
+            )}
+          </div>
         </div>
       </div>
-    </div>,
+
+      {/* F25 — universal modals. Mounted at the overlay root so any tab or
+          card can pop them via SpaceModalsCtx. Each clears its driving
+          state when closed; ItemComposer's existing reset effect handles
+          the form blanking. */}
+      {editingTodo && (
+        <ItemComposer
+          mode="todo"
+          open={true}
+          onClose={() => setEditingTodo(null)}
+          todo={editingTodo}
+        />
+      )}
+      {editingGoal && (
+        <ItemComposer
+          mode="goal"
+          open={true}
+          onClose={() => setEditingGoal(null)}
+          goal={editingGoal}
+        />
+      )}
+      {addingProject && (
+        <ProjectFormModal
+          open
+          onClose={() => setAddingProject(false)}
+          defaultClientId={data.clientId}
+          onCreated={(row) => {
+            // Auto-navigate into the new project's space so the user lands
+            // somewhere useful immediately after creating.
+            openSpace({ kind: 'project', id: row.id });
+          }}
+        />
+      )}
+      {addingClient && (
+        <ClientFormModal open onClose={() => setAddingClient(false)} />
+      )}
+    </SpaceModalsCtx.Provider>,
     document.body,
   );
 }
@@ -169,6 +247,9 @@ function SpaceHeader({
         <h1 className="text-2xl font-bold text-gray-900 leading-tight truncate">{title}</h1>
       </div>
       <SpaceHeaderTimer data={data} />
+      {scope.kind === 'client' && (
+        <SpaceHeaderAddProject />
+      )}
       <button
         type="button"
         onClick={onClose}
@@ -263,6 +344,27 @@ function SpaceHeaderTimer({ data }: { data: ReturnType<typeof useSpaceData> }) {
     >
       <Play className="w-3.5 h-3.5" />
       Start timer
+    </button>
+  );
+}
+
+// F25 — header pill button: "Add project". Visible only on client scope;
+// click opens ProjectFormModal pre-filled with this client's id. The
+// permission check ("can the user create projects?") happens via the
+// existing `projects.manage` gate on the underlying mutation.
+function SpaceHeaderAddProject() {
+  const modals = useSpaceModals();
+  const { can } = useAuth();
+  if (!can('projects.manage')) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => modals.addProject()}
+      className="inline-flex items-center gap-1.5 rounded-full bg-white border border-brand-200 text-brand-700 hover:bg-brand-50 px-3 py-1.5 font-semibold text-sm"
+      title="Add a new project to this client"
+    >
+      <Plus className="w-3.5 h-3.5" />
+      Add project
     </button>
   );
 }
@@ -490,12 +592,15 @@ function GoalsTab({
 }
 
 function SpaceGoalCard({ goal, todos, users }: { goal: GoalRow; todos: TodoRow[]; users: any[] }) {
-  const owner = users.find((u) => u.id === goal.ownerId);
+  const modals = useSpaceModals();
+  const { data: groups = [] } = useGroups();
+  const owner = goal.ownerId ? users.find((u) => u.id === goal.ownerId) : null;
+  const ownerGroup = goal.ownerGroupId ? groups.find((g) => g.id === goal.ownerGroupId) ?? null : null;
   const pct = rollupProgress(goal, todos);
   const linked = todos.filter((t) => t.goalId === goal.id);
   const doneCount = linked.filter((t) => t.status === 'done').length;
   return (
-    <div className="bg-white border border-gray-200 hover:border-brand-300 hover:shadow-sm transition-all rounded-xl p-3 flex items-center gap-3">
+    <div className="group bg-white border border-gray-200 hover:border-brand-300 hover:shadow-sm transition-all rounded-xl p-3 flex items-center gap-3">
       <div className="flex-1 min-w-0">
         <div className="text-sm font-semibold text-gray-900 truncate">{goal.title}</div>
         <div className="mt-1.5 h-1 bg-gray-100 rounded-full overflow-hidden">
@@ -513,7 +618,18 @@ function SpaceGoalCard({ goal, todos, users }: { goal: GoalRow; todos: TodoRow[]
           <span className="ml-1 italic text-gray-400">· Auto-linked</span>
         </div>
       </div>
-      {owner && <Avatar user={owner} size={28} />}
+      {/* F25 — owner pill renders user OR group via the shared AssigneeCell. */}
+      <AssigneeCell user={owner ?? null} group={ownerGroup} size="md" iconOnly />
+      {/* F25 — pencil opens the goal in ItemComposer for full-form edit. */}
+      <button
+        type="button"
+        onClick={() => modals.editGoal(goal)}
+        className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-brand-700 transition-opacity p-1 rounded"
+        title="Edit goal"
+        aria-label="Edit goal"
+      >
+        <Pencil className="w-4 h-4" />
+      </button>
     </div>
   );
 }
@@ -642,8 +758,14 @@ function SpaceTodoCard({ todo }: { todo: TodoRow }) {
     }
   };
 
+  const modals = useSpaceModals();
+  const { data: groups = [] } = useGroups();
+  const { data: users = [] } = useUsers();
+  const assignedUser = todo.assigneeId ? users.find((u) => u.id === todo.assigneeId) ?? null : null;
+  const assignedGroup = todo.assigneeGroupId ? groups.find((g) => g.id === todo.assigneeGroupId) ?? null : null;
+
   return (
-    <div className={`rounded-xl border px-3 py-2.5 flex items-center gap-3 transition-colors ${
+    <div className={`group rounded-xl border px-3 py-2.5 flex items-center gap-3 transition-colors ${
       running
         ? 'bg-red-50 border-red-300'
         : isDone
@@ -665,6 +787,10 @@ function SpaceTodoCard({ todo }: { todo: TodoRow }) {
           {running && <span className="text-red-600 font-semibold not-italic"> · {fmtTimer(elapsedSec)}</span>}
         </div>
       </div>
+      {/* F25 — assignee pill (user OR group) via the shared AssigneeCell. */}
+      {(assignedUser || assignedGroup) && (
+        <AssigneeCell user={assignedUser} group={assignedGroup} size="sm" iconOnly />
+      )}
       {!isDone && (
         <button
           type="button"
@@ -679,6 +805,16 @@ function SpaceTodoCard({ todo }: { todo: TodoRow }) {
           {running ? 'Stop' : 'Start'}
         </button>
       )}
+      {/* F25 — pencil opens the to-do in ItemComposer for full-form edit. */}
+      <button
+        type="button"
+        onClick={() => modals.editTodo(todo)}
+        className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-brand-700 transition-opacity p-1 rounded"
+        title="Edit to-do"
+        aria-label="Edit to-do"
+      >
+        <Pencil className="w-4 h-4" />
+      </button>
     </div>
   );
 }

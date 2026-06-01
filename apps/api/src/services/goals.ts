@@ -35,13 +35,17 @@ export async function listGoals(): Promise<(Goal & { resources: GoalResource[] }
 }
 
 export async function createGoal(input: CreateGoalInput, whoId: string): Promise<Goal> {
+  // F25: owner is EITHER a user OR a group. If a group is set, leave the
+  // user owner null so the XOR CHECK holds.
+  const ownerId = input.ownerGroupId != null ? null : (input.ownerId ?? null);
   const [row] = await db.insert(goals).values({
     clientId: input.clientId,
     projectId: input.projectId,
     title: input.title,
     description: input.description ?? null,
     status: input.status,
-    ownerId: input.ownerId ?? null,
+    ownerId,
+    ownerGroupId: input.ownerGroupId ?? null,
     startDate: input.startDate ?? null,
     endDate: input.endDate ?? null,
     priority: input.priority,
@@ -65,7 +69,16 @@ export async function updateGoal(id: string, patch: UpdateGoalInput, whoId: stri
   if (patch.title !== undefined) upd.title = patch.title;
   if (patch.description !== undefined) upd.description = patch.description;
   if (patch.status !== undefined) upd.status = patch.status;
-  if (patch.ownerId !== undefined) upd.ownerId = patch.ownerId;
+  // F25: setting one of (ownerId, ownerGroupId) clears the other so the DB
+  // XOR CHECK holds without requiring callers to know.
+  if (patch.ownerId !== undefined) {
+    upd.ownerId = patch.ownerId;
+    if (patch.ownerId != null) upd.ownerGroupId = null;
+  }
+  if (patch.ownerGroupId !== undefined) {
+    upd.ownerGroupId = patch.ownerGroupId;
+    if (patch.ownerGroupId != null) upd.ownerId = null;
+  }
   if (patch.startDate !== undefined) upd.startDate = patch.startDate;
   if (patch.endDate !== undefined) upd.endDate = patch.endDate;
   if (patch.priority !== undefined) upd.priority = patch.priority;

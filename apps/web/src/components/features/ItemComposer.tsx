@@ -11,13 +11,15 @@ import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/hooks/useAuth';
 import {
-  useUsers, useClients, useProjects, useGoals, useTodos, useEpics,
+  useUsers, useClients, useProjects, useGoals, useTodos, useEpics, useGroups,
   useCreateTodo, useUpdateTodo, useDeleteTodo,
   useCreateGoal, useUpdateGoal, useMoveGoal,
   useAddResource, useRemoveResource, useUploadGoalResource,
   useStartTimer, useStopTimer,
   type TodoRow, type GoalRow, type ChecklistItemRow, type GoalHealth,
 } from '@/hooks/useResources';
+import { useUploadManager } from '@/contexts/UploadManagerContext';
+import type { SpaceFile } from '@allebrum/shared';
 import { useMyTimer } from '@/hooks/useTimer';
 import { fmtTimer, PRIORITY_DOT } from '@/lib/formatters';
 import { QuickAddTodo } from '@/components/features/QuickAddTodo';
@@ -27,6 +29,7 @@ import { Activity, Gauge, Layers } from 'lucide-react';
 import { PropertyCell } from '@/components/composer/PropertyCell';
 import { Checklist } from '@/components/composer/Checklist';
 import { UserChip } from '@/components/composer/chips/UserChip';
+import { AssigneeChip } from '@/components/composer/chips/AssigneeChip';
 import { ClientChip } from '@/components/composer/chips/ClientChip';
 import { ProjectChip } from '@/components/composer/chips/ProjectChip';
 import { GoalChip } from '@/components/composer/chips/GoalChip';
@@ -72,6 +75,7 @@ export function ItemComposer(props: ItemComposerProps) {
 
   // Shared lookups (one set of hooks for everything in the composer).
   const { data: users = [] } = useUsers();
+  const { data: groups = [] } = useGroups();
   const { data: clients = [] } = useClients();
   const { data: projects = [] } = useProjects();
   const { data: goals = [] } = useGoals();
@@ -102,7 +106,10 @@ export function ItemComposer(props: ItemComposerProps) {
 
   // todo-specific
   const [assigneeId, setAssigneeId] = useState<string | null>(null);
+  // F25: a todo may be assigned to a group instead of a user; either is null.
+  const [assigneeGroupId, setAssigneeGroupId] = useState<string | null>(null);
   const [goalId, setGoalId] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<SpaceFile[]>([]);
   const [dueDate, setDueDate] = useState('');
   const [estimateMin, setEstimateMin] = useState(60);
   const [tags, setTags] = useState<string[]>([]);
@@ -111,6 +118,8 @@ export function ItemComposer(props: ItemComposerProps) {
 
   // goal-specific
   const [ownerId, setOwnerId] = useState<string | null>(null);
+  // F25: a goal may be owned by a group instead of a user.
+  const [ownerGroupId, setOwnerGroupId] = useState<string | null>(null);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [goalCategory, setGoalCategory] = useState('Delivery');
@@ -129,6 +138,15 @@ export function ItemComposer(props: ItemComposerProps) {
   const [rMeta, setRMeta] = useState('');
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  // F25 — todo Files section uses its own drop state + ref so the goal-mode
+  // Resources zone and the todo-mode Files zone don't share UI state when
+  // both happen to render on the same modal mount.
+  const [todoDragging, setTodoDragging] = useState(false);
+  const todoFileRef = useRef<HTMLInputElement>(null);
+  // Reach into the shell-level UploadManager so dropped todo files survive
+  // the modal closing — they show up in the same global tray as Space and
+  // Drive uploads.
+  const uploadMgr = useUploadManager();
 
   // goal-edit linked-todos inline form
   const [pickedTodoId, setPickedTodoId] = useState('');
@@ -144,7 +162,10 @@ export function ItemComposer(props: ItemComposerProps) {
       setClientId(t?.clientId ?? d.clientId ?? null);
       setProjectId(t?.projectId ?? d.projectId ?? null);
       setGoalId(t?.goalId ?? d.goalId ?? null);
-      setAssigneeId(t?.assigneeId ?? d.assigneeId ?? me?.id ?? null);
+      // F25: prefer existing group assignment over user; if neither, default
+      // assignee to creator. Defaults flow through `d.assigneeId` as today.
+      setAssigneeId(t?.assigneeGroupId ? null : (t?.assigneeId ?? d.assigneeId ?? me?.id ?? null));
+      setAssigneeGroupId(t?.assigneeGroupId ?? null);
       setDueDate(t?.dueDate ?? new Date().toISOString().slice(0, 10));
       setEstimateMin(t?.estimateMin ?? 60);
       setPriority(t?.priority ?? 'medium');
@@ -152,6 +173,7 @@ export function ItemComposer(props: ItemComposerProps) {
       setPriv(t?.private ?? false);
       setTodoStatus(t?.status ?? 'open');
       setChecklist(t?.checklist ?? []);
+      setAttachments(t?.attachments ?? []);
     } else {
       const g = props.goal ?? null;
       const d = props.defaults ?? {};
@@ -159,7 +181,9 @@ export function ItemComposer(props: ItemComposerProps) {
       setDescription(g?.description ?? '');
       setClientId(g?.clientId ?? d.clientId ?? null);
       setProjectId(g?.projectId ?? d.projectId ?? null);
-      setOwnerId(g?.ownerId ?? d.ownerId ?? null);
+      // F25: prefer existing group ownership over user.
+      setOwnerId(g?.ownerGroupId ? null : (g?.ownerId ?? d.ownerId ?? null));
+      setOwnerGroupId(g?.ownerGroupId ?? null);
       setStartDate(g?.startDate ?? '');
       setEndDate(g?.endDate ?? '');
       setPriority(g?.priority ?? 'medium');
@@ -224,10 +248,13 @@ export function ItemComposer(props: ItemComposerProps) {
     }
     try {
       if (mode === 'todo') {
+        // F25: a private todo is always personally owned by the creator —
+        // groups can't be the assignee of a private todo.
         const payload = {
           title: title.trim(),
           description: description.trim() || null,
           assigneeId: priv ? me?.id ?? null : assigneeId,
+          assigneeGroupId: priv ? null : assigneeGroupId,
           clientId,
           projectId,
           goalId: priv ? null : goalId,
@@ -237,6 +264,7 @@ export function ItemComposer(props: ItemComposerProps) {
           tags,
           private: priv,
           checklist,
+          attachments,
         };
         if (props.todo) {
           await updateTodo.mutateAsync({
@@ -260,6 +288,7 @@ export function ItemComposer(props: ItemComposerProps) {
           description: description.trim() || null,
           status: goalStatus,
           ownerId,
+          ownerGroupId,
           startDate: startDate || undefined,
           endDate: endDate || undefined,
           priority,
@@ -327,6 +356,37 @@ export function ItemComposer(props: ItemComposerProps) {
       onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed');
+    }
+  };
+
+  // F25 — todo Files: dropped files go through the shell-level
+  // UploadManager (same XHR pipeline + tray UI Space/Drive uploads use).
+  // The server resolves the parent project/client's Drive folder and
+  // atomically appends to `todos.attachments`. On success the row
+  // invalidates → ItemComposer re-mounts with the new attachment list.
+  const onUploadTodoFiles = (files: File[]) => {
+    if (mode !== 'todo' || !props.todo || files.length === 0) return;
+    if (!props.todo.projectId && !props.todo.clientId) {
+      toast.error('Attach a client or project first — files need a Drive home.');
+      return;
+    }
+    uploadMgr.enqueue({
+      target: { kind: 'todo', todoId: props.todo.id },
+      scopeLabel: props.todo.title || 'To-do',
+      files,
+    });
+    toast.success(`${files.length} file${files.length === 1 ? '' : 's'} queued`);
+  };
+
+  const onRemoveTodoAttachment = async (fileId: string) => {
+    if (mode !== 'todo' || !props.todo) return;
+    try {
+      const next = attachments.filter((a) => a.id !== fileId);
+      await updateTodo.mutateAsync({ id: props.todo.id, patch: { attachments: next } });
+      setAttachments(next);
+      toast.success('Attachment removed');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Remove failed');
     }
   };
 
@@ -501,12 +561,38 @@ export function ItemComposer(props: ItemComposerProps) {
             {/* Properties grid */}
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-10 gap-y-5">
               <PropertyCell icon={User} label={priv ? 'Owner' : mode === 'goal' ? 'Owner' : 'Assignee'}>
-                <UserChip
-                  value={mode === 'goal' ? ownerId : assigneeId}
-                  users={users}
-                  onChange={mode === 'goal' ? setOwnerId : setAssigneeId}
-                  placeholder="Unassigned"
-                />
+                {priv ? (
+                  // Private todos are personally owned by the creator — the
+                  // user-only chip surfaces that constraint, no group option.
+                  <UserChip
+                    value={assigneeId}
+                    users={users}
+                    onChange={setAssigneeId}
+                    placeholder="Unassigned"
+                  />
+                ) : (
+                  // F25: unified picker — users + groups in one list. The
+                  // picker writes either id and clears the other so the
+                  // server's XOR CHECK is always satisfied.
+                  <AssigneeChip
+                    value={{
+                      userId: mode === 'goal' ? ownerId : assigneeId,
+                      groupId: mode === 'goal' ? ownerGroupId : assigneeGroupId,
+                    }}
+                    users={users}
+                    groups={groups}
+                    onChange={(next) => {
+                      if (mode === 'goal') {
+                        setOwnerId(next.userId);
+                        setOwnerGroupId(next.groupId);
+                      } else {
+                        setAssigneeId(next.userId);
+                        setAssigneeGroupId(next.groupId);
+                      }
+                    }}
+                    placeholder="Unassigned"
+                  />
+                )}
               </PropertyCell>
 
               <PropertyCell icon={Building2} label="Client">
@@ -633,6 +719,86 @@ export function ItemComposer(props: ItemComposerProps) {
             {/* Checklist */}
             <SectionHeader icon={Check} title="Checklist" count={checklist.length || undefined} />
             <Checklist items={checklist} onChange={setChecklist} />
+
+            {/* F25 — Todo files (edit-only: an attachment needs a todo id to upload against). */}
+            {mode === 'todo' && props.todo && (
+              <>
+                <SectionHeader icon={Upload} title="Files" count={attachments.length || undefined} />
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setTodoDragging(true);
+                  }}
+                  onDragLeave={() => setTodoDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setTodoDragging(false);
+                    const files = Array.from(e.dataTransfer.files);
+                    if (files.length) onUploadTodoFiles(files);
+                  }}
+                  onClick={() => todoFileRef.current?.click()}
+                  className={`border-2 border-dashed rounded-lg p-4 text-center text-sm cursor-pointer transition-colors ${
+                    todoDragging
+                      ? 'border-brand-500 bg-brand-50 text-brand-700'
+                      : 'border-gray-200 text-gray-500 hover:border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  <Upload className="w-4 h-4 inline-block mr-1.5 -mt-0.5" />
+                  Drop files here, or click to upload
+                  <div className="text-[11px] text-gray-400 mt-0.5">
+                    Lands in the parent project's Drive folder.
+                  </div>
+                  <input
+                    ref={todoFileRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files ?? []);
+                      if (files.length) onUploadTodoFiles(files);
+                      e.target.value = '';
+                    }}
+                  />
+                </div>
+                <ul className="space-y-1">
+                  {attachments.length === 0 && (
+                    <li className="text-sm text-gray-500">No files yet.</li>
+                  )}
+                  {attachments.map((a) => (
+                    <li key={a.id} className="flex items-center gap-2 text-sm py-1">
+                      <span className="flex-1 min-w-0 truncate">
+                        <a
+                          href={a.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="hover:text-brand-700"
+                        >
+                          {a.title}
+                        </a>
+                        {a.meta && <span className="text-gray-400 ml-1">({a.meta})</span>}
+                      </span>
+                      <a
+                        href={a.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-gray-400 hover:text-brand-700"
+                        aria-label="Open"
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => onRemoveTodoAttachment(a.id)}
+                        className="text-gray-400 hover:text-red-600"
+                        aria-label="Remove"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
 
             {/* Goal-edit sections: Resources + Linked to-dos */}
             {mode === 'goal' && props.goal && (

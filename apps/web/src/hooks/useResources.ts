@@ -119,6 +119,9 @@ export type GoalRow = {
   // Free-form: default workflow value OR a project custom-workflow status id.
   status: string;
   ownerId: string | null;
+  // F25: a goal may be owned by a group instead of a user. Either side
+  // can be null; both null = unowned. Server CHECK enforces XOR.
+  ownerGroupId: string | null;
   startDate: string | null;
   endDate: string | null;
   priority: 'low' | 'medium' | 'high';
@@ -154,6 +157,9 @@ export type TodoRow = {
   title: string;
   description: string | null;
   assigneeId: string | null;
+  // F25: a todo may be assigned to a group instead of a user. Either side
+  // can be null; both null = unassigned. Server CHECK enforces XOR.
+  assigneeGroupId: string | null;
   clientId: string | null;
   projectId: string | null;
   goalId: string | null;
@@ -165,6 +171,9 @@ export type TodoRow = {
   tags: string[];
   private: boolean;
   checklist: ChecklistItemRow[];
+  // F25: file attachments on the todo itself. Always an array; server
+  // defaults to [].
+  attachments: SpaceFile[];
 };
 export type EntryRow = {
   id: string;
@@ -837,6 +846,41 @@ export function useSetUserGroups() {
     mutationFn: ({ id, groupIds }: { id: string; groupIds: string[] }) =>
       api.put<{ ok: true }>(`/rbac/users/${id}/groups`, { groupIds }),
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.users });
+      qc.invalidateQueries({ queryKey: qk.bootstrap });
+    },
+  });
+}
+/**
+ * F25: list the user ids currently in a group. Used by the redesigned
+ * GroupsTab Members section.
+ */
+export function useGroupMembers(groupId: string | null) {
+  return useQuery({
+    queryKey: ['groupMembers', groupId] as const,
+    enabled: !!groupId,
+    queryFn: () => api.get<string[]>(`/rbac/groups/${groupId}/members`),
+  });
+}
+export function useAddUserToGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ groupId, userId }: { groupId: string; userId: string }) =>
+      api.post<{ ok: true }>(`/rbac/groups/${groupId}/users`, { userId }),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['groupMembers', v.groupId] });
+      qc.invalidateQueries({ queryKey: qk.users });
+      qc.invalidateQueries({ queryKey: qk.bootstrap });
+    },
+  });
+}
+export function useRemoveUserFromGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ groupId, userId }: { groupId: string; userId: string }) =>
+      api.del<{ ok: true }>(`/rbac/groups/${groupId}/users/${userId}`),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['groupMembers', v.groupId] });
       qc.invalidateQueries({ queryKey: qk.users });
       qc.invalidateQueries({ queryKey: qk.bootstrap });
     },
