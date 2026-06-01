@@ -37,12 +37,20 @@ function emitTodo(
 }
 
 export async function createTodo(input: CreateTodoInput, whoId: string): Promise<Todo> {
+  // F25: an assignee is EITHER a user OR a group. If neither is provided we
+  // default the assignee to the creator (existing behavior). If a group is
+  // provided, leave assigneeId null so the XOR CHECK holds.
+  const assigneeId =
+    input.assigneeGroupId != null
+      ? null
+      : (input.assigneeId ?? whoId);
   const [row] = await db
     .insert(todos)
     .values({
       title: input.title,
       description: input.description ?? null,
-      assigneeId: input.assigneeId ?? whoId,
+      assigneeId,
+      assigneeGroupId: input.assigneeGroupId ?? null,
       clientId: input.clientId ?? null,
       projectId: input.projectId ?? null,
       goalId: input.goalId ?? null,
@@ -52,6 +60,7 @@ export async function createTodo(input: CreateTodoInput, whoId: string): Promise
       tags: input.tags,
       private: input.private,
       checklist: input.checklist,
+      attachments: input.attachments ?? [],
     })
     .returning();
   if (!row) throw new Error('todo insert failed');
@@ -67,7 +76,16 @@ export async function updateTodo(id: string, patch: UpdateTodoInput, whoId: stri
   const upd: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   if (patch.title !== undefined) upd.title = patch.title;
   if (patch.description !== undefined) upd.description = patch.description;
-  if (patch.assigneeId !== undefined) upd.assigneeId = patch.assigneeId;
+  // F25: setting one of (assigneeId, assigneeGroupId) clears the other so
+  // the DB XOR CHECK is satisfied without requiring callers to know.
+  if (patch.assigneeId !== undefined) {
+    upd.assigneeId = patch.assigneeId;
+    if (patch.assigneeId != null) upd.assigneeGroupId = null;
+  }
+  if (patch.assigneeGroupId !== undefined) {
+    upd.assigneeGroupId = patch.assigneeGroupId;
+    if (patch.assigneeGroupId != null) upd.assigneeId = null;
+  }
   if (patch.clientId !== undefined) upd.clientId = patch.clientId;
   if (patch.projectId !== undefined) upd.projectId = patch.projectId;
   if (patch.goalId !== undefined) upd.goalId = patch.goalId;
@@ -79,6 +97,7 @@ export async function updateTodo(id: string, patch: UpdateTodoInput, whoId: stri
   if (patch.private !== undefined) upd.private = patch.private;
   if (patch.status !== undefined) upd.status = patch.status;
   if (patch.checklist !== undefined) upd.checklist = patch.checklist;
+  if (patch.attachments !== undefined) upd.attachments = patch.attachments;
 
   const [row] = await db.update(todos).set(upd).where(eq(todos.id, id)).returning();
   if (!row) throw new HttpError(404, 'todo_not_found');

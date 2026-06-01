@@ -20,6 +20,9 @@ import {
   setUserGroups,
   getUserOverrides,
   setUserOverrides,
+  listGroupMembers,
+  addUserToGroup,
+  removeUserFromGroup,
 } from '../services/rbac.js';
 
 export const rbacRouter = Router();
@@ -84,6 +87,50 @@ rbacRouter.put(
         getValidated<typeof SetGroupPermissionsSchema._type>(req).permissions,
         me.userId,
       );
+      res.json({ ok: true });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+// F25: per-group members list + single-user add/remove. The GroupsTab UI
+// uses these instead of issuing a full PUT of the user's group set on every
+// pill click. Permission: `groups.manage` (same gate as group create/edit).
+rbacRouter.get('/groups/:id/members', async (req, res, next) => {
+  try {
+    res.json(await listGroupMembers(req.params.id!));
+  } catch (e) {
+    next(e);
+  }
+});
+
+rbacRouter.post(
+  '/groups/:id/users',
+  requirePermission('groups.manage'),
+  async (req, res, next) => {
+    try {
+      const me = req.session.user!;
+      const userId = (req.body?.userId ?? '') as string;
+      if (!userId || typeof userId !== 'string') {
+        res.status(400).json({ error: 'userId_required' });
+        return;
+      }
+      await addUserToGroup(userId, req.params.id!, me.userId);
+      res.json({ ok: true });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+rbacRouter.delete(
+  '/groups/:id/users/:userId',
+  requirePermission('groups.manage'),
+  async (req, res, next) => {
+    try {
+      const me = req.session.user!;
+      await removeUserFromGroup(req.params.userId!, req.params.id!, me.userId);
       res.json({ ok: true });
     } catch (e) {
       next(e);

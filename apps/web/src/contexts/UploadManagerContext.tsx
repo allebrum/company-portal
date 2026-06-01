@@ -45,7 +45,7 @@ const MAX_FILE_BYTES = 100 * 1024 * 1024;
 export type UploadStatus = 'queued' | 'uploading' | 'done' | 'failed' | 'cancelled';
 
 /**
- * Where an enqueued file should land. Two flavours today:
+ * Where an enqueued file should land. Three flavours:
  *
  * - `space` — atomic upload to a Client/Project Space (Drive upload +
  *   spaceFiles JSONB append via F17A's `/api/spaces/...` endpoint).
@@ -54,13 +54,17 @@ export type UploadStatus = 'queued' | 'uploading' | 'done' | 'failed' | 'cancell
  *   generic `/api/integrations/drive/upload` endpoint. Used by the
  *   Media manager so it can drop into any folder the admin is
  *   browsing, including ones not linked to a client/project.
+ * - `todo` — F25: atomic upload to a todo's `attachments` JSONB array
+ *   via `POST /api/todos/:id/files`. The server resolves the parent
+ *   project's (or client's) Drive folder for storage.
  *
  * Captured at enqueue time so the destination doesn't change if the
  * user navigates away — uploads keep going to where they started.
  */
 export type UploadTarget =
   | { kind: 'space'; scopeKind: 'client' | 'project'; scopeId: string }
-  | { kind: 'drive'; folderId: string };
+  | { kind: 'drive'; folderId: string }
+  | { kind: 'todo'; todoId: string };
 
 export type UploadItem = {
   id: string;
@@ -197,6 +201,8 @@ export function UploadManagerProvider({ children }: { children: ReactNode }) {
       const url =
         item.target.kind === 'space'
           ? `${API_URL}/api/spaces/${item.target.scopeKind}/${item.target.scopeId}/files`
+          : item.target.kind === 'todo'
+          ? `${API_URL}/api/todos/${item.target.todoId}/files`
           : `${API_URL}/api/integrations/drive/upload`;
 
       xhr.upload.onprogress = (e) => {
@@ -213,7 +219,7 @@ export function UploadManagerProvider({ children }: { children: ReactNode }) {
               file?: { url?: string; meta?: string };
               id?: string;
             };
-            if (item.target.kind === 'space') {
+            if (item.target.kind === 'space' || item.target.kind === 'todo') {
               const match = body?.file?.meta?.match(/Drive · (\S+)/);
               driveFileId = match?.[1];
             } else {
@@ -227,6 +233,9 @@ export function UploadManagerProvider({ children }: { children: ReactNode }) {
           if (item.target.kind === 'space') {
             qc.invalidateQueries({ queryKey: qk.clients });
             qc.invalidateQueries({ queryKey: qk.projects });
+          }
+          if (item.target.kind === 'todo') {
+            qc.invalidateQueries({ queryKey: qk.todos });
           }
           qc.invalidateQueries({ queryKey: ['driveList'] });
         } else {

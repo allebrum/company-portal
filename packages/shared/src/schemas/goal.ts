@@ -11,7 +11,11 @@ export const CreateGoalSchema = z.object({
   description: z.string().max(10_000).nullable().optional(),
   // Free-form status (default workflow OR a project's custom workflow id).
   status: z.string().min(1).max(60).default('backlog'),
+  // F25: owner is EITHER a user OR a group (or null). The DB CHECK
+  // constraint rejects mixed ownership; callers must clear one when
+  // setting the other.
   ownerId: z.string().uuid().nullable().optional(),
+  ownerGroupId: z.string().uuid().nullable().optional(),
   startDate: isoDate.optional(),
   endDate: isoDate.optional(),
   priority: z.enum(PRIORITIES).default('medium'),

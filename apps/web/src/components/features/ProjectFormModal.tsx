@@ -16,10 +16,16 @@ export function ProjectFormModal({
   open,
   onClose,
   project,
+  defaultClientId,
+  onCreated,
 }: {
   open: boolean;
   onClose: () => void;
   project?: ProjectRow | null;
+  /** F25: pre-fill the Client picker when opening from a Client Space. */
+  defaultClientId?: string | null;
+  /** F25: called with the newly-created row so callers can deep-link in. */
+  onCreated?: (row: ProjectRow) => void;
 }) {
   const isEdit = !!project;
   const toast = useToast();
@@ -42,13 +48,15 @@ export function ProjectFormModal({
       setBudgetHrs(project.budgetHrs);
       setBillable(project.billable);
     } else {
-      setClientId('');
+      // F25: default-client pre-fill on create when caller supplies one
+      // (e.g. opening "Add project" from inside a Client Space).
+      setClientId(defaultClientId ?? '');
       setName('');
       setCode('');
       setBudgetHrs(120);
       setBillable(true);
     }
-  }, [open, project]);
+  }, [open, project, defaultClientId]);
 
   const onSave = async () => {
     if (!name.trim() || !clientId) {
@@ -63,8 +71,9 @@ export function ProjectFormModal({
         });
         toast.success('Project updated');
       } else {
-        await create.mutateAsync({ clientId, name: name.trim(), code, budgetHrs, billable, color: '#9333ea' });
+        const row = await create.mutateAsync({ clientId, name: name.trim(), code, budgetHrs, billable, color: '#9333ea' });
         toast.success('Project created');
+        onCreated?.(row);
       }
       onClose();
     } catch (e) {

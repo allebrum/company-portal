@@ -1,9 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowRight, Briefcase, CheckCircle2, FolderKanban, Layers, Search } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Briefcase, CheckCircle2, FolderKanban, Layers, Plus, Search } from 'lucide-react';
 import { Card, Section, Empty } from '@/components/ui';
+import { Button } from '@/components/ui/Button';
 import { AvatarStack, type AvatarUser } from '@/components/ui/Avatar';
+import { ClientFormModal } from '@/components/features/ClientFormModal';
+import { useAuth } from '@/hooks/useAuth';
 import {
   useClients,
   useProjects,
@@ -58,6 +61,10 @@ export default function ClientsPage() {
   const { data: todos = [] } = useTodos();
   const { data: entries = [] } = useEntries();
   const { data: users = [] } = useUsers();
+  const { can } = useAuth();
+  // F25 — "Add client" lives in the page header so creating from anywhere
+  // doesn't require jumping to Admin first.
+  const [addingClient, setAddingClient] = useState(false);
 
   const sortedClients = useMemo(
     () => [...clients].sort((a, b) => a.name.localeCompare(b.name)),
@@ -75,8 +82,18 @@ export default function ClientsPage() {
             {projects.length === 1 ? 'project' : 'projects'} · open any card to jump into its space.
           </p>
         </div>
-        <QuickOpenSearch clients={clients} projects={projects} />
+        <div className="flex items-center gap-3">
+          <QuickOpenSearch clients={clients} projects={projects} />
+          {can('clients.manage') && (
+            <Button variant="primary" size="sm" onClick={() => setAddingClient(true)}>
+              <Plus className="w-3.5 h-3.5" /> Add client
+            </Button>
+          )}
+        </div>
       </div>
+      {addingClient && (
+        <ClientFormModal open onClose={() => setAddingClient(false)} />
+      )}
 
       <RecentsRow clients={clients} projects={projects} />
 
