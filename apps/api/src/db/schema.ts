@@ -41,6 +41,15 @@ export const overrideEffectEnum = pgEnum('override_effect', ['grant', 'deny']);
 const ts = () => timestamp('created_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull();
 const updTs = () => timestamp('updated_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull();
 
+// Hoppa multi-tenancy — every tenant-owned business table carries this.
+// Lazy `() => tenants.id` so it can be used before `tenants` is declared in
+// source order. ON DELETE CASCADE: deleting a workspace wipes its data.
+//
+// PHASE 1 is additive + behavior-neutral, so the column is NULLABLE here.
+// The 0016 migration backfills it to the default tenant. Phase 2 flips it
+// to NOT NULL and scopes every query; only then is it load-bearing.
+const tenantRef = () => uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' });
+
 // ---- Users ----
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -60,9 +69,44 @@ export const users = pgTable('users', {
   googleSubIdx: uniqueIndex('users_google_sub_idx').on(t.googleSub),
 }));
 
-// ---- App settings (singleton) ----
+// ---- Tenants (workspaces) — Hoppa multi-tenancy ----
+// One row per workspace. Subscription truth lives in the marketing site;
+// `plan` / `seatLimit` / `status` are a cached mirror refreshed by the
+// subscription client (Phase 3). `billingExternalId` is the stable Stripe
+// customer id used to look the subscription up.
+export const tenants = pgTable('tenants', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+  slug: text('slug').notNull(),
+  billingExternalId: text('billing_external_id'),
+  plan: text('plan'),
+  seatLimit: integer('seat_limit'),
+  status: text('status').notNull().default('active'),
+  createdAt: ts(),
+  updatedAt: updTs(),
+}, (t) => ({
+  slugIdx: uniqueIndex('tenants_slug_idx').on(t.slug),
+  billingIdx: uniqueIndex('tenants_billing_idx').on(t.billingExternalId),
+}));
+
+// Membership: which global users belong to which workspace. Drives the
+// workspace switcher + membership checks, independent of RBAC groups.
+export const tenantMembers = pgTable('tenant_members', {
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  isOwner: boolean('is_owner').notNull().default(false),
+  createdAt: ts(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.tenantId, t.userId] }),
+  userIdx: index('tenant_members_user_idx').on(t.userId),
+}));
+
+// ---- App settings (Phase 1: still a global singleton; Phase 2 re-keys per tenant) ----
 export const appSettings = pgTable('app_settings', {
   id: text('id').primaryKey().default('singleton'),
+  // Phase 1 adds this nullable + backfilled to the default tenant. Phase 2
+  // makes it the PK (one row per tenant) and drops `id`.
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }),
   passwordLoginEnabled: boolean('password_login_enabled').notNull().default(true),
   googleLoginEnabled: boolean('google_login_enabled').notNull().default(true),
   allowedEmailDomains: text('allowed_email_domains').array().notNull().default(sql`'{}'::text[]`),
@@ -171,6 +215,7 @@ export const permissions = pgTable('permissions', {
 
 export const groups = pgTable('groups', {
   id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRef(),
   name: text('name').notNull(),
   description: text('description').notNull().default(''),
   isSystem: boolean('is_system').notNull().default(false),
@@ -180,34 +225,46 @@ export const groups = pgTable('groups', {
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
+  // Phase 1: keep the global unique index (only the default tenant exists).
+  // Phase 2 swaps this to a per-tenant unique index on (tenant_id, lower(name)).
   nameIdx: uniqueIndex('groups_name_lower_idx').on(sql`lower(${t.name})`),
+  tenantIdx: index('groups_tenant_idx').on(t.tenantId),
 }));
 
 export const groupPermissions = pgTable('group_permissions', {
   groupId: uuid('group_id').notNull().references(() => groups.id, { onDelete: 'cascade' }),
   permissionKey: text('permission_key').notNull().references(() => permissions.key, { onDelete: 'cascade' }),
+  tenantId: tenantRef(),
 }, (t) => ({
   pk: primaryKey({ columns: [t.groupId, t.permissionKey] }),
+  tenantIdx: index('group_permissions_tenant_idx').on(t.tenantId),
 }));
 
 export const userGroups = pgTable('user_groups', {
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   groupId: uuid('group_id').notNull().references(() => groups.id, { onDelete: 'cascade' }),
+  tenantId: tenantRef(),
 }, (t) => ({
   pk: primaryKey({ columns: [t.userId, t.groupId] }),
+  tenantUserIdx: index('user_groups_tenant_user_idx').on(t.tenantId, t.userId),
 }));
 
 export const userPermissionOverrides = pgTable('user_permission_overrides', {
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   permissionKey: text('permission_key').notNull().references(() => permissions.key, { onDelete: 'cascade' }),
   effect: overrideEffectEnum('effect').notNull(),
+  tenantId: tenantRef(),
 }, (t) => ({
+  // Phase 1: PK unchanged. Phase 2 widens it to include tenant_id so a user
+  // can hold different overrides per workspace.
   pk: primaryKey({ columns: [t.userId, t.permissionKey] }),
+  tenantUserIdx: index('user_perm_overrides_tenant_user_idx').on(t.tenantId, t.userId),
 }));
 
 // ---- Clients ----
 export const clients = pgTable('clients', {
   id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRef(),
   name: text('name').notNull(),
   kind: clientKindEnum('kind').notNull().default('agency'),
   color: text('color').notNull().default('#7e22ce'),
@@ -228,7 +285,9 @@ export const clients = pgTable('clients', {
   portalPublishedAt: timestamp('portal_published_at', { withTimezone: true, mode: 'string' }),
   createdAt: ts(),
   updatedAt: updTs(),
-});
+}, (t) => ({
+  tenantIdx: index('clients_tenant_idx').on(t.tenantId),
+}));
 
 // External contacts at a client — separate from internal `users`. Granted
 // access to one client's public portal via magic-link email invites
@@ -254,6 +313,7 @@ export const clientContacts = pgTable('client_contacts', {
 // ---- Projects ----
 export const projects = pgTable('projects', {
   id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRef(),
   clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'restrict' }),
   name: text('name').notNull(),
   code: text('code').notNull().default(''),
@@ -279,6 +339,7 @@ export const projects = pgTable('projects', {
 // ---- Goals ----
 export const goals = pgTable('goals', {
   id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRef(),
   clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'restrict' }),
   projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
   title: text('title').notNull(),
@@ -314,6 +375,7 @@ export const goals = pgTable('goals', {
 // ---- Epics (top of the PM hierarchy: epic → goal → to-do) ----
 export const epics = pgTable('epics', {
   id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRef(),
   projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
   clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
@@ -330,6 +392,7 @@ export const epics = pgTable('epics', {
 // ---- Milestones (point-in-time markers on Gantt + Calendar) ----
 export const milestones = pgTable('milestones', {
   id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRef(),
   projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
   date: date('date').notNull(),
@@ -344,6 +407,7 @@ export const milestones = pgTable('milestones', {
 // ---- Goal resources ----
 export const goalResources = pgTable('goal_resources', {
   id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRef(),
   goalId: uuid('goal_id').notNull().references(() => goals.id, { onDelete: 'cascade' }),
   kind: resourceKindEnum('kind').notNull(),
   title: text('title').notNull(),
@@ -364,6 +428,7 @@ export const goalResources = pgTable('goal_resources', {
 // ---- Todos ----
 export const todos = pgTable('todos', {
   id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRef(),
   title: text('title').notNull(),
   assigneeId: uuid('assignee_id').references(() => users.id, { onDelete: 'set null' }),
   // F25: a todo can be assigned to a group instead of a user. The 0015
@@ -400,6 +465,7 @@ export const todos = pgTable('todos', {
 // ---- Pay periods ----
 export const payPeriods = pgTable('pay_periods', {
   id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRef(),
   label: text('label').notNull(),
   startDate: date('start_date').notNull(),
   endDate: date('end_date').notNull(),
@@ -410,12 +476,16 @@ export const payPeriods = pgTable('pay_periods', {
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
+  // Phase 1: keep the global unique index. Phase 2 swaps to per-tenant.
   startEndUnique: uniqueIndex('pay_periods_start_end_unique').on(t.startDate, t.endDate),
+  tenantIdx: index('pay_periods_tenant_idx').on(t.tenantId),
 }));
 
-// ---- Pay config singleton ----
+// ---- Pay config (Phase 1: still a global singleton; Phase 2 re-keys per tenant) ----
 export const payConfig = pgTable('pay_config', {
   id: text('id').primaryKey().default('singleton'),
+  // Phase 1 adds this nullable + backfilled. Phase 2 makes it the PK.
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }),
   cadence: cadenceEnum('cadence').notNull().default('by-date'),
   payDates: jsonb('pay_dates').notNull().default(sql`'[15, "last"]'::jsonb`),
   weekendRule: weekendRuleEnum('weekend_rule').notNull().default('prior'),
@@ -429,6 +499,7 @@ export const payConfig = pgTable('pay_config', {
 // ---- Time entries ----
 export const timeEntries = pgTable('time_entries', {
   id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRef(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   // projectId is nullable: users may track time against a to-do that has no
   // project (e.g. personal/overhead tasks). FK behavior stays `restrict` to
@@ -459,7 +530,10 @@ export const timeEntries = pgTable('time_entries', {
 
 // ---- Active timers (one per user) ----
 export const activeTimers = pgTable('active_timers', {
+  // One running timer per user globally (PK stays user_id). The tenant the
+  // timer belongs to is carried for scoping the realtime emit + cleanup.
   userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  tenantId: tenantRef(),
   // Nullable: matches time_entries.projectId. The running timer may not have
   // a project yet (the user picked a project-less to-do, or no to-do at all).
   projectId: uuid('project_id').references(() => projects.id, { onDelete: 'restrict' }),
@@ -475,18 +549,22 @@ export const activeTimers = pgTable('active_timers', {
 // ---- Activity log ----
 export const activityLog = pgTable('activity_log', {
   id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRef(),
   whoId: uuid('who_id').references(() => users.id, { onDelete: 'set null' }),
   kind: text('kind').notNull(),
   target: text('target').notNull(),
   meta: jsonb('meta'),
   createdAt: ts(),
 }, (t) => ({
-  createdIdx: index('activity_created_idx').on(sql`${t.createdAt} DESC`),
+  tenantCreatedIdx: index('activity_tenant_created_idx').on(t.tenantId, sql`${t.createdAt} DESC`),
 }));
 
-// ---- Integrations (1 row per kind) ----
+// ---- Integrations (Phase 1: still 1 row per kind globally; Phase 2 widens PK to (tenant_id, kind)) ----
 export const integrations = pgTable('integrations', {
   kind: text('kind').primaryKey(),
+  // Phase 1 adds this nullable + backfilled. Phase 2 widens the PK to
+  // (tenant_id, kind) so two workspaces each connect their own Drive/Gmail.
+  tenantId: tenantRef(),
   connected: boolean('connected').notNull().default(false),
   account: text('account'),
   connectedAt: date('connected_at'),
@@ -500,6 +578,7 @@ export const integrations = pgTable('integrations', {
 // ---- Drive folders ----
 export const driveLinkedFolders = pgTable('drive_linked_folders', {
   id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRef(),
   drivePath: text('drive_path').notNull(),
   clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'cascade' }),
   itemCount: integer('item_count').notNull().default(0),
@@ -509,6 +588,7 @@ export const driveLinkedFolders = pgTable('drive_linked_folders', {
 
 export const driveItems = pgTable('drive_items', {
   id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRef(),
   folderId: uuid('folder_id').notNull().references(() => driveLinkedFolders.id, { onDelete: 'cascade' }),
   kind: resourceKindEnum('kind').notNull(),
   title: text('title').notNull(),
@@ -525,6 +605,7 @@ export const driveItems = pgTable('drive_items', {
 // can view + scan dashboard, only owner can mutate.
 export const qrCodes = pgTable('qr_codes', {
   id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRef(),
   ownerUserId: uuid('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   label: text('label').notNull().default(''),
   targetUrl: text('target_url').notNull(),
@@ -570,6 +651,8 @@ export const qrScans = pgTable('qr_scans', {
 
 // ---- Type exports ----
 export type User = typeof users.$inferSelect;
+export type Tenant = typeof tenants.$inferSelect;
+export type TenantMember = typeof tenantMembers.$inferSelect;
 export type AppSettingsRow = typeof appSettings.$inferSelect;
 export type OAuthToken = typeof oauthTokens.$inferSelect;
 export type UserTotp = typeof userTotp.$inferSelect;
