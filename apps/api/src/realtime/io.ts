@@ -47,11 +47,13 @@ export function initIO(httpServer: HttpServer, sessionMiddleware: RequestHandler
     if (user.tenantId) socket.join(roomForTenant(user.tenantId));
     socket.join(ORG_ROOM);
     socket.join(roomForUser(user.userId));
-    void getEffectivePermissions(user.userId)
-      .then((perms) => {
-        if (perms.has('time_entry.approve')) socket.join(APPROVERS_ROOM);
-      })
-      .catch(() => undefined);
+    if (user.tenantId) {
+      void getEffectivePermissions(user.userId, user.tenantId)
+        .then((perms) => {
+          if (perms.has('time_entry.approve')) socket.join(APPROVERS_ROOM);
+        })
+        .catch(() => undefined);
+    }
   });
 
   _io = io;

@@ -6,6 +6,7 @@ import { qrCodes, qrScans, type QrCode, type QrScan } from '../db/schema.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { appendActivity } from './activity.js';
 import { lookupGeo } from './ipGeo.js';
+import { tenantEq, stampTenant } from '../tenancy/scope.js';
 import type {
   CreateQrInput,
   UpdateQrInput,
@@ -95,6 +96,7 @@ export async function listVisible(viewerId: string): Promise<QrCodeRow[]> {
     .from(qrCodes)
     .where(
       and(
+        tenantEq(qrCodes.tenantId),
         isNull(qrCodes.archivedAt),
         or(eq(qrCodes.ownerUserId, viewerId), eq(qrCodes.visibility, 'workspace')),
       ),
@@ -108,7 +110,7 @@ export async function getOwned(id: string, ownerId: string): Promise<QrCode | nu
   const [row] = await db
     .select()
     .from(qrCodes)
-    .where(and(eq(qrCodes.id, id), eq(qrCodes.ownerUserId, ownerId), isNull(qrCodes.archivedAt)))
+    .where(and(tenantEq(qrCodes.tenantId), eq(qrCodes.id, id), eq(qrCodes.ownerUserId, ownerId), isNull(qrCodes.archivedAt)))
     .limit(1);
   return row ?? null;
 }
@@ -124,6 +126,7 @@ export async function getForViewer(id: string, viewerId: string): Promise<QrCode
     .from(qrCodes)
     .where(
       and(
+        tenantEq(qrCodes.tenantId),
         eq(qrCodes.id, id),
         isNull(qrCodes.archivedAt),
         or(eq(qrCodes.ownerUserId, viewerId), eq(qrCodes.visibility, 'workspace')),
@@ -137,7 +140,7 @@ export async function create(args: { ownerId: string; input: CreateQrInput }): P
   const shortCode = await mintShortCode();
   const [row] = await db
     .insert(qrCodes)
-    .values({
+    .values(stampTenant({
       ownerUserId: args.ownerId,
       label: args.input.label ?? '',
       targetUrl: args.input.targetUrl,
@@ -147,7 +150,7 @@ export async function create(args: { ownerId: string; input: CreateQrInput }): P
       backgroundColor: args.input.backgroundColor ?? '#FFFFFF',
       errorCorrection: args.input.errorCorrection ?? 'M',
       logoDataUrl: args.input.logoDataUrl ?? null,
-    })
+    }))
     .returning();
   if (!row) throw new Error('insert_failed');
   await appendActivity({
@@ -209,7 +212,7 @@ export async function update(args: {
   const [row] = await db
     .update(qrCodes)
     .set(upd)
-    .where(eq(qrCodes.id, args.id))
+    .where(and(eq(qrCodes.id, args.id), tenantEq(qrCodes.tenantId)))
     .returning();
   if (!row) throw new HttpError(404, 'qr_not_found');
   await appendActivity({
@@ -227,7 +230,7 @@ export async function softDelete(id: string, ownerId: string): Promise<void> {
   await db
     .update(qrCodes)
     .set({ archivedAt: new Date().toISOString() })
-    .where(eq(qrCodes.id, id));
+    .where(and(eq(qrCodes.id, id), tenantEq(qrCodes.tenantId)));
   await appendActivity({
     whoId: ownerId,
     kind: 'qr.delete',

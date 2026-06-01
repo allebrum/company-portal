@@ -95,7 +95,7 @@ authRouter.post('/login', rateLimit({ key: 'login', max: 10, windowSec: 60 }), v
 
     const finishLogin = async (): Promise<void> => {
       try {
-        const permissions = [...(await getEffectivePermissions(user.id))];
+        const permissions = [...(await getEffectivePermissions(user.id, tenantId))];
         res.json({
           user: {
             id: user.id,
@@ -362,7 +362,7 @@ authRouter.get('/me', requireAuth, async (req, res, next) => {
       return;
     }
     const [permissions, groupIds, workspaces] = await Promise.all([
-      getEffectivePermissions(u.id),
+      getEffectivePermissions(u.id, req.session.user!.tenantId),
       getUserGroupIds(u.id),
       getUserTenants(u.id),
     ]);

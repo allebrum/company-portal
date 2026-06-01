@@ -45,7 +45,7 @@ function promote(req: Request, res: Response, next: NextFunction, userId: string
           res.status(401).json({ error: 'unauthorized' });
           return;
         }
-        const permissions = [...(await getEffectivePermissions(userId))];
+        const permissions = [...(await getEffectivePermissions(userId, tenantId))];
         res.json({
           user: {
             id: u.id,

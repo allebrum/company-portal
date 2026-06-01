@@ -1,4 +1,4 @@
-import { eq, sql, asc } from 'drizzle-orm';
+import { and, eq, sql, asc } from 'drizzle-orm';
 import argon2 from 'argon2';
 import { db } from '../db/client.js';
 import { users, groups, userGroups, type User } from '../db/schema.js';
@@ -9,6 +9,8 @@ import { EV } from '@allebrum/shared';
 import { env } from '../env.js';
 import { issueToken, invalidateTokensFor, INVITE_TTL_MS } from '../auth/tokens.js';
 import { sendInviteEmail } from './mail.js';
+import { currentTenantId } from '../tenancy/context.js';
+import { ensureMembership, getDefaultTenantId } from './tenants.js';
 
 function initialsFrom(name: string): string {
   return name
@@ -67,6 +69,10 @@ export async function inviteUser(args: {
     })
     .returning();
   if (!row) throw new Error('user insert failed');
+  // Hoppa: enroll the invited user in the inviting admin's workspace so they
+  // can resolve a tenant at login. The user row itself is global (one
+  // identity across workspaces); membership is per-tenant.
+  await ensureMembership(currentTenantId(), row.id);
   emit.toOrg(EV.USER_CREATED, { id: row.id, by: args.whoId, at: new Date().toISOString() });
   await appendActivity({
     whoId: args.whoId,
@@ -217,19 +223,24 @@ export async function findOrCreateGoogleUser(profile: {
     .returning();
   if (!created) throw new Error('google user creation failed');
 
-  // New domain-restricted Google sign-ups get the Member group so they land
-  // on a working app immediately; an admin can elevate them afterward. (The
-  // sub/email-link branches above intentionally preserve existing membership.)
-  const [memberGroup] = await db
-    .select({ id: groups.id })
-    .from(groups)
-    .where(eq(groups.name, 'Member'))
-    .limit(1);
-  if (memberGroup) {
-    await db
-      .insert(userGroups)
-      .values({ userId: created.id, groupId: memberGroup.id })
-      .onConflictDoNothing();
+  // New domain-restricted Google sign-ups land in the default workspace with
+  // its Member group so they get a working app immediately. This runs in the
+  // OAuth callback (no request tenant context), so the default tenant is
+  // resolved explicitly. The caller (auth.ts) also enrolls them in
+  // tenant_members.
+  const defaultTenantId = await getDefaultTenantId();
+  if (defaultTenantId) {
+    const [memberGroup] = await db
+      .select({ id: groups.id })
+      .from(groups)
+      .where(and(eq(groups.name, 'Member'), eq(groups.tenantId, defaultTenantId)))
+      .limit(1);
+    if (memberGroup) {
+      await db
+        .insert(userGroups)
+        .values({ userId: created.id, groupId: memberGroup.id, tenantId: defaultTenantId })
+        .onConflictDoNothing();
+    }
   }
   return created;
 }

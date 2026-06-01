@@ -1,18 +1,25 @@
 import type { Request, Response, NextFunction } from 'express';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { userGroups, groupPermissions, userPermissionOverrides } from '../db/schema.js';
 import type { Permission } from '@allebrum/shared';
 
 /**
  * Effective permissions = union of all permissions from every group the user
- * belongs to, then apply per-user overrides (grant adds, deny removes).
+ * belongs to IN THE GIVEN WORKSPACE, then apply that workspace's per-user
+ * overrides (grant adds, deny removes).
+ *
+ * Hoppa: `tenantId` is passed explicitly (not from the AsyncLocalStorage
+ * context) because this is called from places with no request context — the
+ * socket-connect handler and the login flow before `session.user` is set. A
+ * user's permissions in one workspace must never leak from their groups in
+ * another, so all three queries filter on `tenant_id`.
  */
-export async function getEffectivePermissions(userId: string): Promise<Set<string>> {
+export async function getEffectivePermissions(userId: string, tenantId: string): Promise<Set<string>> {
   const memberships = await db
     .select({ groupId: userGroups.groupId })
     .from(userGroups)
-    .where(eq(userGroups.userId, userId));
+    .where(and(eq(userGroups.userId, userId), eq(userGroups.tenantId, tenantId)));
   const groupIds = memberships.map((m) => m.groupId);
 
   const set = new Set<string>();
@@ -20,14 +27,14 @@ export async function getEffectivePermissions(userId: string): Promise<Set<strin
     const gp = await db
       .select({ permissionKey: groupPermissions.permissionKey })
       .from(groupPermissions)
-      .where(inArray(groupPermissions.groupId, groupIds));
+      .where(and(inArray(groupPermissions.groupId, groupIds), eq(groupPermissions.tenantId, tenantId)));
     for (const r of gp) set.add(r.permissionKey);
   }
 
   const overrides = await db
     .select({ permissionKey: userPermissionOverrides.permissionKey, effect: userPermissionOverrides.effect })
     .from(userPermissionOverrides)
-    .where(eq(userPermissionOverrides.userId, userId));
+    .where(and(eq(userPermissionOverrides.userId, userId), eq(userPermissionOverrides.tenantId, tenantId)));
   for (const o of overrides) {
     if (o.effect === 'grant') set.add(o.permissionKey);
     else set.delete(o.permissionKey);
@@ -37,12 +44,12 @@ export async function getEffectivePermissions(userId: string): Promise<Set<strin
 
 type ReqWithPerms = Request & { _perms?: Set<string> };
 
-/** Loads (memoized on the request) the current user's effective permissions. */
+/** Loads (memoized on the request) the current user's effective permissions in the active workspace. */
 export async function loadPermissions(req: Request): Promise<Set<string>> {
   const r = req as ReqWithPerms;
   if (r._perms) return r._perms;
-  const userId = req.session?.user?.userId;
-  const perms = userId ? await getEffectivePermissions(userId) : new Set<string>();
+  const user = req.session?.user;
+  const perms = user ? await getEffectivePermissions(user.userId, user.tenantId) : new Set<string>();
   r._perms = perms;
   return perms;
 }
