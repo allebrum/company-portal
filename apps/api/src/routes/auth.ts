@@ -16,6 +16,12 @@ import { verifyLogin, getUser, findByEmail, findOrCreateGoogleUser } from '../se
 import { getEffectivePermissions } from '../auth/permissions.js';
 import { getUserGroupIds } from '../services/rbac.js';
 import { getSettings } from '../services/settings.js';
+import {
+  resolveLoginTenantId,
+  getDefaultTenantId,
+  ensureMembership,
+  getUserTenants,
+} from '../services/tenants.js';
 import { buildConsentUrl, exchangeCodeForProfile } from '../auth/google.js';
 import { needsSecondFactor } from '../services/twofa.js';
 import { db } from '../db/client.js';
@@ -65,11 +71,20 @@ authRouter.post('/login', rateLimit({ key: 'login', max: 10, windowSec: 60 }), v
       return;
     }
 
+    // Hoppa: resolve the user's active workspace. Phase 1 — every user
+    // belongs to the default workspace. A user with no workspace can't enter
+    // the app (they'd need to subscribe on the marketing site first).
+    const tenantId = await resolveLoginTenantId(user.id);
+    if (!tenantId) {
+      res.status(403).json({ error: 'no_workspace' });
+      return;
+    }
+
     // Primary auth OK — gate on a second factor if required/enrolled.
     if (await needsSecondFactor(user.id)) {
       req.session.regenerate((err) => {
         if (err) return next(err);
-        req.session.pending = { userId: user.id };
+        req.session.pending = { userId: user.id, tenantId };
         req.session.save((saveErr) => {
           if (saveErr) return next(saveErr);
           res.json({ mfaRequired: true });
@@ -99,7 +114,7 @@ authRouter.post('/login', rateLimit({ key: 'login', max: 10, windowSec: 60 }), v
 
     req.session.regenerate((err) => {
       if (err) return next(err);
-      req.session.user = { userId: user.id };
+      req.session.user = { userId: user.id, tenantId };
       req.session.save((saveErr) => {
         if (saveErr) return next(saveErr);
         void finishLogin();
@@ -173,10 +188,24 @@ authRouter.get('/google/callback', async (req, res, next) => {
         },
       });
 
+    // Hoppa: resolve the workspace. A brand-new Google user has no membership
+    // yet — Phase 1 auto-enrolls them in the default workspace so the existing
+    // "sign in with Google" behavior is preserved. (Phase 4: the marketing
+    // site owns signup and only invited users reach the app.)
+    let tenantId = await resolveLoginTenantId(user.id);
+    if (!tenantId) {
+      const def = await getDefaultTenantId();
+      if (def) {
+        await ensureMembership(def, user.id);
+        tenantId = def;
+      }
+    }
+    if (!tenantId) return fail('no_workspace');
+
     if (await needsSecondFactor(user.id)) {
       req.session.regenerate((err) => {
         if (err) return next(err);
-        req.session.pending = { userId: user.id };
+        req.session.pending = { userId: user.id, tenantId: tenantId! };
         req.session.save((saveErr) => {
           if (saveErr) return next(saveErr);
           res.redirect(`${env.WEB_ORIGIN}/login?mfa=1`);
@@ -187,7 +216,7 @@ authRouter.get('/google/callback', async (req, res, next) => {
 
     req.session.regenerate((err) => {
       if (err) return next(err);
-      req.session.user = { userId: user.id };
+      req.session.user = { userId: user.id, tenantId: tenantId! };
       req.session.save((saveErr) => {
         if (saveErr) return next(saveErr);
         res.redirect(`${env.WEB_ORIGIN}/dashboard`);
@@ -332,9 +361,10 @@ authRouter.get('/me', requireAuth, async (req, res, next) => {
       res.status(401).json({ error: 'unauthorized' });
       return;
     }
-    const [permissions, groupIds] = await Promise.all([
+    const [permissions, groupIds, workspaces] = await Promise.all([
       getEffectivePermissions(u.id),
       getUserGroupIds(u.id),
+      getUserTenants(u.id),
     ]);
     res.json({
       id: u.id,
@@ -345,6 +375,9 @@ authRouter.get('/me', requireAuth, async (req, res, next) => {
       billable: Number(u.billable),
       permissions: [...permissions],
       groupIds,
+      // Hoppa: the active workspace + the full membership list for the switcher.
+      tenantId: req.session.user!.tenantId,
+      workspaces,
     });
   } catch (e) {
     next(e);

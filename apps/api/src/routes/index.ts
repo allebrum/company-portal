@@ -19,12 +19,19 @@ import { bootstrapRouter } from './bootstrap.js';
 import { rbacRouter } from './rbac.js';
 import { settingsRouter } from './settings.js';
 import { twofaRouter } from './twofa.js';
+import { tenantContext } from '../middleware/tenantContext.js';
 
 export const apiRouter = Router();
 
 apiRouter.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
+
+// Hoppa: bind the request's active workspace (from session.user.tenantId) to
+// an AsyncLocalStorage context for all downstream services. No-op for routes
+// reached before login (auth, public portal/QR) — they pass through and any
+// service that needs a tenant will throw, which is correct for those paths.
+apiRouter.use(tenantContext);
 
 apiRouter.use('/auth', authRouter);
 apiRouter.use('/auth', twofaRouter);
