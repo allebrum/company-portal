@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { clients, projects } from '../db/schema.js';
 import type { SpaceFile } from '@allebrum/shared';
@@ -14,6 +14,7 @@ import {
 import { emit } from '../realtime/emit.js';
 import { EV } from '@allebrum/shared';
 import { appendActivity } from './activity.js';
+import { tenantEq } from '../tenancy/scope.js';
 
 export type SpaceScopeKind = 'client' | 'project';
 
@@ -116,7 +117,7 @@ async function appendSpaceFile(
         spaceFiles: sql`COALESCE(${clients.spaceFiles}, '[]'::jsonb) || ${oneElementArray}::jsonb`,
         updatedAt: new Date().toISOString(),
       })
-      .where(eq(clients.id, scopeId))
+      .where(and(eq(clients.id, scopeId), tenantEq(clients.tenantId)))
       .returning({ spaceFiles: clients.spaceFiles });
     if (!row) throw new HttpError(404, 'scope_not_found');
     return (row.spaceFiles as SpaceFile[]) ?? [];
@@ -127,7 +128,7 @@ async function appendSpaceFile(
       spaceFiles: sql`COALESCE(${projects.spaceFiles}, '[]'::jsonb) || ${oneElementArray}::jsonb`,
       updatedAt: new Date().toISOString(),
     })
-    .where(eq(projects.id, scopeId))
+    .where(and(eq(projects.id, scopeId), tenantEq(projects.tenantId)))
     .returning({ spaceFiles: projects.spaceFiles });
   if (!row) throw new HttpError(404, 'scope_not_found');
   return (row.spaceFiles as SpaceFile[]) ?? [];

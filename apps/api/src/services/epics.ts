@@ -1,17 +1,18 @@
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { epics, type Epic } from '../db/schema.js';
 import type { CreateEpicInput, UpdateEpicInput } from '@allebrum/shared';
 import { HttpError } from '../middleware/errorHandler.js';
+import { tenantEq, stampTenant } from '../tenancy/scope.js';
 
 export async function listEpics(): Promise<Epic[]> {
-  return db.select().from(epics).orderBy(asc(epics.createdAt));
+  return db.select().from(epics).where(tenantEq(epics.tenantId)).orderBy(asc(epics.createdAt));
 }
 
 export async function createEpic(input: CreateEpicInput): Promise<Epic> {
   const [row] = await db
     .insert(epics)
-    .values({
+    .values(stampTenant({
       projectId: input.projectId,
       clientId: input.clientId,
       title: input.title,
@@ -19,7 +20,7 @@ export async function createEpic(input: CreateEpicInput): Promise<Epic> {
       icon: input.icon,
       startDate: input.startDate ?? null,
       endDate: input.endDate ?? null,
-    })
+    }))
     .returning();
   if (!row) throw new Error('epic insert failed');
   return row;
@@ -34,12 +35,12 @@ export async function updateEpic(id: string, patch: UpdateEpicInput): Promise<Ep
   if (patch.icon !== undefined) upd.icon = patch.icon;
   if (patch.startDate !== undefined) upd.startDate = patch.startDate;
   if (patch.endDate !== undefined) upd.endDate = patch.endDate;
-  const [row] = await db.update(epics).set(upd).where(eq(epics.id, id)).returning();
+  const [row] = await db.update(epics).set(upd).where(and(eq(epics.id, id), tenantEq(epics.tenantId))).returning();
   if (!row) throw new HttpError(404, 'epic_not_found');
   return row;
 }
 
 export async function deleteEpic(id: string): Promise<void> {
-  const [row] = await db.delete(epics).where(eq(epics.id, id)).returning({ id: epics.id });
+  const [row] = await db.delete(epics).where(and(eq(epics.id, id), tenantEq(epics.tenantId))).returning({ id: epics.id });
   if (!row) throw new HttpError(404, 'epic_not_found');
 }

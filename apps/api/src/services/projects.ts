@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { projects, type Project } from '../db/schema.js';
 import type { CreateProjectInput, UpdateProjectInput } from '@allebrum/shared';
@@ -7,13 +7,14 @@ import { EV } from '@allebrum/shared';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { isConnected as driveIsConnected, ensureProjectFolder } from './drive.js';
+import { tenantEq, stampTenant } from '../tenancy/scope.js';
 
 export async function listProjects(): Promise<Project[]> {
-  return db.select().from(projects).orderBy(asc(projects.name));
+  return db.select().from(projects).where(tenantEq(projects.tenantId)).orderBy(asc(projects.name));
 }
 
 export async function createProject(input: CreateProjectInput, whoId: string): Promise<Project> {
-  const [inserted] = await db.insert(projects).values({
+  const [inserted] = await db.insert(projects).values(stampTenant({
     clientId: input.clientId,
     name: input.name,
     code: input.code ?? '',
@@ -21,7 +22,7 @@ export async function createProject(input: CreateProjectInput, whoId: string): P
     budgetHrs: input.budgetHrs,
     color: input.color,
     statuses: input.statuses ?? null,
-  }).returning();
+  })).returning();
   if (!inserted) throw new Error('project insert failed');
   let row = inserted;
 
@@ -37,7 +38,7 @@ export async function createProject(input: CreateProjectInput, whoId: string): P
       const [updated] = await db
         .select()
         .from(projects)
-        .where(eq(projects.id, row.id))
+        .where(and(eq(projects.id, row.id), tenantEq(projects.tenantId)))
         .limit(1);
       if (updated) row = updated;
     }
@@ -66,7 +67,7 @@ export async function updateProject(
   if (patch.statuses !== undefined) upd.statuses = patch.statuses;
   if (patch.spaceBlocks !== undefined) upd.spaceBlocks = patch.spaceBlocks;
   if (patch.spaceFiles !== undefined) upd.spaceFiles = patch.spaceFiles;
-  const [row] = await db.update(projects).set(upd).where(eq(projects.id, id)).returning();
+  const [row] = await db.update(projects).set(upd).where(and(eq(projects.id, id), tenantEq(projects.tenantId))).returning();
   if (!row) throw new HttpError(404, 'project_not_found');
   emit.toOrg(EV.PROJECT_UPDATED, { id: row.id, by: whoId, at: new Date().toISOString() });
   await appendActivity({ whoId, kind: 'project.update', target: `${row.name} updated` });

@@ -10,6 +10,7 @@ import { EV } from '@allebrum/shared';
 import { getSettings } from './settings.js';
 import { sendPayrollReportEmail } from './mail.js';
 import { HttpError } from '../middleware/errorHandler.js';
+import { tenantEq, stampTenant } from '../tenancy/scope.js';
 
 // ---- Date utilities (ported from project/app/data.jsx) ----
 function isoDate(d: Date): string {
@@ -144,7 +145,11 @@ export function generatePeriodSchedule(
 
 // ---- Service ops ----
 export async function listPeriods(): Promise<PayPeriod[]> {
-  return db.select().from(payPeriods).orderBy(asc(payPeriods.startDate));
+  return db
+    .select()
+    .from(payPeriods)
+    .where(tenantEq(payPeriods.tenantId))
+    .orderBy(asc(payPeriods.startDate));
 }
 
 export async function periodForDate(iso: string): Promise<PayPeriod | undefined> {
@@ -152,7 +157,7 @@ export async function periodForDate(iso: string): Promise<PayPeriod | undefined>
   const rows = await db
     .select()
     .from(payPeriods)
-    .where(and(lte(payPeriods.startDate, ymd), gte(payPeriods.endDate, ymd)))
+    .where(and(lte(payPeriods.startDate, ymd), gte(payPeriods.endDate, ymd), tenantEq(payPeriods.tenantId)))
     .limit(1);
   return rows[0];
 }
@@ -188,7 +193,8 @@ export async function generateAndInsert(args: {
   // start (May 12 vs May 11) for the same Jun 1 pay run.
   const existing = await db
     .select({ s: payPeriods.startDate, p: payPeriods.payDate })
-    .from(payPeriods);
+    .from(payPeriods)
+    .where(tenantEq(payPeriods.tenantId));
   const haveStart = new Set(existing.map((r) => r.s));
   const havePayDate = new Set(existing.map((r) => r.p));
   const toInsert = schedule
@@ -203,7 +209,7 @@ export async function generateAndInsert(args: {
     }));
 
   if (toInsert.length === 0) return { inserted: 0 };
-  await db.insert(payPeriods).values(toInsert);
+  await db.insert(payPeriods).values(toInsert.map(stampTenant));
 
   await appendActivity({
     whoId: args.whoId,
@@ -240,7 +246,7 @@ export async function ensureFuturePeriods(args: {
   const future = await db
     .select({ start: payPeriods.startDate })
     .from(payPeriods)
-    .where(and(eq(payPeriods.status, 'open'), gte(payPeriods.startDate, today)))
+    .where(and(eq(payPeriods.status, 'open'), gte(payPeriods.startDate, today), tenantEq(payPeriods.tenantId)))
     .orderBy(asc(payPeriods.startDate));
   if (future.length >= 3) return { inserted: 0 };
   // Generate forward from the latest existing end+1 (or today if none).
@@ -250,6 +256,7 @@ export async function ensureFuturePeriods(args: {
   const lastEnd = await db
     .select({ end: payPeriods.endDate })
     .from(payPeriods)
+    .where(tenantEq(payPeriods.tenantId))
     .orderBy(desc(payPeriods.endDate))
     .limit(1);
   const startCursor = lastEnd[0]
@@ -301,6 +308,7 @@ export async function consolidateOverlappingPeriods(args: { whoId: string }): Pr
       createdAt: payPeriods.createdAt,
     })
     .from(payPeriods)
+    .where(tenantEq(payPeriods.tenantId))
     .orderBy(asc(payPeriods.startDate), asc(payPeriods.createdAt));
 
   if (rows.length < 2) return { merged: 0 };
@@ -311,7 +319,7 @@ export async function consolidateOverlappingPeriods(args: { whoId: string }): Pr
   const entryRows = await db
     .select({ pid: timeEntries.payPeriodId })
     .from(timeEntries)
-    .where(isNotNull(timeEntries.payPeriodId));
+    .where(and(isNotNull(timeEntries.payPeriodId), tenantEq(timeEntries.tenantId)));
   for (const r of entryRows) {
     if (!r.pid) continue;
     entryCounts.set(r.pid, (entryCounts.get(r.pid) ?? 0) + 1);
@@ -350,8 +358,8 @@ export async function consolidateOverlappingPeriods(args: { whoId: string }): Pr
       await db
         .update(timeEntries)
         .set({ payPeriodId: winner.id, updatedAt: new Date().toISOString() })
-        .where(eq(timeEntries.payPeriodId, loser.id));
-      await db.delete(payPeriods).where(eq(payPeriods.id, loser.id));
+        .where(and(eq(timeEntries.payPeriodId, loser.id), tenantEq(timeEntries.tenantId)));
+      await db.delete(payPeriods).where(and(eq(payPeriods.id, loser.id), tenantEq(payPeriods.tenantId)));
 
       entryCounts.set(winner.id, keeperCount + curCount);
       keeper = winner;
@@ -401,12 +409,12 @@ export async function regenerateFuturePeriods(args: { whoId: string }): Promise<
   const openRows = await db
     .select({ id: payPeriods.id, start: payPeriods.startDate })
     .from(payPeriods)
-    .where(eq(payPeriods.status, 'open'));
+    .where(and(eq(payPeriods.status, 'open'), tenantEq(payPeriods.tenantId)));
   // Distinct period ids referenced by at least one time entry.
   const usedRows = await db
     .selectDistinct({ pid: timeEntries.payPeriodId })
     .from(timeEntries)
-    .where(isNotNull(timeEntries.payPeriodId));
+    .where(and(isNotNull(timeEntries.payPeriodId), tenantEq(timeEntries.tenantId)));
   const usedSet = new Set(usedRows.map((r) => r.pid).filter((x): x is string => !!x));
 
   const toDelete = openRows
@@ -415,14 +423,14 @@ export async function regenerateFuturePeriods(args: { whoId: string }): Promise<
   const preserved = openRows.length - toDelete.length;
 
   if (toDelete.length > 0) {
-    await db.delete(payPeriods).where(inArray(payPeriods.id, toDelete));
+    await db.delete(payPeriods).where(and(inArray(payPeriods.id, toDelete), tenantEq(payPeriods.tenantId)));
   }
   const { inserted } = await ensureFuturePeriods({ whoId: args.whoId, count: 12 });
   return { deleted: toDelete.length, inserted, preserved, merged };
 }
 
 export async function moveToReview(id: string, whoId: string): Promise<void> {
-  await db.update(payPeriods).set({ status: 'review', updatedAt: new Date().toISOString() }).where(eq(payPeriods.id, id));
+  await db.update(payPeriods).set({ status: 'review', updatedAt: new Date().toISOString() }).where(and(eq(payPeriods.id, id), tenantEq(payPeriods.tenantId)));
   emit.toOrg(EV.PAY_PERIOD_UPDATED, { id, by: whoId, at: new Date().toISOString() });
   await appendActivity({ whoId, kind: 'period.review', target: `Pay period moved to review` });
 }
@@ -432,13 +440,13 @@ export async function closePeriod(id: string, whoId: string): Promise<{ autoAppr
   await db
     .update(payPeriods)
     .set({ status: 'closed', closedAt: now, updatedAt: now })
-    .where(eq(payPeriods.id, id));
+    .where(and(eq(payPeriods.id, id), tenantEq(payPeriods.tenantId)));
 
   // auto-approve any remaining submitted entries
   const result = await db
     .update(timeEntries)
     .set({ status: 'approved', approvedBy: whoId, approvedAt: now, updatedAt: now })
-    .where(and(eq(timeEntries.payPeriodId, id), eq(timeEntries.status, 'submitted')))
+    .where(and(eq(timeEntries.payPeriodId, id), eq(timeEntries.status, 'submitted'), tenantEq(timeEntries.tenantId)))
     .returning({ id: timeEntries.id });
 
   emit.toOrg(EV.PAY_PERIOD_CLOSED, { id, by: whoId, at: now });
@@ -470,7 +478,7 @@ export async function sendPayrollReportToBookkeeper(
   const periodRows = await db
     .select()
     .from(payPeriods)
-    .where(eq(payPeriods.id, periodId))
+    .where(and(eq(payPeriods.id, periodId), tenantEq(payPeriods.tenantId)))
     .limit(1);
   const period = periodRows[0];
   if (!period) throw new HttpError(404, 'period_not_found');
@@ -490,7 +498,7 @@ export async function sendPayrollReportToBookkeeper(
   const entries = await db
     .select()
     .from(timeEntries)
-    .where(and(eq(timeEntries.payPeriodId, periodId), eq(timeEntries.status, 'approved')));
+    .where(and(eq(timeEntries.payPeriodId, periodId), eq(timeEntries.status, 'approved'), tenantEq(timeEntries.tenantId)));
   const userIds = [...new Set(entries.map((e) => e.userId))];
   const approverIds = [...new Set(entries.map((e) => e.approvedBy).filter((x): x is string => !!x))];
   const projectIds = [...new Set(entries.map((e) => e.projectId).filter((x): x is string => !!x))];
@@ -500,7 +508,7 @@ export async function sendPayrollReportToBookkeeper(
       ? db.select({ id: users.id, name: users.name, email: users.email, billable: users.billable }).from(users).where(inArray(users.id, allUserIds))
       : Promise.resolve([] as Array<{ id: string; name: string; email: string; billable: string }>),
     projectIds.length
-      ? db.select({ id: projects.id, name: projects.name, billable: projects.billable }).from(projects).where(inArray(projects.id, projectIds))
+      ? db.select({ id: projects.id, name: projects.name, billable: projects.billable }).from(projects).where(and(inArray(projects.id, projectIds), tenantEq(projects.tenantId)))
       : Promise.resolve([] as Array<{ id: string; name: string; billable: boolean }>),
   ]);
   const userById = new Map(userRows.map((u) => [u.id, u]));
@@ -608,7 +616,7 @@ export async function reopenPeriod(id: string, whoId: string): Promise<void> {
   await db
     .update(payPeriods)
     .set({ status: 'review', closedAt: null, updatedAt: new Date().toISOString() })
-    .where(eq(payPeriods.id, id));
+    .where(and(eq(payPeriods.id, id), tenantEq(payPeriods.tenantId)));
   emit.toOrg(EV.PAY_PERIOD_UPDATED, { id, by: whoId, at: new Date().toISOString() });
   await appendActivity({ whoId, kind: 'period.reopen', target: `Pay period reopened` });
 }
