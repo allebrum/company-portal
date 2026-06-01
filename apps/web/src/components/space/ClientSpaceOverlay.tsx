@@ -98,17 +98,25 @@ export function ClientSpaceOverlay() {
     [],
   );
 
+  // F25 — any of the overlay-mounted modals being open. Used to (a) stop the
+  // overlay's ESC handler from also exiting the space when ESC is dismissing
+  // a child modal, and (b) reads the latest value inside the keydown closure.
+  const anyChildModalOpen = !!editingTodo || !!editingGoal || addingProject || addingClient;
+
   useEffect(() => {
     if (!openScope) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       // A nested popover/dialog can claim ESC by setting this attribute.
       if (document.body.hasAttribute('data-space-modal-open')) return;
+      // F25 — child modals (ItemComposer / Project / Client form) own their
+      // own ESC-to-close. Don't also tear down the whole space underneath them.
+      if (anyChildModalOpen) return;
       closeSpace();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [openScope, closeSpace]);
+  }, [openScope, closeSpace, anyChildModalOpen]);
 
   if (!openScope || openScope.kind === 'all' || !mounted) return null;
   const narrowed: OpenScope = openScope;
@@ -117,7 +125,10 @@ export function ClientSpaceOverlay() {
     // While the client/project rows are still being fetched on first open,
     // render a minimal scaffold so the overlay doesn't flash empty.
     return createPortal(
-      <div className="fixed inset-0 z-[200] bg-white grid place-items-center text-gray-400 text-sm">
+      // z-[80]: above the app shell (TimerBar/sidebar/tray/toast ≤ 60) but
+      // BELOW the modal layer (Modal 100 · ItemComposer 120 · Popover 140) so
+      // edit/add modals launched from inside the space float on top, not behind.
+      <div className="fixed inset-0 z-[80] bg-white grid place-items-center text-gray-400 text-sm">
         Loading space…
       </div>,
       document.body,
@@ -126,8 +137,11 @@ export function ClientSpaceOverlay() {
 
   return createPortal(
     <SpaceModalsCtx.Provider value={modals}>
+      {/* z-[80]: above the app shell but below the modal layer (Modal 100 ·
+          ItemComposer 120 · Popover 140) so the F25 edit/add modals mounted
+          below render ON TOP of this overlay instead of behind its opaque bg. */}
       <div
-        className="fixed inset-0 z-[200] bg-white flex flex-col"
+        className="fixed inset-0 z-[80] bg-white flex flex-col"
         data-screen-label="Project Space"
         role="dialog"
         aria-modal="true"
