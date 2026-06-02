@@ -12,6 +12,7 @@ import type { ConnectIntegrationInput, LinkFolderInput, IntegrationKind } from '
 import { EV } from '@allebrum/shared';
 import { emit } from '../realtime/emit.js';
 import { appendActivity } from './activity.js';
+import { disconnectDrive } from './drive.js';
 import { HttpError } from '../middleware/errorHandler.js';
 
 export async function listIntegrations(): Promise<Integration[]> {
@@ -66,6 +67,9 @@ export async function connect(kind: IntegrationKind, input: ConnectIntegrationIn
 }
 
 export async function disconnect(kind: IntegrationKind, whoId: string): Promise<Integration> {
+  if (kind === 'drive') {
+    await disconnectDrive();
+  }
   const row = await upsertIntegration(kind, { connected: false, account: null });
   emit.toOrg(EV.INTEGRATION_UPDATED, { id: kind, by: whoId, at: new Date().toISOString(), kind });
   await appendActivity({ whoId, kind: 'integration.disconnect', target: `${kind} disconnected` });

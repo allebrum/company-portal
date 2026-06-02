@@ -31,6 +31,7 @@ import { PortalTab } from './PortalTab';
 import { ItemComposer } from '@/components/features/ItemComposer';
 import { ProjectFormModal } from '@/components/features/ProjectFormModal';
 import { ClientFormModal } from '@/components/features/ClientFormModal';
+import { QrUploadModal } from '@/components/upload/QrUploadModal';
 
 // ============================================================================
 // Internal context — modal openers shared by every child of the overlay so
@@ -56,6 +57,20 @@ function useSpaceModals(): SpaceModals {
 type OpenScope = Exclude<Scope, { kind: 'all' }>;
 
 type TabKey = 'notes' | 'goals' | 'todos' | 'files' | 'portal';
+const SPACE_TAB_PARAM = 'spaceTab';
+const TAB_KEYS: ReadonlyArray<TabKey> = ['notes', 'goals', 'todos', 'files', 'portal'];
+
+function readTabFromUrl(): TabKey | null {
+  const raw = new URL(window.location.href).searchParams.get(SPACE_TAB_PARAM);
+  if (!raw) return null;
+  return TAB_KEYS.includes(raw as TabKey) ? (raw as TabKey) : null;
+}
+
+function writeTabToUrl(tab: TabKey): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set(SPACE_TAB_PARAM, tab);
+  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+}
 
 /**
  * The full-screen Client/Project Space overlay.
@@ -77,9 +92,19 @@ export function ClientSpaceOverlay() {
   useEffect(() => setMounted(true), []);
 
   const [tab, setTab] = useState<TabKey>('notes');
-  // Reset to Notes tab whenever the scope changes (e.g. client → project hop).
+  const onTabChange = (next: TabKey) => {
+    setTab(next);
+    if (!openScope || openScope.kind === 'all') return;
+    writeTabToUrl(next);
+  };
+
+  // Load tab from URL on scope changes; default to Notes.
   useEffect(() => {
-    setTab('notes');
+    if (!openScope || openScope.kind === 'all') return;
+    const fromUrl = readTabFromUrl();
+    const next = fromUrl ?? 'notes';
+    setTab(next);
+    if (!fromUrl) writeTabToUrl(next);
   }, [openScope?.kind === 'client' || openScope?.kind === 'project' ? openScope.id : null]);
 
   // F25 — universal modals. State lives at the overlay level so children
@@ -147,7 +172,7 @@ export function ClientSpaceOverlay() {
         aria-modal="true"
       >
         <SpaceHeader scope={narrowed} data={data} onClose={closeSpace} />
-        <SpaceTabs tab={tab} onTab={setTab} data={data} />
+        <SpaceTabs tab={tab} onTab={onTabChange} data={data} />
         {narrowed.kind === 'client' && data.client && (
           <ProjectsStrip client={data.client} />
         )}
@@ -853,6 +878,7 @@ function FilesTab({
   const { me } = useAuth();
   const [dragging, setDragging] = useState(false);
   const [embedOpen, setEmbedOpen] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Drive folder for this scope — used purely for the "no folder yet" UX
@@ -972,6 +998,14 @@ function FilesTab({
                 className="text-brand-700 font-semibold hover:underline"
               >
                 paste a link
+              </button>
+              {' '}or{' '}
+              <button
+                type="button"
+                onClick={() => setQrOpen(true)}
+                className="text-brand-700 font-semibold hover:underline"
+              >
+                qr code
               </button>
               .
             </>
@@ -1128,6 +1162,13 @@ function FilesTab({
           setEmbedOpen(false);
         }}
         intent="file"
+      />
+
+      <QrUploadModal
+        open={qrOpen}
+        onClose={() => setQrOpen(false)}
+        target={{ kind: 'space', scopeKind: scope.kind, scopeId: scope.id }}
+        label={scope.kind === 'project' ? (data.project?.name ?? 'Project space') : (data.client?.name ?? 'Client space')}
       />
     </div>
   );
