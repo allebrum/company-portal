@@ -59,7 +59,7 @@ export function QrUploadModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Upload by QR code" size="md">
+    <Modal open={open} onClose={onClose} title="Upload by QR code" size="md" layerBase={140}>
       <div className="space-y-4">
         <p className="text-sm text-gray-600">
           Scan this code with a phone to upload photos/files directly into <span className="font-semibold text-gray-900">{label}</span>.

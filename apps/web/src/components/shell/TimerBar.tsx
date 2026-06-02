@@ -35,13 +35,15 @@ export function TimerBar() {
     setProjectId(first?.id ?? '');
   }, [clientId, projects]);
 
-  // Keyboard shortcut: T opens picker
+  // Keyboard shortcut: Cmd/Ctrl+Shift+T opens picker
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
-      if (e.key === 't' || e.key === 'T') {
-        if (!timer) setOpen(true);
-      }
+      const target = e.target as HTMLElement | null;
+      if (target && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)) return;
+      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
+      if (e.key.toLowerCase() !== 't') return;
+      e.preventDefault();
+      if (!timer) setOpen(true);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
