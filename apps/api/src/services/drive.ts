@@ -7,6 +7,7 @@ import { oauthTokens, appSettings, clients, projects } from '../db/schema.js';
 import { getSettings } from './settings.js';
 import { env, driveRedirectUrl, driveOAuthConfigured } from '../env.js';
 import { HttpError } from '../middleware/errorHandler.js';
+import { tenantEq } from '../tenancy/scope.js';
 
 const PROVIDER = 'google_drive';
 export const DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive'];
@@ -125,7 +126,7 @@ export async function ensureSharedFolder(): Promise<string> {
   await db
     .update(appSettings)
     .set({ portalSharedFolderId: id, updatedAt: new Date().toISOString() })
-    .where(eq(appSettings.id, 'singleton'));
+    .where(tenantEq(appSettings.tenantId));
   return id;
 }
 
@@ -304,8 +305,8 @@ export async function reconcileFolders(): Promise<ReconciliationReport> {
   const rootId = await ensureSharedFolder();
   const now = () => new Date().toISOString();
 
-  const allClients = await db.select().from(clients);
-  const allProjects = await db.select().from(projects);
+  const allClients = await db.select().from(clients).where(tenantEq(clients.tenantId));
+  const allProjects = await db.select().from(projects).where(tenantEq(projects.tenantId));
 
   // --- Clients pass ---
   // 1) Clear dangling pointers (folder deleted in Drive UI).
@@ -317,12 +318,12 @@ export async function reconcileFolders(): Promise<ReconciliationReport> {
       await db
         .update(clients)
         .set({ driveFolderId: null, updatedAt: now() })
-        .where(eq(clients.id, c.id));
+        .where(and(eq(clients.id, c.id), tenantEq(clients.tenantId)));
     }
   }
 
   // 2) For clients with null pointer, search the shared root for a same-named folder.
-  const clientsAfter = await db.select().from(clients);
+  const clientsAfter = await db.select().from(clients).where(tenantEq(clients.tenantId));
   for (const c of clientsAfter) {
     if (c.driveFolderId) continue;
     const matches = await findFoldersByName(rootId, c.name);
@@ -331,7 +332,7 @@ export async function reconcileFolders(): Promise<ReconciliationReport> {
     await db
       .update(clients)
       .set({ driveFolderId: canonical.id!, updatedAt: now() })
-      .where(and(eq(clients.id, c.id), isNull(clients.driveFolderId)));
+      .where(and(eq(clients.id, c.id), isNull(clients.driveFolderId), tenantEq(clients.tenantId)));
     report.linked.push({ scope: 'client', id: c.id, name: c.name, folderId: canonical.id! });
     if (matches.length > 1) {
       report.duplicatesDetected.push({
@@ -354,14 +355,14 @@ export async function reconcileFolders(): Promise<ReconciliationReport> {
       await db
         .update(projects)
         .set({ driveFolderId: null, updatedAt: now() })
-        .where(eq(projects.id, p.id));
+        .where(and(eq(projects.id, p.id), tenantEq(projects.tenantId)));
     }
   }
 
   // 2) For projects with null pointer, search their parent client folder.
-  const projectsAfter = await db.select().from(projects);
+  const projectsAfter = await db.select().from(projects).where(tenantEq(projects.tenantId));
   const clientsById = new Map(
-    (await db.select().from(clients)).map((c) => [c.id, c]),
+    (await db.select().from(clients).where(tenantEq(clients.tenantId))).map((c) => [c.id, c]),
   );
   for (const p of projectsAfter) {
     if (p.driveFolderId) continue;
@@ -373,7 +374,7 @@ export async function reconcileFolders(): Promise<ReconciliationReport> {
     await db
       .update(projects)
       .set({ driveFolderId: canonical.id!, updatedAt: now() })
-      .where(and(eq(projects.id, p.id), isNull(projects.driveFolderId)));
+      .where(and(eq(projects.id, p.id), isNull(projects.driveFolderId), tenantEq(projects.tenantId)));
     report.linked.push({ scope: 'project', id: p.id, name: p.name, folderId: canonical.id! });
     if (matches.length > 1) {
       report.duplicatesDetected.push({
@@ -388,8 +389,8 @@ export async function reconcileFolders(): Promise<ReconciliationReport> {
 
   // --- Orphan scan ---
   // Shared root → list folders → any not pointed-to by a client is an orphan.
-  const finalClients = await db.select().from(clients);
-  const finalProjects = await db.select().from(projects);
+  const finalClients = await db.select().from(clients).where(tenantEq(clients.tenantId));
+  const finalProjects = await db.select().from(projects).where(tenantEq(projects.tenantId));
   const claimedClientFolders = new Set(
     finalClients.map((c) => c.driveFolderId).filter((x): x is string => !!x),
   );
@@ -436,7 +437,7 @@ export async function reconcileFolders(): Promise<ReconciliationReport> {
  * if they want a softer failure.
  */
 export async function ensureClientFolder(clientId: string): Promise<string> {
-  const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
+  const [client] = await db.select().from(clients).where(and(eq(clients.id, clientId), tenantEq(clients.tenantId))).limit(1);
   if (!client) throw new HttpError(404, 'client_not_found');
   if (client.driveFolderId) return client.driveFolderId;
 
@@ -449,7 +450,7 @@ export async function ensureClientFolder(clientId: string): Promise<string> {
   const written = await db
     .update(clients)
     .set({ driveFolderId: folder.id, updatedAt: new Date().toISOString() })
-    .where(and(eq(clients.id, clientId), isNull(clients.driveFolderId)))
+    .where(and(eq(clients.id, clientId), isNull(clients.driveFolderId), tenantEq(clients.tenantId)))
     .returning({ driveFolderId: clients.driveFolderId });
 
   if (written.length === 0) {
@@ -457,7 +458,7 @@ export async function ensureClientFolder(clientId: string): Promise<string> {
     const [winner] = await db
       .select({ driveFolderId: clients.driveFolderId })
       .from(clients)
-      .where(eq(clients.id, clientId))
+      .where(and(eq(clients.id, clientId), tenantEq(clients.tenantId)))
       .limit(1);
     if (!winner?.driveFolderId) throw new Error('client_folder_race_unresolved');
     return winner.driveFolderId;
@@ -473,7 +474,7 @@ export async function ensureClientFolder(clientId: string): Promise<string> {
  * project row. Requires Drive to be connected.
  */
 export async function ensureProjectFolder(projectId: string): Promise<string> {
-  const [proj] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
+  const [proj] = await db.select().from(projects).where(and(eq(projects.id, projectId), tenantEq(projects.tenantId))).limit(1);
   if (!proj) throw new HttpError(404, 'project_not_found');
   if (proj.driveFolderId) return proj.driveFolderId;
 
@@ -485,7 +486,7 @@ export async function ensureProjectFolder(projectId: string): Promise<string> {
   const written = await db
     .update(projects)
     .set({ driveFolderId: folder.id, updatedAt: new Date().toISOString() })
-    .where(and(eq(projects.id, projectId), isNull(projects.driveFolderId)))
+    .where(and(eq(projects.id, projectId), isNull(projects.driveFolderId), tenantEq(projects.tenantId)))
     .returning({ driveFolderId: projects.driveFolderId });
 
   if (written.length === 0) {
@@ -493,7 +494,7 @@ export async function ensureProjectFolder(projectId: string): Promise<string> {
     const [winner] = await db
       .select({ driveFolderId: projects.driveFolderId })
       .from(projects)
-      .where(eq(projects.id, projectId))
+      .where(and(eq(projects.id, projectId), tenantEq(projects.tenantId)))
       .limit(1);
     if (!winner?.driveFolderId) throw new Error('project_folder_race_unresolved');
     return winner.driveFolderId;

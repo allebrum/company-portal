@@ -6,12 +6,29 @@ import { EV } from '@allebrum/shared';
 import { emit } from '../realtime/emit.js';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';
+import { currentTenantIdOrNull } from '../tenancy/context.js';
+import { getDefaultTenantId } from './tenants.js';
+
+/**
+ * Hoppa: app_settings is now one row per workspace. In-app calls resolve the
+ * active workspace from the request context; pre-login calls (/auth/config,
+ * the login gate) have no context and fall back to the DEFAULT workspace,
+ * which governs the generic single-domain login surface.
+ */
+async function settingsTenantId(): Promise<string> {
+  const t = currentTenantIdOrNull();
+  if (t) return t;
+  const def = await getDefaultTenantId();
+  if (!def) throw new Error('no_default_tenant');
+  return def;
+}
 
 export async function getSettings(): Promise<AppSettingsRow> {
-  const rows = await db.select().from(appSettings).limit(1);
+  const tenantId = await settingsTenantId();
+  const rows = await db.select().from(appSettings).where(eq(appSettings.tenantId, tenantId)).limit(1);
   if (rows[0]) return rows[0];
-  const [created] = await db.insert(appSettings).values({ id: 'singleton' }).returning();
-  if (!created) throw new Error('failed to create app_settings singleton');
+  const [created] = await db.insert(appSettings).values({ tenantId }).returning();
+  if (!created) throw new Error('failed to create app_settings row');
   return created;
 }
 
@@ -49,13 +66,14 @@ export async function updateSettings(
     }
     upd.systemSenderUserId = patch.systemSenderUserId;
   }
+  const tenantId = await settingsTenantId();
   const [row] = await db
     .update(appSettings)
     .set(upd)
-    .where(eq(appSettings.id, 'singleton'))
+    .where(eq(appSettings.tenantId, tenantId))
     .returning();
   if (!row) throw new Error('app_settings update failed');
-  emit.toOrg(EV.SETTINGS_UPDATED, { id: 'singleton', by: whoId, at: new Date().toISOString() });
+  emit.toOrg(EV.SETTINGS_UPDATED, { id: tenantId, by: whoId, at: new Date().toISOString() });
   await appendActivity({ whoId, kind: 'settings.update', target: 'Workspace settings updated' });
   return row;
 }

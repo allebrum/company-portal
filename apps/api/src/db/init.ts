@@ -104,12 +104,12 @@ async function main(): Promise<void> {
     }
   }
 
-  // 3. App-settings — create only if missing (preserves any admin-customised
-  //    settings on later deploys). Phase 1 keeps the singleton id; the
-  //    tenant_id column is stamped so Phase 2's re-key has clean data.
+  // 3. App-settings — one row per tenant (Phase 2 re-key dropped `id`).
+  //    Create the default workspace's row only if missing (preserves any
+  //    admin-customised settings on later deploys).
   await db
     .insert(appSettings)
-    .values({ id: 'singleton', tenantId: defaultTenantId, allowedEmailDomains: allowedDomains })
+    .values({ tenantId: defaultTenantId, allowedEmailDomains: allowedDomains })
     .onConflictDoNothing();
 
   // 4. Break-glass admin — only if that email does not already exist.

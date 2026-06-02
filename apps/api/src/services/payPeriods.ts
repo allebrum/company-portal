@@ -168,9 +168,10 @@ export async function generateAndInsert(args: {
   fromDate?: string;
   prevPeriodEnd?: string;
 }): Promise<{ inserted: number }> {
-  const cfgRows = await db.select().from(payConfig).limit(1);
+  // Hoppa: pay_config is per-workspace; read the active tenant's row.
+  const cfgRows = await db.select().from(payConfig).where(tenantEq(payConfig.tenantId)).limit(1);
   const cfg = cfgRows[0];
-  if (!cfg) throw new Error('pay_config singleton missing');
+  if (!cfg) throw new Error('pay_config_missing_for_tenant');
   const schedule = generatePeriodSchedule(
     {
       cadence: cfg.cadence,

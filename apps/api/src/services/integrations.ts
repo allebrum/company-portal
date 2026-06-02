@@ -1,4 +1,4 @@
-import { eq, asc } from 'drizzle-orm';
+import { eq, and, asc } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
   integrations,
@@ -13,13 +13,18 @@ import { EV } from '@allebrum/shared';
 import { emit } from '../realtime/emit.js';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';
+import { tenantEq, stampTenant } from '../tenancy/scope.js';
 
 export async function listIntegrations(): Promise<Integration[]> {
-  return db.select().from(integrations);
+  return db.select().from(integrations).where(tenantEq(integrations.tenantId));
 }
 
 export async function getIntegration(kind: IntegrationKind): Promise<Integration | undefined> {
-  const rows = await db.select().from(integrations).where(eq(integrations.kind, kind)).limit(1);
+  const rows = await db
+    .select()
+    .from(integrations)
+    .where(and(eq(integrations.kind, kind), tenantEq(integrations.tenantId)))
+    .limit(1);
   return rows[0];
 }
 
@@ -29,14 +34,14 @@ async function upsertIntegration(kind: IntegrationKind, patch: Partial<Integrati
     const [updated] = await db
       .update(integrations)
       .set({ ...patch, updatedAt: new Date().toISOString() })
-      .where(eq(integrations.kind, kind))
+      .where(and(eq(integrations.kind, kind), tenantEq(integrations.tenantId)))
       .returning();
     if (!updated) throw new Error('integration update failed');
     return updated;
   }
   const [created] = await db
     .insert(integrations)
-    .values({
+    .values(stampTenant({
       kind,
       connected: patch.connected ?? false,
       account: patch.account ?? null,
@@ -45,7 +50,7 @@ async function upsertIntegration(kind: IntegrationKind, patch: Partial<Integrati
       autoSync: patch.autoSync ?? false,
       syncIntervalHours: patch.syncIntervalHours ?? 4,
       config: patch.config ?? {},
-    })
+    }))
     .returning();
   if (!created) throw new Error('integration insert failed');
   return created;
@@ -92,18 +97,22 @@ export async function syncDrive(whoId: string): Promise<Integration> {
 
 // ---- Drive folders / items ----
 export async function listDriveFolders(): Promise<DriveFolder[]> {
-  return db.select().from(driveLinkedFolders).orderBy(asc(driveLinkedFolders.drivePath));
+  return db
+    .select()
+    .from(driveLinkedFolders)
+    .where(tenantEq(driveLinkedFolders.tenantId))
+    .orderBy(asc(driveLinkedFolders.drivePath));
 }
 
 export async function linkDriveFolder(input: LinkFolderInput, whoId: string): Promise<DriveFolder> {
   const [row] = await db
     .insert(driveLinkedFolders)
-    .values({
+    .values(stampTenant({
       drivePath: input.drivePath,
       clientId: input.clientId,
       itemCount: input.itemCount,
       lastSync: new Date().toISOString(),
-    })
+    }))
     .returning();
   if (!row) throw new Error('drive folder insert failed');
   emit.toOrg(EV.DRIVE_FOLDER_LINKED, { id: row.id, by: whoId, at: new Date().toISOString() });
@@ -111,14 +120,20 @@ export async function linkDriveFolder(input: LinkFolderInput, whoId: string): Pr
 }
 
 export async function unlinkDriveFolder(id: string, whoId: string): Promise<void> {
-  const [row] = await db.delete(driveLinkedFolders).where(eq(driveLinkedFolders.id, id)).returning({ id: driveLinkedFolders.id });
+  const [row] = await db
+    .delete(driveLinkedFolders)
+    .where(and(eq(driveLinkedFolders.id, id), tenantEq(driveLinkedFolders.tenantId)))
+    .returning({ id: driveLinkedFolders.id });
   if (!row) throw new HttpError(404, 'folder_not_found');
   emit.toOrg(EV.DRIVE_FOLDER_UNLINKED, { id: row.id, by: whoId, at: new Date().toISOString() });
 }
 
 export async function listDriveItems(folderId?: string): Promise<DriveItem[]> {
   if (folderId) {
-    return db.select().from(driveItems).where(eq(driveItems.folderId, folderId));
+    return db
+      .select()
+      .from(driveItems)
+      .where(and(eq(driveItems.folderId, folderId), tenantEq(driveItems.tenantId)));
   }
-  return db.select().from(driveItems);
+  return db.select().from(driveItems).where(tenantEq(driveItems.tenantId));
 }

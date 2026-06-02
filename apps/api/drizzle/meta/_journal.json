@@ -120,6 +120,13 @@
       "when": 1780337933966,
       "tag": "0016_curved_skreet",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1780354340838,
+      "tag": "0017_jittery_machine_man",
+      "breakpoints": true
     }
   ]
 }

@@ -46,9 +46,15 @@ const updTs = () => timestamp('updated_at', { withTimezone: true, mode: 'string'
 // source order. ON DELETE CASCADE: deleting a workspace wipes its data.
 //
 // PHASE 1 is additive + behavior-neutral, so the column is NULLABLE here.
-// The 0016 migration backfills it to the default tenant. Phase 2 flips it
-// to NOT NULL and scopes every query; only then is it load-bearing.
+// The 0016 migration backfills it to the default tenant. Phase 2 scopes every
+// query. Most tables keep the nullable column (services always stamp it via
+// stampTenant; the DB column being NOT NULL everywhere is a Phase-5 hardening
+// step that would force the dev seed to stamp every insert).
 const tenantRef = () => uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' });
+// NOT NULL variant for tables that need tenant_id in a PK or per-tenant unique
+// index in Phase 2 (groups, pay_periods, user_permission_overrides) — migration
+// 0017 SET NOT NULL after the 0016 backfill.
+const tenantRefNN = () => uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' });
 
 // ---- Users ----
 export const users = pgTable('users', {
@@ -101,12 +107,11 @@ export const tenantMembers = pgTable('tenant_members', {
   userIdx: index('tenant_members_user_idx').on(t.userId),
 }));
 
-// ---- App settings (Phase 1: still a global singleton; Phase 2 re-keys per tenant) ----
+// ---- App settings (one row per tenant) ----
 export const appSettings = pgTable('app_settings', {
-  id: text('id').primaryKey().default('singleton'),
-  // Phase 1 adds this nullable + backfilled to the default tenant. Phase 2
-  // makes it the PK (one row per tenant) and drops `id`.
-  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }),
+  // Hoppa Phase 2: re-keyed from the global `id='singleton'` row to one row
+  // per workspace. Migration 0017 drops `id` and makes tenant_id the PK.
+  tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id, { onDelete: 'cascade' }),
   passwordLoginEnabled: boolean('password_login_enabled').notNull().default(true),
   googleLoginEnabled: boolean('google_login_enabled').notNull().default(true),
   allowedEmailDomains: text('allowed_email_domains').array().notNull().default(sql`'{}'::text[]`),
@@ -215,7 +220,7 @@ export const permissions = pgTable('permissions', {
 
 export const groups = pgTable('groups', {
   id: uuid('id').defaultRandom().primaryKey(),
-  tenantId: tenantRef(),
+  tenantId: tenantRefNN(),
   name: text('name').notNull(),
   description: text('description').notNull().default(''),
   isSystem: boolean('is_system').notNull().default(false),
@@ -225,9 +230,9 @@ export const groups = pgTable('groups', {
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
-  // Phase 1: keep the global unique index (only the default tenant exists).
-  // Phase 2 swaps this to a per-tenant unique index on (tenant_id, lower(name)).
-  nameIdx: uniqueIndex('groups_name_lower_idx').on(sql`lower(${t.name})`),
+  // Hoppa Phase 2: group names are unique PER WORKSPACE so every tenant can
+  // have its own Owner/Admin/Bookkeeper/Member system groups.
+  nameIdx: uniqueIndex('groups_name_lower_idx').on(t.tenantId, sql`lower(${t.name})`),
   tenantIdx: index('groups_tenant_idx').on(t.tenantId),
 }));
 
@@ -253,11 +258,11 @@ export const userPermissionOverrides = pgTable('user_permission_overrides', {
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   permissionKey: text('permission_key').notNull().references(() => permissions.key, { onDelete: 'cascade' }),
   effect: overrideEffectEnum('effect').notNull(),
-  tenantId: tenantRef(),
+  tenantId: tenantRefNN(),
 }, (t) => ({
-  // Phase 1: PK unchanged. Phase 2 widens it to include tenant_id so a user
-  // can hold different overrides per workspace.
-  pk: primaryKey({ columns: [t.userId, t.permissionKey] }),
+  // Hoppa Phase 2: PK widened to include tenant_id so a user can hold
+  // different overrides per workspace.
+  pk: primaryKey({ columns: [t.userId, t.permissionKey, t.tenantId] }),
   tenantUserIdx: index('user_perm_overrides_tenant_user_idx').on(t.tenantId, t.userId),
 }));
 
@@ -465,7 +470,7 @@ export const todos = pgTable('todos', {
 // ---- Pay periods ----
 export const payPeriods = pgTable('pay_periods', {
   id: uuid('id').defaultRandom().primaryKey(),
-  tenantId: tenantRef(),
+  tenantId: tenantRefNN(),
   label: text('label').notNull(),
   startDate: date('start_date').notNull(),
   endDate: date('end_date').notNull(),
@@ -476,16 +481,15 @@ export const payPeriods = pgTable('pay_periods', {
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
-  // Phase 1: keep the global unique index. Phase 2 swaps to per-tenant.
-  startEndUnique: uniqueIndex('pay_periods_start_end_unique').on(t.startDate, t.endDate),
+  // Hoppa Phase 2: period date ranges are unique PER WORKSPACE.
+  startEndUnique: uniqueIndex('pay_periods_start_end_unique').on(t.tenantId, t.startDate, t.endDate),
   tenantIdx: index('pay_periods_tenant_idx').on(t.tenantId),
 }));
 
-// ---- Pay config (Phase 1: still a global singleton; Phase 2 re-keys per tenant) ----
+// ---- Pay config (one row per tenant) ----
 export const payConfig = pgTable('pay_config', {
-  id: text('id').primaryKey().default('singleton'),
-  // Phase 1 adds this nullable + backfilled. Phase 2 makes it the PK.
-  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }),
+  // Hoppa Phase 2: re-keyed from `id='singleton'` to one row per workspace.
+  tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id, { onDelete: 'cascade' }),
   cadence: cadenceEnum('cadence').notNull().default('by-date'),
   payDates: jsonb('pay_dates').notNull().default(sql`'[15, "last"]'::jsonb`),
   weekendRule: weekendRuleEnum('weekend_rule').notNull().default('prior'),
@@ -559,12 +563,12 @@ export const activityLog = pgTable('activity_log', {
   tenantCreatedIdx: index('activity_tenant_created_idx').on(t.tenantId, sql`${t.createdAt} DESC`),
 }));
 
-// ---- Integrations (Phase 1: still 1 row per kind globally; Phase 2 widens PK to (tenant_id, kind)) ----
+// ---- Integrations (one row per kind PER TENANT) ----
 export const integrations = pgTable('integrations', {
-  kind: text('kind').primaryKey(),
-  // Phase 1 adds this nullable + backfilled. Phase 2 widens the PK to
-  // (tenant_id, kind) so two workspaces each connect their own Drive/Gmail.
-  tenantId: tenantRef(),
+  // Hoppa Phase 2: PK widened from `kind` to (tenant_id, kind) so two
+  // workspaces each connect their own Drive/Gmail/etc.
+  tenantId: tenantRefNN(),
+  kind: text('kind').notNull(),
   connected: boolean('connected').notNull().default(false),
   account: text('account'),
   connectedAt: date('connected_at'),
@@ -573,7 +577,9 @@ export const integrations = pgTable('integrations', {
   syncIntervalHours: integer('sync_interval_hours').notNull().default(4),
   config: jsonb('config').notNull().default(sql`'{}'::jsonb`),
   updatedAt: updTs(),
-});
+}, (t) => ({
+  pk: primaryKey({ columns: [t.tenantId, t.kind] }),
+}));
 
 // ---- Drive folders ----
 export const driveLinkedFolders = pgTable('drive_linked_folders', {
