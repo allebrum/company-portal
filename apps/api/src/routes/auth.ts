@@ -21,6 +21,7 @@ import {
   getDefaultTenantId,
   ensureMembership,
   getUserTenants,
+  isMember,
 } from '../services/tenants.js';
 import { buildConsentUrl, exchangeCodeForProfile } from '../auth/google.js';
 import { needsSecondFactor } from '../services/twofa.js';
@@ -352,6 +353,31 @@ authRouter.post('/logout', requireAuth, (req, res, next) => {
     res.clearCookie('connect.sid');
     res.json({ ok: true });
   });
+});
+
+// Hoppa: switch the active workspace. Verifies the user is a member of the
+// target tenant, then updates the session. The web client clears its query
+// cache + refetches bootstrap so no other workspace's data lingers.
+authRouter.post('/switch-workspace', requireAuth, async (req, res, next) => {
+  try {
+    const me = req.session.user!;
+    const tenantId = (req.body?.tenantId ?? '') as string;
+    if (!tenantId || typeof tenantId !== 'string') {
+      res.status(400).json({ error: 'tenantId_required' });
+      return;
+    }
+    if (!(await isMember(me.userId, tenantId))) {
+      res.status(403).json({ error: 'not_a_member' });
+      return;
+    }
+    req.session.user = { userId: me.userId, tenantId };
+    req.session.save((err) => {
+      if (err) return next(err);
+      res.json({ ok: true, tenantId });
+    });
+  } catch (e) {
+    next(e);
+  }
 });
 
 authRouter.get('/me', requireAuth, async (req, res, next) => {
