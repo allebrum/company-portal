@@ -1,6 +1,7 @@
-# Hoppa — multi-tenant SaaS test app. SEPARATE from the prod allebrum-portal
-# app: own DO app, own managed clusters (hoppa-db / hoppa-redis), deploys from
-# the `hoppa` branch. Never merge `hoppa` to `main` — the prod app watches main.
+# Hoppa — staging app on its own DO app + managed clusters (hoppa-db /
+# hoppa-redis), deploying from the `hoppa` branch. NOTE: the multi-tenant work
+# has been merged into `main` (convergence); `hoppa` is now a frozen
+# safety-net / staging branch, and this app is the pre-convergence staging env.
 #
 # One-time cluster setup (run as the DO operator):
 #   doctl databases create hoppa-db    --engine pg     --region nyc1 --size db-s-1vcpu-1gb  --num-nodes 1 --version 16 --wait

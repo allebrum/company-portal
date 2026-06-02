@@ -1,37 +1,69 @@
+# Hoppa — one-command self-host stack: Postgres + Redis + the app.
+#
+#   cp .env.example .env   # then set SESSION_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD
+#   docker compose up --build
+#
+# The app builds from the repo Dockerfile, runs migrations + seeds the default
+# workspace/admin on startup, and serves both the API and the web UI on
+# http://localhost:8080. Credentials + ports are env-driven (sensible defaults).
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: allebrum-postgres
+    container_name: hoppa-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: allebrum
-      POSTGRES_PASSWORD: allebrum
-      POSTGRES_DB: allebrum
+      POSTGRES_USER: ${POSTGRES_USER:-hoppa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hoppa}
+      POSTGRES_DB: ${POSTGRES_DB:-hoppa}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - allebrum-pgdata:/var/lib/postgresql/data
+      - hoppa-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U allebrum -d allebrum"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hoppa} -d ${POSTGRES_DB:-hoppa}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    container_name: allebrum-redis
+    container_name: hoppa-redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
-      - allebrum-redisdata:/data
+      - hoppa-redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10
 
+  app:
+    build: .
+    container_name: hoppa-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      API_PORT: "8080"
+      SERVE_WEB: "true"
+      WEB_DIST_DIR: /app/apps/web/out
+      DATABASE_URL: postgres://${POSTGRES_USER:-hoppa}:${POSTGRES_PASSWORD:-hoppa}@postgres:5432/${POSTGRES_DB:-hoppa}
+      REDIS_URL: redis://redis:6379
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:8080}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env (openssl rand -hex 32)}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?set ADMIN_EMAIL in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
+      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+
 volumes:
-  allebrum-pgdata:
-  allebrum-redisdata:
+  hoppa-pgdata:
+  hoppa-redisdata:

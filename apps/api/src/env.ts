@@ -39,6 +39,12 @@ const EnvSchema = z.object({
   MARKETING_API_URL: z.string().url().optional(),     // e.g. https://hoppa.app/api
   MARKETING_API_KEY: z.string().optional(),           // bearer for subscription/billing reads
   PROVISIONING_SECRET: z.string().optional(),         // HMAC shared secret for the inbound provisioning webhook
+  // Self-host single-container mode: when "true"/"1", the API also serves the
+  // pre-built static web app (apps/web/out) at / so one process serves the
+  // whole product on one origin. Off in the SaaS deploy, where the web is a
+  // separate static site. (z.coerce.boolean would treat "false" as truthy.)
+  SERVE_WEB: z.string().optional().transform((v) => v === 'true' || v === '1'),
+  WEB_DIST_DIR: z.string().optional(),                // path to apps/web/out (defaults derived in index.ts)
 });
 
 export const env = EnvSchema.parse(process.env);

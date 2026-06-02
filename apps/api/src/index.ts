@@ -1,5 +1,7 @@
 import express from 'express';
 import { createServer } from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -47,9 +49,37 @@ app.use(
 
 app.use('/api', apiRouter);
 
-app.get('/', (_req, res) => {
-  res.json({ name: 'allebrum-api', status: 'ok' });
-});
+if (env.SERVE_WEB) {
+  // Self-host single-container mode: serve the pre-built static web export so
+  // one process serves the whole product on one origin (no CORS / cookie-domain
+  // setup). The SaaS deploy leaves SERVE_WEB off — there the web is a separate
+  // static site fronted by the platform.
+  const webDir =
+    env.WEB_DIST_DIR ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/out');
+  const webRoot = path.resolve(webDir);
+  app.use(express.static(webRoot, { index: false }));
+  // Next static export emits <route>/index.html (trailingSlash:true). Resolve
+  // any non-API GET to its index.html, falling back to the export's 404 page.
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
+      next();
+      return;
+    }
+    const rel = req.path === '/' ? 'index.html' : path.join(req.path, 'index.html');
+    const abs = path.resolve(webRoot, '.' + path.sep + rel);
+    if (!abs.startsWith(webRoot)) {
+      res.status(404).end();
+      return;
+    }
+    res.sendFile(abs, (err) => {
+      if (err) res.status(404).sendFile(path.join(webRoot, '404.html'), () => res.end());
+    });
+  });
+} else {
+  app.get('/', (_req, res) => {
+    res.json({ name: 'hoppa-api', status: 'ok' });
+  });
+}
 
 app.use(errorHandler);
 

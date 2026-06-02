@@ -43,6 +43,33 @@ pnpm dev
 # http://localhost:3000
 ```
 
+## Self-hosting (one command)
+
+Hoppa ships as a single container that bundles the web UI + API and runs
+database migrations on startup. The included `docker-compose.yml` brings up
+Postgres + Redis alongside it:
+
+```bash
+cp .env.example .env
+# Set SESSION_SECRET (openssl rand -hex 32), ADMIN_EMAIL, ADMIN_PASSWORD.
+docker compose up --build
+# → http://localhost:8080  (log in with ADMIN_EMAIL / ADMIN_PASSWORD)
+```
+
+The app applies all migrations, seeds the default workspace + your admin user,
+and serves the whole product (API + UI) on **one origin** at
+`http://localhost:8080` — no CORS or cookie-domain setup.
+
+- **Bring your own infra:** point `DATABASE_URL` / `REDIS_URL` at your managed
+  Postgres + Redis and run the image directly. All config is via environment
+  variables — see [`.env.example`](.env.example) and `apps/api/src/env.ts`.
+- **Optional integrations** (Google sign-in, Drive, Gmail, passkeys, analytics)
+  stay dormant until you set their env vars; the core app works without them.
+- **SaaS / multi-tenant mode is opt-in:** setting `MARKETING_API_URL` +
+  `MARKETING_API_KEY` + `PROVISIONING_SECRET` turns on subscription gating and
+  the provisioning webhook (see `HOPPA_MARKETING_CONTRACT.md`). Leave them unset
+  to run as a single self-hosted workspace.
+
 Default seed users (password printed on `db:seed`):
 
 | Email | Role |

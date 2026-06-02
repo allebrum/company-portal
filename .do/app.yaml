@@ -44,6 +44,14 @@ services:
       - { key: ADMIN_EMAIL, scope: RUN_TIME, type: SECRET }
       - { key: ADMIN_PASSWORD, scope: RUN_TIME, type: SECRET }
       - { key: ALLOWED_EMAIL_DOMAINS, value: allebrum.com }
+      # SaaS mode (OPTIONAL — leave unset to run as a single workspace). When
+      # the marketing/billing site is live, set these as SECRETs to turn on
+      # subscription gating + the provisioning webhook. The default workspace is
+      # billing_exempt, so the internal team is never gated. See
+      # HOPPA_MARKETING_CONTRACT.md + STRIPE_BILLING_REWORK.md.
+      # - { key: MARKETING_API_URL, scope: RUN_TIME, type: SECRET }
+      # - { key: MARKETING_API_KEY, scope: RUN_TIME, type: SECRET }
+      # - { key: PROVISIONING_SECRET, scope: RUN_TIME, type: SECRET }
       # Gmail send uses the same Google OAuth app as login + Drive; the
       # callback URL is derived in env.ts (no extra env needed). Each
       # teammate connects their own Gmail under Settings → Integrations,
