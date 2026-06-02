@@ -142,6 +142,8 @@ export async function revokeUploadQrSession(id: string): Promise<void> {
 export type UploadQrSessionFileRow = {
   id: string;
   sessionId: string;
+  uploadTitle: string | null;
+  uploadNotes: string | null;
   originalName: string;
   mimeType: string | null;
   sizeBytes: number;
@@ -157,6 +159,8 @@ export async function listUploadQrSessionFiles(sessionId: string): Promise<Uploa
     .select({
       id: uploadQrSessionFiles.id,
       sessionId: uploadQrSessionFiles.sessionId,
+      uploadTitle: uploadQrSessionFiles.uploadTitle,
+      uploadNotes: uploadQrSessionFiles.uploadNotes,
       originalName: uploadQrSessionFiles.originalName,
       mimeType: uploadQrSessionFiles.mimeType,
       sizeBytes: uploadQrSessionFiles.sizeBytes,
@@ -171,12 +175,18 @@ export async function listUploadQrSessionFiles(sessionId: string): Promise<Uploa
     .orderBy(desc(uploadQrSessionFiles.createdAt));
 }
 
-export async function uploadViaQrSession(token: string, files: Express.Multer.File[]): Promise<{
+export async function uploadViaQrSession(
+  token: string,
+  files: Express.Multer.File[],
+  options?: { uploadTitle?: string | null; uploadNotes?: string | null },
+): Promise<{
   uploaded: Array<{ name: string; id?: string; url?: string }>;
   failed: Array<{ name: string; error: string }>;
 }> {
   const session = await getUploadQrSession(token);
   const target = fromTarget(session);
+  const uploadTitle = options?.uploadTitle ?? null;
+  const uploadNotes = options?.uploadNotes ?? null;
 
   const uploaded: Array<{ name: string; id?: string; url?: string }> = [];
   const failed: Array<{ name: string; error: string }> = [];
@@ -195,6 +205,8 @@ export async function uploadViaQrSession(token: string, files: Express.Multer.Fi
         uploaded.push({ name: out.file.title, id: out.file.id, url: out.file.url });
         await db.insert(uploadQrSessionFiles).values({
           sessionId: session.id,
+          uploadTitle,
+          uploadNotes,
           originalName: f.originalname,
           mimeType: f.mimetype,
           sizeBytes: f.size,
@@ -217,6 +229,8 @@ export async function uploadViaQrSession(token: string, files: Express.Multer.Fi
         uploaded.push({ name: out.file.title, id: out.file.id, url: out.file.url });
         await db.insert(uploadQrSessionFiles).values({
           sessionId: session.id,
+          uploadTitle,
+          uploadNotes,
           originalName: f.originalname,
           mimeType: f.mimetype,
           sizeBytes: f.size,
@@ -242,6 +256,8 @@ export async function uploadViaQrSession(token: string, files: Express.Multer.Fi
         uploaded.push({ name: out.title, id: out.id, url: out.url });
         await db.insert(uploadQrSessionFiles).values({
           sessionId: session.id,
+          uploadTitle,
+          uploadNotes,
           originalName: f.originalname,
           mimeType: f.mimetype,
           sizeBytes: f.size,
@@ -261,6 +277,8 @@ export async function uploadViaQrSession(token: string, files: Express.Multer.Fi
       });
       await db.insert(uploadQrSessionFiles).values({
         sessionId: session.id,
+        uploadTitle,
+        uploadNotes,
         originalName: f.originalname,
         mimeType: f.mimetype,
         sizeBytes: f.size,

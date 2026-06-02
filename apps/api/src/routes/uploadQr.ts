@@ -32,6 +32,13 @@ const CreateUploadQrSessionSchema = z.object({
 
 export const uploadQrRouter = Router();
 
+function normalizeOptionalText(value: unknown, maxLen: number): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, maxLen);
+}
+
 uploadQrRouter.get('/sessions', requireAuth, requirePermission('integrations.manage'), async (_req, res, next) => {
   try {
     const rows = await listActiveUploadQrSessions();
@@ -109,7 +116,11 @@ uploadQrRouter.post(
         res.status(400).json({ error: 'files_required' });
         return;
       }
-      const out = await uploadViaQrSession(req.params.token!, files);
+      const body = req.body as Record<string, unknown>;
+      const out = await uploadViaQrSession(req.params.token!, files, {
+        uploadTitle: normalizeOptionalText(body.uploadTitle, 120),
+        uploadNotes: normalizeOptionalText(body.uploadNotes, 400),
+      });
       res.json(out);
     } catch (e) {
       next(e);

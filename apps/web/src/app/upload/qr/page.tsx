@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Camera, CheckCircle2, Upload, XCircle } from 'lucide-react';
 import { API_URL } from '@/lib/env';
+import { Modal } from '@/components/ui/Modal';
+import { Button } from '@/components/ui/Button';
 
 type UploadMeta = {
   token: string;
@@ -15,6 +17,43 @@ type UploadResponse = {
   uploaded: Array<{ name: string; id?: string; url?: string }>;
   failed: Array<{ name: string; error: string }>;
 };
+
+type UploadMetaFields = {
+  uploadTitle?: string;
+  uploadNotes?: string;
+};
+
+function sanitizeTitleForFilename(input: string): string {
+  const compact = input.trim().replace(/\s+/g, ' ');
+  const safe = compact.replace(/[^a-zA-Z0-9 _-]/g, '').trim();
+  return safe.replace(/\s+/g, '-');
+}
+
+function getFileExtension(file: File): string {
+  const fromName = file.name.includes('.') ? file.name.split('.').pop() ?? '' : '';
+  if (fromName) return fromName.toLowerCase();
+  if (file.type === 'image/jpeg') return 'jpg';
+  if (file.type === 'image/png') return 'png';
+  if (file.type === 'image/webp') return 'webp';
+  if (file.type === 'image/heic') return 'heic';
+  return 'jpg';
+}
+
+function renameFilesWithTitle(files: FileList | File[], title: string, notes?: string): File[] {
+  const list = Array.from(files);
+  const baseRaw = `${title.trim()} ${notes?.trim() ?? ''}`.trim();
+  const base = (sanitizeTitleForFilename(baseRaw) || 'photo').slice(0, 90);
+  const total = list.length;
+  return list.map((f, idx) => {
+    const ext = getFileExtension(f);
+    const suffix = total > 1 ? `-${idx + 1}` : '';
+    const fileName = `${base}${suffix}.${ext}`;
+    return new File([f], fileName, {
+      type: f.type,
+      lastModified: f.lastModified,
+    });
+  });
+}
 
 export default function UploadQrPage() {
   const [token, setToken] = useState('');
@@ -30,6 +69,11 @@ export default function UploadQrPage() {
   const [dragActive, setDragActive] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [photoMetaOpen, setPhotoMetaOpen] = useState(false);
+  const [pendingPhotoFiles, setPendingPhotoFiles] = useState<File[]>([]);
+  const [photoTitle, setPhotoTitle] = useState('photo');
+  const [photoNotes, setPhotoNotes] = useState('');
+  const [photoTitleError, setPhotoTitleError] = useState<string | null>(null);
 
   const pickRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -99,11 +143,13 @@ export default function UploadQrPage() {
     };
   }, [token]);
 
-  const onFiles = (files: FileList | null) => {
+  const onFiles = (files: FileList | null, metaFields?: UploadMetaFields) => {
     if (!files || files.length === 0 || !token || uploading) return;
 
     const fd = new FormData();
     Array.from(files).forEach((f) => fd.append('files', f));
+    if (metaFields?.uploadTitle?.trim()) fd.append('uploadTitle', metaFields.uploadTitle.trim());
+    if (metaFields?.uploadNotes?.trim()) fd.append('uploadNotes', metaFields.uploadNotes.trim());
 
     const xhr = new XMLHttpRequest();
     setUploading(true);
@@ -134,6 +180,44 @@ export default function UploadQrPage() {
 
     xhr.open('POST', `${API_URL}/api/upload/qr/${encodeURIComponent(token)}/files`);
     xhr.send(fd);
+  };
+
+  const onNamedFiles = (files: File[], metaFields?: UploadMetaFields) => {
+    if (files.length === 0 || !token || uploading) return;
+    const dt = new DataTransfer();
+    files.forEach((f) => dt.items.add(f));
+    onFiles(dt.files, metaFields);
+  };
+
+  const openPhotoMetaModal = (files: File[]) => {
+    if (files.length === 0) return;
+    setPendingPhotoFiles(files);
+    setPhotoTitle('photo');
+    setPhotoNotes('');
+    setPhotoTitleError(null);
+    setPhotoMetaOpen(true);
+  };
+
+  const closePhotoMetaModal = () => {
+    setPhotoMetaOpen(false);
+    setPendingPhotoFiles([]);
+    setPhotoTitle('photo');
+    setPhotoNotes('');
+    setPhotoTitleError(null);
+  };
+
+  const confirmPhotoMeta = () => {
+    const title = photoTitle.trim();
+    if (!title) {
+      setPhotoTitleError('Please enter a title.');
+      return;
+    }
+    const renamed = renameFilesWithTitle(pendingPhotoFiles, title, photoNotes);
+    closePhotoMetaModal();
+    onNamedFiles(renamed, {
+      uploadTitle: title,
+      uploadNotes: photoNotes,
+    });
   };
 
   const openDesktopCamera = async () => {
@@ -175,10 +259,8 @@ export default function UploadQrPage() {
     if (!blob) return;
 
     const file = new File([blob], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
-    const dt = new DataTransfer();
-    dt.items.add(file);
-    onFiles(dt.files);
     stopCamera();
+    openPhotoMetaModal([file]);
   };
 
   const onTakePhotoClick = () => {
@@ -277,11 +359,55 @@ export default function UploadQrPage() {
                 multiple
                 className="hidden"
                 onChange={(e) => {
-                  onFiles(e.target.files);
+                  const files = e.target.files;
+                  if (files && files.length > 0) {
+                    openPhotoMetaModal(Array.from(files));
+                  }
                   e.target.value = '';
                 }}
               />
             </div>
+
+            <Modal
+              open={photoMetaOpen}
+              onClose={closePhotoMetaModal}
+              title="Name Photo Upload"
+              footer={(
+                <>
+                  <Button variant="ghost" onClick={closePhotoMetaModal}>Cancel</Button>
+                  <Button variant="primary" onClick={confirmPhotoMeta} disabled={uploading}>Upload</Button>
+                </>
+              )}
+            >
+              <div className="space-y-3">
+                <p className="text-sm text-gray-600">
+                  Add a meaningful file name for {pendingPhotoFiles.length} photo{pendingPhotoFiles.length === 1 ? '' : 's'}.
+                </p>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-1">Title</label>
+                  <input
+                    value={photoTitle}
+                    onChange={(e) => {
+                      setPhotoTitle(e.target.value);
+                      if (photoTitleError) setPhotoTitleError(null);
+                    }}
+                    placeholder="e.g. front-entrance"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
+                  />
+                  {photoTitleError && <div className="mt-1 text-xs text-red-600">{photoTitleError}</div>}
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-1">Notes (optional)</label>
+                  <input
+                    value={photoNotes}
+                    onChange={(e) => setPhotoNotes(e.target.value)}
+                    placeholder="e.g. north-side-window"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
+                  />
+                  <div className="mt-1 text-[11px] text-gray-500">Notes are stored in upload audit details and appended to the file name.</div>
+                </div>
+              </div>
+            </Modal>
 
             {cameraOpen && (
               <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">

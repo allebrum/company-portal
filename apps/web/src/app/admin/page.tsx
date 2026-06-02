@@ -22,6 +22,7 @@ import { LinkFolderModal } from '@/components/features/LinkFolderModal';
 import {
   useReconcileDriveFolders,
   useDisconnectDrive,
+  useDriveStatus,
   driveConnectUrl,
   type DriveReconciliationReport,
 } from '@/hooks/useDrive';
@@ -1346,6 +1347,7 @@ function IntegrationsTab() {
   const disconnectDrive = useDisconnectDrive();
   const sync = useSyncDrive();
   const unlink = useUnlinkDriveFolder();
+  const { data: driveStatus } = useDriveStatus();
   const reconcile = useReconcileDriveFolders();
   const [linkOpen, setLinkOpen] = useState(false);
   const [reconcileReport, setReconcileReport] = useState<DriveReconciliationReport | null>(null);
@@ -1353,6 +1355,7 @@ function IntegrationsTab() {
 
   const byKind = (k: string) => integrations.find((i) => i.kind === k);
   const drive = byKind('drive');
+  const driveConnected = !!driveStatus?.connected;
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     try {
@@ -1369,15 +1372,19 @@ function IntegrationsTab() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {(['drive', 'github', 'slack', 'quickbooks'] as const).map((kind) => {
             const i = byKind(kind);
-            const connected = !!i?.connected;
             const isDrive = kind === 'drive';
+            const connected = isDrive ? driveConnected : !!i?.connected;
+            const accountLabel = isDrive
+              ? (driveStatus?.account ?? (connected ? 'connected' : 'not connected'))
+              : (i?.account ?? (connected ? 'connected' : 'not connected'));
+            const lastSyncLabel = isDrive ? i?.lastSyncAt : i?.lastSyncAt;
             return (
               <Tile key={kind}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="text-sm font-bold text-gray-900 capitalize">{kind === 'drive' ? 'Google Drive' : kind}</div>
-                    <div className="text-[12px] text-gray-500">{i?.account ?? (connected ? 'connected' : 'not connected')}</div>
-                    {i?.lastSyncAt && <div className="text-[11px] text-gray-400 mt-1">Last sync {new Date(i.lastSyncAt).toLocaleString()}</div>}
+                    <div className="text-[12px] text-gray-500">{accountLabel}</div>
+                    {lastSyncLabel && <div className="text-[11px] text-gray-400 mt-1">Last sync {new Date(lastSyncLabel).toLocaleString()}</div>}
                   </div>
                   {connected ? (
                     <Button
@@ -1410,7 +1417,7 @@ function IntegrationsTab() {
         </div>
       </Section>
 
-      {drive?.connected && (
+      {driveConnected && (
         <Section
           title="Drive folders"
           action={
@@ -1599,6 +1606,12 @@ function ActiveQrUploadLinksPanel() {
             {files.map((f) => (
               <li key={f.id} className="py-2 first:pt-0 last:pb-0">
                 <div className="text-sm text-gray-900 font-medium break-all">{f.originalName}</div>
+                {(f.uploadTitle || f.uploadNotes) && (
+                  <div className="mt-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-[11px] text-gray-600 space-y-0.5">
+                    {f.uploadTitle && <div><span className="font-semibold text-gray-700">Title:</span> {f.uploadTitle}</div>}
+                    {f.uploadNotes && <div><span className="font-semibold text-gray-700">Notes:</span> {f.uploadNotes}</div>}
+                  </div>
+                )}
                 <div className="text-[11px] text-gray-500 mt-0.5">
                   {fmtSize(f.sizeBytes)} · {f.mimeType ?? 'unknown type'} · Uploaded {new Date(f.createdAt).toLocaleString()}
                 </div>

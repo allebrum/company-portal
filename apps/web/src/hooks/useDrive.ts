@@ -120,6 +120,59 @@ export function useDeleteDriveEntry() {
   });
 }
 
+export function useRenameDriveEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      api.patch<DriveEntry>(`/integrations/drive/file/${id}`, { name }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['driveList'] });
+      qc.invalidateQueries({ queryKey: ['clients'] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+      qc.invalidateQueries({ queryKey: ['goals'] });
+    },
+  });
+}
+
+export function useRenameSpaceFile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: {
+      scopeKind: 'client' | 'project';
+      scopeId: string;
+      fileId: string;
+      title: string;
+      renameInDrive?: boolean;
+    }) =>
+      api.patch<{ file: unknown; spaceFiles: unknown[] }>(
+        `/spaces/${args.scopeKind}/${args.scopeId}/files/${args.fileId}`,
+        { title: args.title, renameInDrive: args.renameInDrive },
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['clients'] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+      qc.invalidateQueries({ queryKey: ['driveList'] });
+      qc.invalidateQueries({ queryKey: ['goals'] });
+    },
+  });
+}
+
+export function useRefreshSpaceFileNames() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { scopeKind: 'client' | 'project'; scopeId: string }) =>
+      api.post<{ updated: number; spaceFiles: unknown[] }>(
+        `/spaces/${args.scopeKind}/${args.scopeId}/files/refresh-drive-names`,
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['clients'] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+      qc.invalidateQueries({ queryKey: ['driveList'] });
+      qc.invalidateQueries({ queryKey: ['goals'] });
+    },
+  });
+}
+
 export function useDisconnectDrive() {
   const qc = useQueryClient();
   return useMutation({
@@ -127,6 +180,7 @@ export function useDisconnectDrive() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['driveStatus'] });
       qc.invalidateQueries({ queryKey: ['driveList'] });
+      qc.invalidateQueries({ queryKey: ['integrations'] });
     },
   });
 }

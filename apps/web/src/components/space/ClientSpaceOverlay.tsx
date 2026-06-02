@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { createPortal } from 'react-dom';
 import {
   X, Layers, Target, CheckSquare, FileText, Play, Square,
-  Upload, ExternalLink, Trash2, Link2, Plus, FolderOpen, Globe, Pencil,
+  Upload, ExternalLink, Trash2, Link2, Plus, FolderOpen, Globe, Pencil, RefreshCw,
 } from 'lucide-react';
 import { useSpace } from '@/contexts/SpaceContext';
 import { useSpaceData, useUpdateSpaceFiles } from '@/hooks/useSpace';
@@ -12,19 +12,27 @@ import { useAuth } from '@/hooks/useAuth';
 import {
   useGoals, useTodos, useUsers, useGroups, useProjects, useEpics, useCreateGoal, useCreateTodo,
   useUpdateGoal, useUpdateTodo, useStartTimer, useStopTimer,
+  useRenameGoalResource,
   type GoalRow, type TodoRow, type ProjectRow, type ClientRow,
 } from '@/hooks/useResources';
-import { useDriveStatus, driveConnectUrl } from '@/hooks/useDrive';
+import {
+  useDriveStatus,
+  driveConnectUrl,
+  useRenameSpaceFile,
+  useRefreshSpaceFileNames,
+} from '@/hooks/useDrive';
 import { useUploadManager } from '@/contexts/UploadManagerContext';
 import { useMyTimer } from '@/hooks/useTimer';
 import { useToast } from '@/components/ui/Toast';
 import { Button } from '@/components/ui/Button';
+import { Modal } from '@/components/ui/Modal';
 import { Avatar } from '@/components/ui/Avatar';
 import { AssigneeCell } from '@/components/ui/AssigneeCell';
 import { fmtTimer, parseLocalDate, PRIORITY_DOT } from '@/lib/formatters';
 import { rollupProgress, HEALTH_TONE } from '@/lib/roadmap';
 import type { SpaceFile } from '@allebrum/shared';
 import type { Scope } from '@/lib/roadmap';
+import { Input } from '@/components/ui/Field';
 import { NotesTab } from './NotesTab';
 import { EmbedDialog, type EmbedDialogValue } from './pickers/EmbedDialog';
 import { PortalTab } from './PortalTab';
@@ -874,11 +882,21 @@ function FilesTab({
   const { data: projects = [] } = useProjects();
   const { enqueue } = useUploadManager();
   const setFiles = useUpdateSpaceFiles(scope);
+  const renameSpaceFile = useRenameSpaceFile();
+  const refreshSpaceFileNames = useRefreshSpaceFileNames();
+  const renameGoalResource = useRenameGoalResource();
   const toast = useToast();
   const { me } = useAuth();
   const [dragging, setDragging] = useState(false);
   const [embedOpen, setEmbedOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameTarget, setRenameTarget] = useState<
+    | { kind: 'space'; scopeKind: 'client' | 'project'; scopeId: string; fileId: string; currentTitle: string }
+    | { kind: 'goal'; goalId: string; resourceId: string; currentTitle: string }
+    | null
+  >(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Drive folder for this scope — used purely for the "no folder yet" UX
@@ -954,6 +972,63 @@ function FilesTab({
 
   const onRemove = async (id: string) => {
     await setFiles(inSpace.filter((f) => f.id !== id));
+  };
+
+  const openRenameForSpaceFile = (args: {
+    scopeKind: 'client' | 'project';
+    scopeId: string;
+    fileId: string;
+    currentTitle: string;
+  }) => {
+    setRenameTarget({ kind: 'space', ...args });
+    setRenameValue(args.currentTitle);
+    setRenameOpen(true);
+  };
+
+  const onRefreshNames = async () => {
+    try {
+      const out = await refreshSpaceFileNames.mutateAsync({ scopeKind: scope.kind, scopeId: scope.id });
+      toast.success(out.updated > 0 ? `Updated ${out.updated} file name${out.updated === 1 ? '' : 's'}` : 'Names are already in sync');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not refresh names');
+    }
+  };
+
+  const openRenameForGoalResource = (goalId: string, resourceId: string, currentTitle: string) => {
+    setRenameTarget({ kind: 'goal', goalId, resourceId, currentTitle });
+    setRenameValue(currentTitle);
+    setRenameOpen(true);
+  };
+
+  const onRenameConfirm = async () => {
+    const target = renameTarget;
+    if (!target) return;
+    const title = renameValue.trim();
+    if (!title || title === target.currentTitle) {
+      setRenameOpen(false);
+      setRenameTarget(null);
+      return;
+    }
+    try {
+      if (target.kind === 'space') {
+        await renameSpaceFile.mutateAsync({
+          scopeKind: target.scopeKind,
+          scopeId: target.scopeId,
+          fileId: target.fileId,
+          title,
+          renameInDrive: true,
+        });
+        toast.success('File renamed');
+      } else {
+        await renameGoalResource.mutateAsync({ goalId: target.goalId, resourceId: target.resourceId, title });
+        toast.success('Attachment renamed');
+      }
+      setRenameOpen(false);
+      setRenameTarget(null);
+      setRenameValue('');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Rename failed');
+    }
   };
 
   return (
@@ -1058,6 +1133,19 @@ function FilesTab({
         </Section>
       )}
 
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => void onRefreshNames()}
+          disabled={!driveConnected || refreshSpaceFileNames.isPending}
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-600 hover:text-brand-700 disabled:opacity-50"
+          title="Refresh file names from Google Drive"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${refreshSpaceFileNames.isPending ? 'animate-spin' : ''}`} />
+          Refresh names from Drive
+        </button>
+      </div>
+
       <Section title="In this space" count={inSpace.length}>
         {inSpace.length === 0 ? (
           <Empty icon={Upload} hint="No files yet — drop one above or paste a link." />
@@ -1081,6 +1169,20 @@ function FilesTab({
                   </span>
                 )}
                 <span className="text-[11px] text-gray-400 truncate max-w-[180px]">{f.meta}</span>
+                <button
+                  type="button"
+                  onClick={() => openRenameForSpaceFile({
+                    scopeKind: scope.kind,
+                    scopeId: scope.id,
+                    fileId: f.id,
+                    currentTitle: f.title,
+                  })}
+                  className="text-gray-300 hover:text-brand-700"
+                  aria-label="Rename"
+                  title="Rename"
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
                 <button
                   type="button"
                   onClick={() => void onRemove(f.id)}
@@ -1121,6 +1223,20 @@ function FilesTab({
                   {project.name}
                 </span>
                 <span className="text-[11px] text-gray-400 truncate max-w-[140px]">{file.meta}</span>
+                <button
+                  type="button"
+                  onClick={() => openRenameForSpaceFile({
+                    scopeKind: 'project',
+                    scopeId: project.id,
+                    fileId: file.id,
+                    currentTitle: file.title,
+                  })}
+                  className="text-gray-300 hover:text-brand-700"
+                  aria-label="Rename"
+                  title="Rename"
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
               </li>
             ))}
           </ul>
@@ -1148,11 +1264,64 @@ function FilesTab({
                 <span className="text-[11px] text-gray-500 italic truncate max-w-[200px]">
                   via {goal.title}
                 </span>
+                <button
+                  type="button"
+                  onClick={() => openRenameForGoalResource(goal.id, resource.id, resource.title)}
+                  className="text-gray-300 hover:text-brand-700"
+                  aria-label="Rename attachment"
+                  title="Rename attachment"
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
               </li>
             ))}
           </ul>
         </Section>
       )}
+
+      <Modal
+        open={renameOpen}
+        onClose={() => {
+          setRenameOpen(false);
+          setRenameTarget(null);
+          setRenameValue('');
+        }}
+        title={renameTarget?.kind === 'goal' ? 'Rename attachment' : 'Rename file'}
+        size="sm"
+        footer={(
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setRenameOpen(false);
+                setRenameTarget(null);
+                setRenameValue('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => void onRenameConfirm()}
+              disabled={!renameValue.trim() || renameSpaceFile.isPending || renameGoalResource.isPending}
+            >
+              {renameSpaceFile.isPending || renameGoalResource.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </>
+        )}
+      >
+        <Input
+          autoFocus
+          value={renameValue}
+          onChange={(e) => setRenameValue(e.target.value)}
+          placeholder="New name"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void onRenameConfirm();
+          }}
+        />
+      </Modal>
 
       <EmbedDialog
         open={embedOpen}

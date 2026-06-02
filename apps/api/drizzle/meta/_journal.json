@@ -113,6 +113,13 @@
       "when": 1780331991997,
       "tag": "0015_free_senator_kelly",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1780395600000,
+      "tag": "0016_solid_chimera",
+      "breakpoints": true
     }
   ]
 }

@@ -36,6 +36,8 @@ export type ActiveQrUploadSession = {
 export type QrUploadSessionFile = {
   id: string;
   sessionId: string;
+  uploadTitle: string | null;
+  uploadNotes: string | null;
   originalName: string;
   mimeType: string | null;
   sizeBytes: number;

@@ -597,6 +597,8 @@ export const uploadQrSessions = pgTable('upload_qr_sessions', {
 export const uploadQrSessionFiles = pgTable('upload_qr_session_files', {
   id: uuid('id').defaultRandom().primaryKey(),
   sessionId: uuid('session_id').notNull().references(() => uploadQrSessions.id, { onDelete: 'cascade' }),
+  uploadTitle: text('upload_title'),
+  uploadNotes: text('upload_notes'),
   originalName: text('original_name').notNull(),
   mimeType: text('mime_type'),
   sizeBytes: integer('size_bytes').notNull().default(0),

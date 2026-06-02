@@ -12,6 +12,7 @@ import {
   Eye,
   Plug,
   ChevronRight,
+  Pencil,
 } from 'lucide-react';
 import { Card, Section, Empty, Pill } from '@/components/ui';
 import { Button } from '@/components/ui/Button';
@@ -25,6 +26,7 @@ import {
   useDriveList,
   useCreateDriveFolder,
   useDeleteDriveEntry,
+  useRenameDriveEntry,
   useDisconnectDrive,
   driveConnectUrl,
   driveDownloadUrl,
@@ -43,11 +45,15 @@ export default function MediaPage() {
   const createFolder = useCreateDriveFolder();
   const { enqueue } = useUploadManager();
   const delEntry = useDeleteDriveEntry();
+  const renameEntry = useRenameDriveEntry();
   const disconnect = useDisconnectDrive();
 
   const [newFolder, setNewFolder] = useState('');
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [preview, setPreview] = useState<DriveEntry | null>(null);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<DriveEntry | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const [qrOpen, setQrOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -88,6 +94,27 @@ export default function MediaPage() {
       toast.success('Folder created');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not create folder');
+    }
+  };
+
+  const openRename = (entry: DriveEntry) => {
+    setRenameTarget(entry);
+    setRenameValue(entry.name);
+    setRenameOpen(true);
+  };
+
+  const onRename = async () => {
+    const target = renameTarget;
+    const name = renameValue.trim();
+    if (!target || !name) return;
+    try {
+      await renameEntry.mutateAsync({ id: target.id, name });
+      toast.success('Renamed');
+      setRenameOpen(false);
+      setRenameTarget(null);
+      setRenameValue('');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Rename failed');
     }
   };
 
@@ -281,6 +308,14 @@ export default function MediaPage() {
                             <ExternalLink className="w-4 h-4" />
                           </a>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => openRename(e)}
+                          className="text-gray-400 hover:text-brand-700"
+                          title="Rename"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
                         {!e.isFolder && (
                           <a
                             href={driveDownloadUrl(e.id)}
@@ -371,6 +406,40 @@ export default function MediaPage() {
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        open={renameOpen}
+        onClose={() => {
+          setRenameOpen(false);
+          setRenameTarget(null);
+          setRenameValue('');
+        }}
+        title="Rename item"
+        size="sm"
+        footer={(
+          <>
+            <Button variant="ghost" size="sm" onClick={() => setRenameOpen(false)}>Cancel</Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => void onRename()}
+              disabled={!renameValue.trim() || renameEntry.isPending}
+            >
+              {renameEntry.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </>
+        )}
+      >
+        <Input
+          autoFocus
+          value={renameValue}
+          onChange={(e) => setRenameValue(e.target.value)}
+          placeholder="New name"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void onRename();
+          }}
+        />
       </Modal>
 
       {currentParent && (

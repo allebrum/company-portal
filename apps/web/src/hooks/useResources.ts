@@ -505,6 +505,19 @@ export function useRemoveResource() {
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.goals }),
   });
 }
+export function useRenameGoalResource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ goalId, resourceId, title }: { goalId: string; resourceId: string; title: string }) =>
+      api.patch<GoalResourceRow>(`/goals/${goalId}/resources/${resourceId}`, { title }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.goals });
+      qc.invalidateQueries({ queryKey: qk.clients });
+      qc.invalidateQueries({ queryKey: qk.projects });
+      qc.invalidateQueries({ queryKey: ['driveList'] });
+    },
+  });
+}
 // Multipart upload: pushes a real file into the goal's project Drive
 // folder and records the resource. Use this for drag-drop / file-picker
 // flows; useAddResource() is still the right call for URL bookmarks.

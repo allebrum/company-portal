@@ -20,6 +20,7 @@ import {
   isConnected as driveIsConnected,
   uploadFile as driveUploadFile,
   ensureProjectFolder,
+  renameEntry as renameDriveEntry,
 } from './drive.js';
 
 export async function listGoals(): Promise<(Goal & { resources: GoalResource[] })[]> {
@@ -136,6 +137,44 @@ export async function removeResource(goalId: string, resourceId: string, whoId: 
   const [row] = await db.delete(goalResources).where(eq(goalResources.id, resourceId)).returning({ id: goalResources.id });
   if (!row) throw new HttpError(404, 'resource_not_found');
   emit.toOrg(EV.GOAL_RESOURCE_REMOVED, { id: goalId, by: whoId, at: new Date().toISOString() });
+}
+
+export async function renameGoalResource(
+  goalId: string,
+  resourceId: string,
+  title: string,
+  whoId: string,
+): Promise<GoalResource> {
+  const nextTitle = title.trim();
+  if (!nextTitle) throw new HttpError(400, 'title_required');
+
+  const [existing] = await db
+    .select()
+    .from(goalResources)
+    .where(eq(goalResources.id, resourceId))
+    .limit(1);
+  if (!existing || existing.goalId !== goalId) throw new HttpError(404, 'resource_not_found');
+
+  let resolvedTitle = nextTitle;
+  if (existing.driveFileId) {
+    try {
+      const renamed = await renameDriveEntry(existing.driveFileId, nextTitle);
+      resolvedTitle = renamed.name;
+    } catch {
+      // Keep local rename behavior even if Drive rename fails.
+    }
+  }
+
+  const [row] = await db
+    .update(goalResources)
+    .set({ title: resolvedTitle })
+    .where(eq(goalResources.id, resourceId))
+    .returning();
+  if (!row) throw new HttpError(404, 'resource_not_found');
+
+  emit.toOrg(EV.GOAL_RESOURCE_ADDED, { id: goalId, by: whoId, at: new Date().toISOString() });
+  await appendActivity({ whoId, kind: 'resource.rename', target: `${existing.title} → ${resolvedTitle}` });
+  return row;
 }
 
 /**

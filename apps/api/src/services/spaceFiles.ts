@@ -10,6 +10,8 @@ import {
   ensureProjectFolder,
   uploadFile,
   deleteEntry,
+  getFileMeta,
+  renameEntry,
 } from './drive.js';
 import { emit } from '../realtime/emit.js';
 import { EV } from '@allebrum/shared';
@@ -131,4 +133,119 @@ async function appendSpaceFile(
     .returning({ spaceFiles: projects.spaceFiles });
   if (!row) throw new HttpError(404, 'scope_not_found');
   return (row.spaceFiles as SpaceFile[]) ?? [];
+}
+
+async function getScopeFiles(scopeKind: SpaceScopeKind, scopeId: string): Promise<SpaceFile[]> {
+  if (scopeKind === 'client') {
+    const [row] = await db.select({ spaceFiles: clients.spaceFiles }).from(clients).where(eq(clients.id, scopeId)).limit(1);
+    if (!row) throw new HttpError(404, 'scope_not_found');
+    return (row.spaceFiles as SpaceFile[]) ?? [];
+  }
+  const [row] = await db.select({ spaceFiles: projects.spaceFiles }).from(projects).where(eq(projects.id, scopeId)).limit(1);
+  if (!row) throw new HttpError(404, 'scope_not_found');
+  return (row.spaceFiles as SpaceFile[]) ?? [];
+}
+
+async function replaceScopeFiles(scopeKind: SpaceScopeKind, scopeId: string, files: SpaceFile[]): Promise<SpaceFile[]> {
+  if (scopeKind === 'client') {
+    const [row] = await db
+      .update(clients)
+      .set({ spaceFiles: files as unknown as Record<string, unknown>, updatedAt: new Date().toISOString() })
+      .where(eq(clients.id, scopeId))
+      .returning({ spaceFiles: clients.spaceFiles });
+    if (!row) throw new HttpError(404, 'scope_not_found');
+    return (row.spaceFiles as SpaceFile[]) ?? [];
+  }
+  const [row] = await db
+    .update(projects)
+    .set({ spaceFiles: files as unknown as Record<string, unknown>, updatedAt: new Date().toISOString() })
+    .where(eq(projects.id, scopeId))
+    .returning({ spaceFiles: projects.spaceFiles });
+  if (!row) throw new HttpError(404, 'scope_not_found');
+  return (row.spaceFiles as SpaceFile[]) ?? [];
+}
+
+function extractDriveFileId(file: SpaceFile): string | null {
+  const urlMatch = /\/d\/([a-zA-Z0-9_-]+)/.exec(file.url ?? '');
+  if (urlMatch?.[1]) return urlMatch[1];
+  const metaMatch = /^Drive\s*[.-]\s*([a-zA-Z0-9_-]+)$/i.exec((file.meta ?? '').trim());
+  if (metaMatch?.[1]) return metaMatch[1];
+  return null;
+}
+
+export async function renameSpaceFile(args: {
+  scopeKind: SpaceScopeKind;
+  scopeId: string;
+  fileId: string;
+  title: string;
+  renameInDrive?: boolean;
+  whoId: string;
+}): Promise<{ file: SpaceFile; spaceFiles: SpaceFile[] }> {
+  const nextTitle = args.title.trim();
+  if (!nextTitle) throw new HttpError(400, 'title_required');
+
+  const files = await getScopeFiles(args.scopeKind, args.scopeId);
+  const idx = files.findIndex((f) => f.id === args.fileId);
+  if (idx < 0) throw new HttpError(404, 'file_not_found');
+
+  const current = files[idx]!;
+  let resolvedTitle = nextTitle;
+  if (args.renameInDrive !== false) {
+    const driveId = extractDriveFileId(current);
+    if (driveId) {
+      const renamed = await renameEntry(driveId, nextTitle);
+      resolvedTitle = renamed.name;
+    }
+  }
+
+  const updatedFile: SpaceFile = { ...current, title: resolvedTitle };
+  const next = files.slice();
+  next[idx] = updatedFile;
+  const spaceFiles = await replaceScopeFiles(args.scopeKind, args.scopeId, next);
+
+  if (args.scopeKind === 'client') {
+    emit.toOrg(EV.CLIENT_UPDATED, { id: args.scopeId, by: args.whoId, at: new Date().toISOString() });
+  } else {
+    emit.toOrg(EV.PROJECT_UPDATED, { id: args.scopeId, by: args.whoId, at: new Date().toISOString() });
+  }
+
+  return { file: updatedFile, spaceFiles };
+}
+
+export async function refreshSpaceFileNamesFromDrive(args: {
+  scopeKind: SpaceScopeKind;
+  scopeId: string;
+  whoId: string;
+}): Promise<{ updated: number; spaceFiles: SpaceFile[] }> {
+  if (!(await driveIsConnected())) {
+    throw new HttpError(412, 'drive_not_connected');
+  }
+
+  const files = await getScopeFiles(args.scopeKind, args.scopeId);
+  let updated = 0;
+  const next = await Promise.all(files.map(async (file) => {
+    const driveId = extractDriveFileId(file);
+    if (!driveId) return file;
+    try {
+      const meta = await getFileMeta(driveId);
+      const driveName = (meta.name ?? '').trim();
+      if (!driveName || driveName === file.title) return file;
+      updated += 1;
+      return { ...file, title: driveName };
+    } catch {
+      return file;
+    }
+  }));
+
+  if (updated === 0) {
+    return { updated: 0, spaceFiles: files };
+  }
+
+  const spaceFiles = await replaceScopeFiles(args.scopeKind, args.scopeId, next);
+  if (args.scopeKind === 'client') {
+    emit.toOrg(EV.CLIENT_UPDATED, { id: args.scopeId, by: args.whoId, at: new Date().toISOString() });
+  } else {
+    emit.toOrg(EV.PROJECT_UPDATED, { id: args.scopeId, by: args.whoId, at: new Date().toISOString() });
+  }
+  return { updated, spaceFiles };
 }

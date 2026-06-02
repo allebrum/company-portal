@@ -222,8 +222,27 @@ export async function uploadFile(
 
 export async function getFileMeta(fileId: string) {
   const drive = await driveApi();
-  const res = await drive.files.get({ fileId, fields: 'id,name,mimeType,size' });
+  const res = await drive.files.get({ fileId, fields: 'id,name,mimeType,size,webViewLink,modifiedTime' });
   return res.data;
+}
+
+export async function renameEntry(fileId: string, name: string): Promise<DriveEntry> {
+  const drive = await driveApi();
+  const res = await drive.files.update({
+    fileId,
+    requestBody: { name },
+    fields: 'id,name,mimeType,webViewLink,modifiedTime,size',
+  });
+  const f = res.data;
+  return {
+    id: f.id!,
+    name: f.name ?? name,
+    mimeType: f.mimeType ?? '',
+    isFolder: f.mimeType === FOLDER_MIME,
+    webViewLink: f.webViewLink,
+    modifiedTime: f.modifiedTime,
+    size: f.size,
+  };
 }
 
 export async function downloadFile(fileId: string): Promise<NodeJS.ReadableStream> {

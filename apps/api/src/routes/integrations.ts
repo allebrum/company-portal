@@ -24,7 +24,6 @@ import {
   buildDriveConsentUrl,
   exchangeDriveCode,
   saveDriveToken,
-  disconnectDrive,
   ensureSharedFolder,
   listFolder,
   folderPath,
@@ -33,6 +32,7 @@ import {
   getFileMeta,
   downloadFile,
   deleteEntry,
+  renameEntry,
   driveConfigured,
   reconcileFolders,
 } from '../services/drive.js';
@@ -154,15 +154,18 @@ integrationsRouter.get('/drive/callback', async (req, res, next) => {
     const tokens = await exchangeDriveCode(code);
     await saveDriveToken(me.userId, tokens);
     await ensureSharedFolder();
+    // Keep Integrations tab consistent with the token-backed Drive status.
+    await connect('drive', { account: 'connected' }, me.userId);
     return back('connected');
   } catch {
     return back('error');
   }
 });
 
-integrationsRouter.post('/drive/disconnect', driveAccess, async (_req, res, next) => {
+integrationsRouter.post('/drive/disconnect', driveAccess, async (req, res, next) => {
   try {
-    await disconnectDrive();
+    const me = req.session.user!;
+    await disconnect('drive', me.userId);
     res.json({ ok: true });
   } catch (e) {
     next(e);
@@ -245,6 +248,22 @@ integrationsRouter.delete('/drive/file/:id', requirePermission('media.manage'), 
     next(e);
   }
 });
+
+const RenameDriveFileSchema = z.object({ name: z.string().trim().min(1).max(240) });
+integrationsRouter.patch(
+  '/drive/file/:id',
+  requirePermission('media.manage'),
+  validate(RenameDriveFileSchema),
+  async (req, res, next) => {
+    try {
+      const { name } = getValidated<typeof RenameDriveFileSchema._type>(req);
+      const entry = await renameEntry(req.params.id!, name);
+      res.json(entry);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
 
 // Reconcile client/project rows against the Drive folder tree. Clears
 // dangling pointers, links rows that have a matching folder available,

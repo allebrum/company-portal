@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
+import { z } from 'zod';
 import {
   CreateGoalSchema,
   UpdateGoalSchema,
@@ -16,6 +17,7 @@ import {
   addResource,
   removeResource,
   uploadGoalResource,
+  renameGoalResource,
 } from '../services/goals.js';
 
 // Same limit as the Drive media manager (100 MB). In-memory; we hand the
@@ -97,6 +99,18 @@ goalsRouter.delete('/:id/resources/:rid', async (req, res, next) => {
     const me = req.session.user!;
     await removeResource(req.params.id!, req.params.rid!, me.userId);
     res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+const RenameGoalResourceSchema = z.object({ title: z.string().trim().min(1).max(240) });
+goalsRouter.patch('/:id/resources/:rid', validate(RenameGoalResourceSchema), async (req, res, next) => {
+  try {
+    const me = req.session.user!;
+    const input = getValidated<typeof RenameGoalResourceSchema._type>(req);
+    const row = await renameGoalResource(req.params.id!, req.params.rid!, input.title, me.userId);
+    res.json(row);
   } catch (e) {
     next(e);
   }
