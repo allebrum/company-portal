@@ -17,6 +17,7 @@ import { Card, Section, Empty, Pill } from '@/components/ui';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
+import { QrUploadModal } from '@/components/upload/QrUploadModal';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/hooks/useAuth';
 import {
@@ -47,6 +48,7 @@ export default function MediaPage() {
   const [newFolder, setNewFolder] = useState('');
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [preview, setPreview] = useState<DriveEntry | null>(null);
+  const [qrOpen, setQrOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const handledDriveParam = useRef(false);
@@ -196,6 +198,9 @@ export default function MediaPage() {
               />
               <Button variant="primary" size="sm" onClick={() => fileRef.current?.click()}>
                 <Upload className="w-4 h-4" /> Upload
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setQrOpen(true)} disabled={!currentParent}>
+                <Plug className="w-4 h-4" /> QR upload
               </Button>
             </div>
           </Card>
@@ -367,6 +372,15 @@ export default function MediaPage() {
           </div>
         )}
       </Modal>
+
+      {currentParent && (
+        <QrUploadModal
+          open={qrOpen}
+          onClose={() => setQrOpen(false)}
+          target={{ kind: 'drive', folderId: currentParent }}
+          label={(listing?.path?.[listing.path.length - 1]?.name ?? 'Shared Drive folder')}
+        />
+      )}
     </div>
   );
 }

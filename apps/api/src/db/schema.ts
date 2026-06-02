@@ -568,6 +568,48 @@ export const qrScans = pgTable('qr_scans', {
   codeTimeIdx: index('qr_scans_code_time_idx').on(t.qrCodeId, t.scannedAt),
 }));
 
+// ---- Upload QR sessions (public mobile upload handoff) ----
+// A staff user mints a one-time-ish tokenized upload URL that can be opened
+// on a phone (no auth required). The token maps to a concrete target in DB
+// so uploaded files route into the correct space / folder.
+export const uploadQrSessions = pgTable('upload_qr_sessions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  token: text('token').notNull().unique(),
+  createdByUserId: uuid('created_by_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  // 'space_client' | 'space_project' | 'drive_folder' | 'todo' | 'goal'
+  targetKind: text('target_kind').notNull(),
+  // Scope id, folder id, or todo id depending on targetKind.
+  targetId: text('target_id').notNull(),
+  label: text('label').notNull().default('Mobile upload'),
+  expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'string' }).notNull(),
+  uploadedCount: integer('uploaded_count').notNull().default(0),
+  lastUploadedAt: timestamp('last_uploaded_at', { withTimezone: true, mode: 'string' }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'string' }),
+  createdAt: ts(),
+  updatedAt: updTs(),
+}, (t) => ({
+  tokenIdx: uniqueIndex('upload_qr_sessions_token_idx').on(t.token),
+  targetIdx: index('upload_qr_sessions_target_idx').on(t.targetKind, t.targetId),
+}));
+
+// Successful files uploaded through a QR session. Used for audit/review so
+// admins can see exactly what was uploaded and where it landed.
+export const uploadQrSessionFiles = pgTable('upload_qr_session_files', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  sessionId: uuid('session_id').notNull().references(() => uploadQrSessions.id, { onDelete: 'cascade' }),
+  originalName: text('original_name').notNull(),
+  mimeType: text('mime_type'),
+  sizeBytes: integer('size_bytes').notNull().default(0),
+  destinationKind: text('destination_kind').notNull(),
+  destinationId: text('destination_id').notNull(),
+  storedFileId: text('stored_file_id'),
+  storedFileUrl: text('stored_file_url'),
+  createdAt: ts(),
+}, (t) => ({
+  sessionTimeIdx: index('upload_qr_session_files_session_time_idx').on(t.sessionId, t.createdAt),
+  destinationIdx: index('upload_qr_session_files_destination_idx').on(t.destinationKind, t.destinationId),
+}));
+
 // ---- Type exports ----
 export type User = typeof users.$inferSelect;
 export type AppSettingsRow = typeof appSettings.$inferSelect;
@@ -595,3 +637,5 @@ export type DriveItem = typeof driveItems.$inferSelect;
 export type AuthToken = typeof authTokens.$inferSelect;
 export type QrCode = typeof qrCodes.$inferSelect;
 export type QrScan = typeof qrScans.$inferSelect;
+export type UploadQrSession = typeof uploadQrSessions.$inferSelect;
+export type UploadQrSessionFile = typeof uploadQrSessionFiles.$inferSelect;

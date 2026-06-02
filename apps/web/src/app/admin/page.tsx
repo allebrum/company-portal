@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronRight, Plus, Search, Trash2, Download, Mail, Users as UsersIcon, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Search, Trash2, Download, Mail, Users as UsersIcon, X, Link2, Copy } from 'lucide-react';
 import { API_URL } from '@/lib/env';
 import { Card, Section, Pill, Empty, Tile } from '@/components/ui';
 import {
@@ -19,7 +19,17 @@ import { UserFormModal } from '@/components/features/UserFormModal';
 import { ClientFormModal } from '@/components/features/ClientFormModal';
 import { ProjectFormModal } from '@/components/features/ProjectFormModal';
 import { LinkFolderModal } from '@/components/features/LinkFolderModal';
-import { useReconcileDriveFolders, type DriveReconciliationReport } from '@/hooks/useDrive';
+import {
+  useReconcileDriveFolders,
+  useDisconnectDrive,
+  driveConnectUrl,
+  type DriveReconciliationReport,
+} from '@/hooks/useDrive';
+import {
+  useActiveQrUploadSessions,
+  useQrUploadSessionFiles,
+  useRevokeQrUploadSession,
+} from '@/hooks/useQrUploadSession';
 import {
   useUsers,
   useClients,
@@ -56,10 +66,43 @@ import { PAY_PERIOD_STATUS_LABEL, PAY_PERIOD_STATUS_PILL } from '@/lib/formatter
 import type { Permission } from '@allebrum/shared';
 
 type Tab = 'users' | 'groups' | 'auth' | 'workspace' | 'pay' | 'integrations' | 'branding';
+const ADMIN_TAB_PARAM = 'adminTab';
+const TAB_IDS: ReadonlyArray<Tab> = ['users', 'groups', 'auth', 'workspace', 'pay', 'integrations', 'branding'];
+
+function readAdminTabFromUrl(): Tab | null {
+  const raw = new URL(window.location.href).searchParams.get(ADMIN_TAB_PARAM);
+  if (!raw) return null;
+  return TAB_IDS.includes(raw as Tab) ? (raw as Tab) : null;
+}
+
+function writeAdminTabToUrl(tab: Tab): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set(ADMIN_TAB_PARAM, tab);
+  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+}
 
 export default function AdminPage() {
   const { can } = useAuth();
   const [tab, setTab] = useState<Tab>('users');
+
+  const onTabChange = (next: Tab) => {
+    setTab(next);
+    writeAdminTabToUrl(next);
+  };
+
+  useEffect(() => {
+    const fromUrl = readAdminTabFromUrl();
+    const next = fromUrl ?? 'users';
+    setTab(next);
+    if (!fromUrl) writeAdminTabToUrl(next);
+
+    const onPopState = () => {
+      const popped = readAdminTabFromUrl();
+      setTab(popped ?? 'users');
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   const hasAnyAdmin =
     can('users.manage') ||
@@ -94,7 +137,7 @@ export default function AdminPage() {
         ).map((t) => (
           <button
             key={t.id}
-            onClick={() => setTab(t.id)}
+            onClick={() => onTabChange(t.id)}
             className={`shrink-0 px-3 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${
               tab === t.id ? 'border-brand-600 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-900'
             }`}
@@ -1300,6 +1343,7 @@ function IntegrationsTab() {
   const { data: clients = [] } = useClients();
   const connect = useConnectIntegration();
   const disconnect = useDisconnectIntegration();
+  const disconnectDrive = useDisconnectDrive();
   const sync = useSyncDrive();
   const unlink = useUnlinkDriveFolder();
   const reconcile = useReconcileDriveFolders();
@@ -1326,6 +1370,7 @@ function IntegrationsTab() {
           {(['drive', 'github', 'slack', 'quickbooks'] as const).map((kind) => {
             const i = byKind(kind);
             const connected = !!i?.connected;
+            const isDrive = kind === 'drive';
             return (
               <Tile key={kind}>
                 <div className="flex items-start justify-between gap-3">
@@ -1335,9 +1380,28 @@ function IntegrationsTab() {
                     {i?.lastSyncAt && <div className="text-[11px] text-gray-400 mt-1">Last sync {new Date(i.lastSyncAt).toLocaleString()}</div>}
                   </div>
                   {connected ? (
-                    <Button variant="ghost" size="sm" onClick={() => run(() => disconnect.mutateAsync(kind), `${kind} disconnected`)}>Disconnect</Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        run(
+                          () => (isDrive ? disconnectDrive.mutateAsync() : disconnect.mutateAsync(kind)),
+                          `${kind} disconnected`,
+                        )
+                      }
+                    >
+                      Disconnect
+                    </Button>
                   ) : (
-                    <Button variant="primary" size="sm" onClick={() => run(() => connect.mutateAsync({ kind, input: {} }), `${kind} connected`)}>Connect</Button>
+                    isDrive ? (
+                      <Button variant="primary" size="sm" onClick={() => window.location.assign(driveConnectUrl)}>
+                        Connect
+                      </Button>
+                    ) : (
+                      <Button variant="primary" size="sm" onClick={() => run(() => connect.mutateAsync({ kind, input: {} }), `${kind} connected`)}>
+                        Connect
+                      </Button>
+                    )
                   )}
                 </div>
               </Tile>
@@ -1429,10 +1493,252 @@ function IntegrationsTab() {
         </Section>
       )}
 
+      <ActiveQrUploadLinksPanel />
+
       <GmailIntegrationPanel />
 
       <LinkFolderModal open={linkOpen} onClose={() => setLinkOpen(false)} />
     </>
+  );
+}
+
+function ActiveQrUploadLinksPanel() {
+  const toast = useToast();
+  const { can } = useAuth();
+  const canManageIntegrations = can('integrations.manage');
+  const { data: sessions = [], isLoading } = useActiveQrUploadSessions(canManageIntegrations);
+  const revoke = useRevokeQrUploadSession();
+  const [query, setQuery] = useState('');
+  const [kindFilter, setKindFilter] = useState<'all' | 'space_client' | 'space_project' | 'drive_folder' | 'todo' | 'goal'>('all');
+  const [creatorFilter, setCreatorFilter] = useState<'all' | string>('all');
+  const [expiringSoonOnly, setExpiringSoonOnly] = useState(false);
+  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
+
+  if (!canManageIntegrations) {
+    return null;
+  }
+
+  const copy = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success('Link copied');
+    } catch {
+      toast.error('Could not copy link');
+    }
+  };
+
+  const fmtTarget = (kind: string, id: string) => {
+    if (kind === 'space_client') return `Client space · ${id.slice(0, 8)}…`;
+    if (kind === 'space_project') return `Project space · ${id.slice(0, 8)}…`;
+    if (kind === 'drive_folder') return `Drive folder · ${id.slice(0, 8)}…`;
+    if (kind === 'todo') return `To-do · ${id.slice(0, 8)}…`;
+    if (kind === 'goal') return `Goal · ${id.slice(0, 8)}…`;
+    return `${kind} · ${id.slice(0, 8)}…`;
+  };
+
+  const creatorOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of sessions) {
+      m.set(s.createdByUserId, s.createdByName ?? s.createdByEmail ?? 'Unknown');
+    }
+    return Array.from(m.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  }, [sessions]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const soonCutoff = Date.now() + 24 * 60 * 60 * 1000;
+    return sessions.filter((s) => {
+      if (kindFilter !== 'all' && s.targetKind !== kindFilter) return false;
+      if (creatorFilter !== 'all' && s.createdByUserId !== creatorFilter) return false;
+      if (expiringSoonOnly && new Date(s.expiresAt).getTime() > soonCutoff) return false;
+      if (!q) return true;
+      const haystack = [
+        s.label,
+        s.targetKind,
+        s.targetId,
+        s.createdByName ?? '',
+        s.createdByEmail ?? '',
+        s.token,
+      ]
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [sessions, query, kindFilter, creatorFilter, expiringSoonOnly]);
+
+  const fmtSize = (sizeBytes: number) => {
+    if (!Number.isFinite(sizeBytes) || sizeBytes < 0) return '0 B';
+    if (sizeBytes < 1024) return `${sizeBytes} B`;
+    const kb = sizeBytes / 1024;
+    if (kb < 1024) return `${kb.toFixed(1)} KB`;
+    const mb = kb / 1024;
+    if (mb < 1024) return `${mb.toFixed(1)} MB`;
+    const gb = mb / 1024;
+    return `${gb.toFixed(2)} GB`;
+  };
+
+  const fmtDestination = (kind: string, id: string) => {
+    if (kind === 'space_client') return `Client space · ${id}`;
+    if (kind === 'space_project') return `Project space · ${id}`;
+    if (kind === 'drive_folder') return `Drive folder · ${id}`;
+    if (kind === 'todo') return `To-do · ${id}`;
+    if (kind === 'goal') return `Goal · ${id}`;
+    return `${kind} · ${id}`;
+  };
+
+  const UploadAuditDetails = ({ sessionId }: { sessionId: string }) => {
+    const { data: files = [], isLoading: loadingFiles } = useQrUploadSessionFiles(sessionId, true);
+    return (
+      <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
+        {loadingFiles ? (
+          <div className="text-xs text-gray-500">Loading uploaded files…</div>
+        ) : files.length === 0 ? (
+          <div className="text-xs text-gray-500">No successful uploads recorded yet.</div>
+        ) : (
+          <ul className="divide-y divide-gray-200">
+            {files.map((f) => (
+              <li key={f.id} className="py-2 first:pt-0 last:pb-0">
+                <div className="text-sm text-gray-900 font-medium break-all">{f.originalName}</div>
+                <div className="text-[11px] text-gray-500 mt-0.5">
+                  {fmtSize(f.sizeBytes)} · {f.mimeType ?? 'unknown type'} · Uploaded {new Date(f.createdAt).toLocaleString()}
+                </div>
+                <div className="text-[11px] text-gray-500 mt-0.5 break-all">
+                  Destination: {fmtDestination(f.destinationKind, f.destinationId)}
+                </div>
+                <div className="text-[11px] text-gray-500 mt-0.5 break-all">
+                  Stored ID: {f.storedFileId ?? 'n/a'}
+                </div>
+                {f.storedFileUrl && (
+                  <a
+                    href={f.storedFileUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex mt-1 text-[11px] font-semibold text-brand-700 hover:underline"
+                  >
+                    Open file
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <Section title="Mobile upload QR links">
+      <Card>
+        {isLoading ? (
+          <div className="px-5 py-4 text-sm text-gray-500">Loading active links…</div>
+        ) : sessions.length === 0 ? (
+          <div className="px-5 py-4 text-sm text-gray-500">No active QR upload links.</div>
+        ) : (
+          <>
+            <div className="px-5 py-3 border-b border-gray-100 grid grid-cols-1 md:grid-cols-4 gap-2">
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search label, token, target…"
+              />
+              <Select value={kindFilter} onChange={(e) => setKindFilter(e.target.value as typeof kindFilter)}>
+                <option value="all">All targets</option>
+                <option value="space_client">Client space</option>
+                <option value="space_project">Project space</option>
+                <option value="drive_folder">Drive folder</option>
+                <option value="todo">To-do</option>
+                <option value="goal">Goal</option>
+              </Select>
+              <Select value={creatorFilter} onChange={(e) => setCreatorFilter(e.target.value)}>
+                <option value="all">All creators</option>
+                {creatorOptions.map(([id, label]) => (
+                  <option key={id} value={id}>{label}</option>
+                ))}
+              </Select>
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700 px-2">
+                <input
+                  type="checkbox"
+                  checked={expiringSoonOnly}
+                  onChange={(e) => setExpiringSoonOnly(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                Expiring in 24h
+              </label>
+            </div>
+
+            {filtered.length === 0 ? (
+              <div className="px-5 py-4 text-sm text-gray-500">No links match the current filters.</div>
+            ) : (
+              <ul className="divide-y divide-gray-100">
+                {filtered.map((s) => (
+                  <li key={s.id} className="px-5 py-3">
+                    <div className="flex items-start gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                          <Link2 className="w-4 h-4 text-gray-400" />
+                          <span className="truncate">{s.label}</span>
+                        </div>
+                        <div className="text-[12px] text-gray-500 mt-0.5">
+                          {fmtTarget(s.targetKind, s.targetId)} · Created by {s.createdByName ?? s.createdByEmail ?? 'Unknown'}
+                        </div>
+                        <div className="text-[11px] text-gray-400 mt-1">
+                          Expires {new Date(s.expiresAt).toLocaleString()} · Uploaded {s.uploadedCount}
+                          {s.lastUploadedAt ? ` · Last upload ${new Date(s.lastUploadedAt).toLocaleString()}` : ''}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedSessionId((prev) => (prev === s.id ? null : s.id))}
+                          className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-800"
+                          title="Review uploaded files"
+                        >
+                          {expandedSessionId === s.id ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void copy(s.uploadUrl)}
+                          className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-800"
+                          title="Copy link"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </button>
+                        <a
+                          href={s.uploadUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-800"
+                          title="Open public upload page"
+                        >
+                          <Download className="w-4 h-4" />
+                        </a>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await revoke.mutateAsync(s.id);
+                              toast.success('QR link revoked');
+                            } catch (e) {
+                              toast.error(e instanceof Error ? e.message : 'Could not revoke link');
+                            }
+                          }}
+                          className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"
+                          title="Revoke"
+                          disabled={revoke.isPending}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                    {expandedSessionId === s.id && <UploadAuditDetails sessionId={s.id} />}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </Card>
+    </Section>
   );
 }
 

@@ -1,16 +1,21 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, RotateCcw, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, ChevronUp, GripHorizontal, RotateCcw, X } from 'lucide-react';
 import { useUploadManager, type UploadItem } from '@/contexts/UploadManagerContext';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
+
+const TRAY_POSITION_KEY = 'uploadTrayPosition:v1';
 
 /**
  * Fixed-position upload progress tray. Sibling of `ClientSpaceOverlay`
  * in `AuthGate` so it persists across Space-overlay open/close, route
  * changes, and scope switches.
  *
- * Position: bottom-left, z-55 — clear of toasts (bottom-right z-60).
+ * Position: bottom-left, z-90 — above the ClientSpaceOverlay (z-80)
+ * so uploads remain visible while that modal is open; still below app
+ * dialogs (Modal z-100+) so focused form dialogs stay on top.
  * Visually a compact card; auto-collapses to a pill 5 seconds after the
  * last upload reaches a terminal state, and the whole tray dismisses
  * itself when the items array empties.
@@ -18,6 +23,34 @@ import { Button } from '@/components/ui/Button';
 export function UploadTray() {
   const { items, cancel, retry, dismiss, clearCompleted } = useUploadManager();
   const [expanded, setExpanded] = useState(false);
+  const trayRef = useRef<HTMLDivElement | null>(null);
+
+  const margin = 16;
+  const defaultX = 16;
+  const defaultY = 16;
+  const [position, setPosition] = useState<{ x: number; y: number }>({
+    x: defaultX,
+    y: defaultY,
+  });
+  const [hasStoredPosition, setHasStoredPosition] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const hasDraggedRef = useRef(false);
+
+  const dragRef = useRef({
+    pointerId: -1,
+    startX: 0,
+    startY: 0,
+    originX: defaultX,
+    originY: defaultY,
+  });
+
+  const savePosition = (next: { x: number; y: number }) => {
+    try {
+      window.localStorage.setItem(TRAY_POSITION_KEY, JSON.stringify(next));
+    } catch {
+      // Ignore quota/private-mode write failures.
+    }
+  };
 
   // Derived counts — single pass.
   const counts = useMemo(() => {
@@ -66,11 +99,113 @@ export function UploadTray() {
     }
   }, [counts.active, wasActive]);
 
+  // Restore persisted tray position if available.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(TRAY_POSITION_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { x?: unknown; y?: unknown };
+      if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+        setPosition({ x: parsed.x, y: parsed.y });
+        setHasStoredPosition(true);
+        hasDraggedRef.current = true;
+      }
+    } catch {
+      // Ignore malformed values.
+    }
+  }, []);
+
+  // Keep the tray within viewport on resize/orientation changes.
+  useEffect(() => {
+    const clamp = () => {
+      const el = trayRef.current;
+      if (!el) return;
+      const width = el.offsetWidth;
+      const height = el.offsetHeight;
+      const maxX = Math.max(margin, window.innerWidth - width - margin);
+      const maxY = Math.max(margin, window.innerHeight - height - margin);
+      setPosition((prev) => {
+        // First-run default (no saved position, never dragged): bottom-left.
+        if (!hasStoredPosition && !hasDraggedRef.current) {
+          return { x: margin, y: maxY };
+        }
+        return {
+          x: Math.min(Math.max(prev.x, margin), maxX),
+          y: Math.min(Math.max(prev.y, margin), maxY),
+        };
+      });
+    };
+    clamp();
+    window.addEventListener('resize', clamp);
+    return () => window.removeEventListener('resize', clamp);
+  }, [hasStoredPosition]);
+
+  const onDragHandlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0) return;
+    const el = trayRef.current;
+    if (!el) return;
+    e.preventDefault();
+    dragRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      originX: position.x,
+      originY: position.y,
+    };
+    setDragging(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onDragHandlePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!dragging || e.pointerId !== dragRef.current.pointerId) return;
+    const el = trayRef.current;
+    if (!el) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
+    const maxX = Math.max(margin, window.innerWidth - width - margin);
+    const maxY = Math.max(margin, window.innerHeight - height - margin);
+    const x = Math.min(Math.max(dragRef.current.originX + dx, margin), maxX);
+    const y = Math.min(Math.max(dragRef.current.originY + dy, margin), maxY);
+    setPosition({ x, y });
+  };
+
+  const onDragHandlePointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.pointerId !== dragRef.current.pointerId) return;
+    setDragging(false);
+    hasDraggedRef.current = true;
+    savePosition(position);
+    dragRef.current.pointerId = -1;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  };
+
   if (items.length === 0) return null;
 
   return (
-    <div className="fixed bottom-4 left-4 z-[55] w-[360px] max-w-[calc(100vw-2rem)]">
+    <div
+      ref={trayRef}
+      className="fixed z-[90] w-[360px] max-w-[calc(100vw-2rem)]"
+      style={{ left: position.x, top: position.y }}
+    >
       <div className="rounded-2xl border border-gray-200 bg-white shadow-xl overflow-hidden">
+        {/* Drag handle — separate from the header button so drag doesn't
+            accidentally toggle expand/collapse. */}
+        <button
+          type="button"
+          aria-label="Drag upload tray"
+          title="Drag"
+          onPointerDown={onDragHandlePointerDown}
+          onPointerMove={onDragHandlePointerMove}
+          onPointerUp={onDragHandlePointerUp}
+          onPointerCancel={onDragHandlePointerUp}
+          className={cn(
+            'w-full h-5 flex items-center justify-center border-b border-gray-100 bg-gray-50 text-gray-400 hover:text-gray-600',
+            dragging ? 'cursor-grabbing' : 'cursor-grab',
+          )}
+        >
+          <GripHorizontal className="w-3.5 h-3.5" />
+        </button>
         {/* Header pill — clickable to expand/collapse */}
         <button
           type="button"

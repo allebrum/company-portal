@@ -30,7 +30,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // own branded shell + run its own session check. Slug is a query
   // param (not a path segment) so this prefix matches every portal route.
   const isPortal = pathname === '/portal' || pathname.startsWith('/portal/');
-  const isPublic = PUBLIC_ROUTES.has(pathname) || isPortal;
+  const isQrUpload = pathname === '/upload/qr' || pathname.startsWith('/upload/qr/');
+  const isPublic = PUBLIC_ROUTES.has(pathname) || isPortal || isQrUpload;
   const isRoot = pathname === '/' || rawPathname === '';
 
   useEffect(() => {
@@ -44,6 +45,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
       router.replace('/dashboard');
     }
   }, [loading, me, isRoot, router]);
+
+  // Normalize deep-link space URLs onto /clients so a link like
+  // /dashboard?space=project:... always opens in the clients workspace
+  // shell context instead of whichever page happened to be linked.
+  useEffect(() => {
+    if (loading || !me || isPublic) return;
+    if (pathname === '/clients') return;
+    const url = new URL(window.location.href);
+    if (!url.searchParams.get('space')) return;
+    router.replace(`/clients${url.search}${url.hash}`);
+  }, [loading, me, isPublic, pathname, router]);
 
   if (isPublic) {
     return <>{children}</>;

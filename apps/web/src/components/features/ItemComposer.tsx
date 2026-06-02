@@ -23,6 +23,7 @@ import type { SpaceFile } from '@allebrum/shared';
 import { useMyTimer } from '@/hooks/useTimer';
 import { fmtTimer, PRIORITY_DOT } from '@/lib/formatters';
 import { QuickAddTodo } from '@/components/features/QuickAddTodo';
+import { QrUploadModal } from '@/components/upload/QrUploadModal';
 import { statusesForScope, HEALTH_TONE } from '@/lib/roadmap';
 import { EpicChip } from '@/components/composer/chips/EpicChip';
 import { Activity, Gauge, Layers } from 'lucide-react';
@@ -143,6 +144,8 @@ export function ItemComposer(props: ItemComposerProps) {
   // both happen to render on the same modal mount.
   const [todoDragging, setTodoDragging] = useState(false);
   const todoFileRef = useRef<HTMLInputElement>(null);
+  const [todoQrOpen, setTodoQrOpen] = useState(false);
+  const [goalQrOpen, setGoalQrOpen] = useState(false);
   // Reach into the shell-level UploadManager so dropped todo files survive
   // the modal closing — they show up in the same global tray as Space and
   // Drive uploads.
@@ -748,6 +751,16 @@ export function ItemComposer(props: ItemComposerProps) {
                   <div className="text-[11px] text-gray-400 mt-0.5">
                     Lands in the parent project's Drive folder.
                   </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setTodoQrOpen(true);
+                    }}
+                    className="mt-2 text-[12px] font-semibold text-brand-700 hover:underline"
+                  >
+                    Or upload by QR code
+                  </button>
                   <input
                     ref={todoFileRef}
                     type="file"
@@ -830,6 +843,16 @@ export function ItemComposer(props: ItemComposerProps) {
                   <div className="text-[11px] text-gray-400 mt-0.5">
                     Goes straight to the project's Drive folder.
                   </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setGoalQrOpen(true);
+                    }}
+                    className="mt-2 text-[12px] font-semibold text-brand-700 hover:underline"
+                  >
+                    Or upload by QR code
+                  </button>
                   <input
                     ref={fileRef}
                     type="file"
@@ -1109,6 +1132,24 @@ export function ItemComposer(props: ItemComposerProps) {
           open={!!editingTodo}
           todo={editingTodo}
           onClose={() => setEditingTodo(null)}
+        />
+      )}
+
+      {mode === 'todo' && props.todo && (
+        <QrUploadModal
+          open={todoQrOpen}
+          onClose={() => setTodoQrOpen(false)}
+          target={{ kind: 'todo', todoId: props.todo.id }}
+          label={`To-do: ${props.todo.title}`}
+        />
+      )}
+
+      {mode === 'goal' && props.goal && (
+        <QrUploadModal
+          open={goalQrOpen}
+          onClose={() => setGoalQrOpen(false)}
+          target={{ kind: 'goal', goalId: props.goal.id }}
+          label={`Goal: ${props.goal.title}`}
         />
       )}
     </>,

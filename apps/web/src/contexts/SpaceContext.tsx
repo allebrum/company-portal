@@ -31,24 +31,92 @@ type SpaceCtx = {
 };
 
 const RECENTS_MAX = 6;
+const SPACE_PARAM = 'space';
+const SPACE_TAB_PARAM = 'spaceTab';
 
 const Ctx = createContext<SpaceCtx | null>(null);
+
+function toUrlScope(scope: Scope): string | null {
+  if (scope.kind === 'all') return null;
+  return `${scope.kind}:${scope.id}`;
+}
+
+function fromUrlScope(raw: string | null): Scope | null {
+  if (!raw) return null;
+  const [kind, id] = raw.split(':');
+  if ((kind !== 'client' && kind !== 'project') || !id) return null;
+  return { kind, id } as Scope;
+}
+
+function readScopeFromUrl(): Scope | null {
+  const url = new URL(window.location.href);
+  return fromUrlScope(url.searchParams.get(SPACE_PARAM));
+}
+
+function writeScopeToUrl(scope: Scope | null, mode: 'push' | 'replace'): void {
+  const url = new URL(window.location.href);
+  if (!scope || scope.kind === 'all') {
+    url.searchParams.delete(SPACE_PARAM);
+    url.searchParams.delete(SPACE_TAB_PARAM);
+  } else {
+    url.searchParams.set(SPACE_PARAM, `${scope.kind}:${scope.id}`);
+    // Opening a new scope starts on Notes by default.
+    url.searchParams.set(SPACE_TAB_PARAM, 'notes');
+  }
+  const next = `${url.pathname}${url.search}${url.hash}`;
+  if (mode === 'push') window.history.pushState(window.history.state, '', next);
+  else window.history.replaceState(window.history.state, '', next);
+}
 
 export function SpaceProvider({ children }: { children: ReactNode }) {
   const [openScope, setOpenScope] = useState<Scope | null>(null);
   const [recentSpaces, setRecentSpaces] = useState<Scope[]>([]);
 
-  const openSpace = useCallback((scope: Scope) => {
-    // The "All clients" scope has no space — refuse it defensively.
+  const rememberRecent = useCallback((scope: Scope) => {
     if (scope.kind === 'all') return;
-    setOpenScope(scope);
-    // Update recents LRU — push to front, dedupe by (kind, id), cap.
     setRecentSpaces((prev) => {
       const without = prev.filter((s) => !(s.kind === scope.kind && 'id' in s && 'id' in scope && s.id === scope.id));
       return [scope, ...without].slice(0, RECENTS_MAX);
     });
   }, []);
-  const closeSpace = useCallback(() => setOpenScope(null), []);
+
+  const openSpace = useCallback((scope: Scope) => {
+    // The "All clients" scope has no space — refuse it defensively.
+    if (scope.kind === 'all') return;
+    const isSame =
+      openScope &&
+      openScope.kind !== 'all' &&
+      openScope.kind === scope.kind &&
+      openScope.id === scope.id;
+    setOpenScope(scope);
+    // Update recents LRU — push to front, dedupe by (kind, id), cap.
+    rememberRecent(scope);
+    if (!isSame) writeScopeToUrl(scope, 'push');
+  }, [openScope, rememberRecent]);
+
+  const closeSpace = useCallback(() => {
+    if (!openScope) return;
+    setOpenScope(null);
+    writeScopeToUrl(null, 'push');
+  }, [openScope]);
+
+  // Initial URL restore + back/forward sync.
+  useEffect(() => {
+    const initial = readScopeFromUrl();
+    if (initial && initial.kind !== 'all') {
+      setOpenScope(initial);
+      rememberRecent(initial);
+    }
+
+    const onPopState = () => {
+      const next = readScopeFromUrl();
+      setOpenScope(next);
+      if (next && next.kind !== 'all') rememberRecent(next);
+    };
+
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [rememberRecent]);
 
   // Body-scroll lock while open so the underlying page doesn't drift when
   // the overlay's own scroll container reaches an edge. We capture the
