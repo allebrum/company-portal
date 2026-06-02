@@ -1,7 +1,7 @@
-import { and, eq, sql, asc } from 'drizzle-orm';
+import { and, eq, sql, asc, count } from 'drizzle-orm';
 import argon2 from 'argon2';
 import { db } from '../db/client.js';
-import { users, groups, userGroups, type User } from '../db/schema.js';
+import { users, groups, userGroups, tenantMembers, type User } from '../db/schema.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { appendActivity } from './activity.js';
 import { emit } from '../realtime/emit.js';
@@ -10,7 +10,8 @@ import { env } from '../env.js';
 import { issueToken, invalidateTokensFor, INVITE_TTL_MS } from '../auth/tokens.js';
 import { sendInviteEmail } from './mail.js';
 import { currentTenantId } from '../tenancy/context.js';
-import { ensureMembership, getDefaultTenantId } from './tenants.js';
+import { ensureMembership, getDefaultTenantId, getTenant } from './tenants.js';
+import { getSubscription } from './subscriptions.js';
 
 function initialsFrom(name: string): string {
   return name
@@ -56,6 +57,25 @@ export async function inviteUser(args: {
   // stays null forever and password login is correctly disabled.
   const existing = await findByEmail(args.email);
   if (existing) throw new HttpError(409, 'email_taken');
+
+  // Hoppa: seat enforcement. The workspace's seat limit comes from its
+  // subscription (marketing site). When billing is unconfigured the limit is
+  // null and invites are unlimited. Otherwise reject once the active member
+  // count would exceed the plan's seats.
+  const inviteTenantId = currentTenantId();
+  const tenant = await getTenant(inviteTenantId);
+  const sub = await getSubscription(tenant?.billingExternalId ?? null);
+  const seatLimit = sub?.seats ?? tenant?.seatLimit ?? null;
+  if (seatLimit != null) {
+    const [memberCount] = await db
+      .select({ n: count() })
+      .from(tenantMembers)
+      .where(eq(tenantMembers.tenantId, inviteTenantId));
+    if (Number(memberCount?.n ?? 0) >= seatLimit) {
+      throw new HttpError(402, 'seat_limit_reached');
+    }
+  }
+
   const [row] = await db
     .insert(users)
     .values({
