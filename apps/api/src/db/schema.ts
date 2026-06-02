@@ -133,7 +133,7 @@ export const appSettings = pgTable('app_settings', {
   // on the login card and sidebar header. The logo, when set, replaces
   // the gradient "A" tile and is stored as a base64 data URL so we don't
   // need Drive permissions or external hosting for it.
-  portalName: text('portal_name').notNull().default('Allebrum'),
+  portalName: text('portal_name').notNull().default('Hoppa'),
   brandPrimaryColor: text('brand_primary_color').notNull().default('#9333ea'),
   brandLogoDataUrl: text('brand_logo_data_url'),
   updatedAt: updTs(),

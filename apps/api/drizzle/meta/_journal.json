@@ -127,6 +127,13 @@
       "when": 1780354340838,
       "tag": "0017_jittery_machine_man",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1780420466804,
+      "tag": "0018_fancy_otto_octavius",
+      "breakpoints": true
     }
   ]
 }

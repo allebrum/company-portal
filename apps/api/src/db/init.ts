@@ -55,7 +55,7 @@ async function main(): Promise<void> {
     } else {
       const [created] = await db
         .insert(tenants)
-        .values({ name: 'Default Workspace', slug: 'default', status: 'active' })
+        .values({ name: 'Hoppa', slug: 'hoppa', status: 'active' })
         .returning({ id: tenants.id });
       defaultTenantId = created!.id;
     }
