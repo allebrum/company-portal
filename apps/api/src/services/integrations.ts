@@ -60,7 +60,7 @@ async function upsertIntegration(kind: IntegrationKind, patch: Partial<Integrati
 export async function connect(kind: IntegrationKind, input: ConnectIntegrationInput, whoId: string): Promise<Integration> {
   const row = await upsertIntegration(kind, {
     connected: true,
-    account: input.account ?? `${kind}@allebrum.com`,
+    account: input.account ?? kind,
     connectedAt: new Date().toISOString().slice(0, 10),
     autoSync: input.autoSync ?? false,
     syncIntervalHours: input.syncIntervalHours ?? 4,

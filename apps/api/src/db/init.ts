@@ -39,7 +39,10 @@ async function main(): Promise<void> {
     console.error('[init] ADMIN_EMAIL and ADMIN_PASSWORD must be set');
     process.exit(1);
   }
-  const allowedDomains = (env.ALLOWED_EMAIL_DOMAINS ?? 'allebrum.com')
+  // Default to no allow-list (empty = any email domain may sign in via Google).
+  // Self-hosters set ALLOWED_EMAIL_DOMAINS to lock sign-up to their domain(s);
+  // the SaaS/prod deploy sets it via its DO spec.
+  const allowedDomains = (env.ALLOWED_EMAIL_DOMAINS ?? '')
     .split(',')
     .map((d) => d.trim().toLowerCase())
     .filter(Boolean);
@@ -60,6 +63,12 @@ async function main(): Promise<void> {
       defaultTenantId = created!.id;
     }
   }
+
+  // The default workspace (internal team in SaaS mode, the sole workspace when
+  // self-hosting) is grandfathered out of subscription billing so it is never
+  // 402'd once SaaS gating is enabled. Provisioned customer tenants stay
+  // billing_exempt = false and resolve via the marketing subscription API.
+  await db.update(tenants).set({ billingExempt: true }).where(eq(tenants.id, defaultTenantId));
 
   // 1. Permission catalog — insert missing, then refresh labels/category so
   //    the catalog always matches @allebrum/shared.

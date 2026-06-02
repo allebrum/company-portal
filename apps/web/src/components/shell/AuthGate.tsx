@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Menu, Lock } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
-import { useBootstrap } from '@/hooks/useResources';
+import { useBootstrap, useAuthConfig } from '@/hooks/useResources';
 import { api, ApiError } from '@/lib/api';
 import { Sidebar } from './Sidebar';
 import { TimerBar } from './TimerBar';
@@ -91,6 +91,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
 function ShellWithBootstrap({ children }: { children: ReactNode }) {
   const { isLoading, isError, error } = useBootstrap();
+  const { data: cfg } = useAuthConfig();
   const pathname = usePathname();
   const [navOpen, setNavOpen] = useState(false);
 
@@ -150,10 +151,18 @@ function ShellWithBootstrap({ children }: { children: ReactNode }) {
             <Menu className="w-6 h-6" />
           </button>
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-brand-600 to-brand-700 flex items-center justify-center text-white text-sm font-bold">
-              A
+            <div
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-sm font-bold overflow-hidden"
+              style={{ backgroundColor: cfg?.brandPrimaryColor ?? '#9333ea' }}
+            >
+              {cfg?.brandLogoDataUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={cfg.brandLogoDataUrl} alt="" className="w-full h-full object-contain" />
+              ) : (
+                (cfg?.portalName ?? 'Hoppa').charAt(0).toUpperCase()
+              )}
             </div>
-            <span className="font-bold text-gray-900">Allebrum</span>
+            <span className="font-bold text-gray-900">{cfg?.portalName ?? 'Hoppa'}</span>
           </div>
         </div>
 

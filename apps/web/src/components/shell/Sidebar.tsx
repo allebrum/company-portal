@@ -75,7 +75,7 @@ export function Sidebar() {
   // Branding from the public auth config — cached + auto-invalidated on
   // settings changes, so the sidebar updates within a query refresh after
   // an admin edits Branding settings.
-  const portalName = cfg?.portalName ?? 'Allebrum';
+  const portalName = cfg?.portalName ?? 'Hoppa';
   const brandColor = cfg?.brandPrimaryColor ?? '#9333ea';
   const logoDataUrl = cfg?.brandLogoDataUrl ?? null;
 
@@ -90,7 +90,7 @@ export function Sidebar() {
             // eslint-disable-next-line @next/next/no-img-element
             <img src={logoDataUrl} alt={`${portalName} logo`} className="w-full h-full object-contain" />
           ) : (
-            <span className="text-white text-base font-bold">{portalName.charAt(0).toUpperCase() || 'A'}</span>
+            <span className="text-white text-base font-bold">{portalName.charAt(0).toUpperCase() || 'H'}</span>
           )}
         </div>
         <div className="leading-tight">
@@ -99,7 +99,7 @@ export function Sidebar() {
             className="text-[10px] uppercase tracking-widest font-semibold"
             style={{ color: brandColor }}
           >
-            Company portal
+            Workspace
           </div>
         </div>
       </div>

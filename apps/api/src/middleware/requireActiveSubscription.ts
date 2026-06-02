@@ -39,6 +39,12 @@ export async function requireActiveSubscription(req: Request, res: Response, nex
   }
   try {
     const tenant = await getTenant(tenantId);
+    // Grandfathered workspaces (the internal / self-host default tenant) bypass
+    // the subscription check entirely, even when SaaS gating is configured.
+    if (tenant?.billingExempt) {
+      next();
+      return;
+    }
     const sub = await getSubscription(tenant?.billingExternalId ?? null);
     if (isActive(sub)) {
       next();
