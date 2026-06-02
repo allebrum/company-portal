@@ -1,4 +1,4 @@
-import { eq, asc } from 'drizzle-orm';
+import { and, eq, asc } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
   goals,
@@ -6,6 +6,7 @@ import {
   type Goal,
   type GoalResource,
 } from '../db/schema.js';
+import { tenantEq, stampTenant } from '../tenancy/scope.js';
 import type {
   CreateGoalInput,
   UpdateGoalInput,
@@ -24,8 +25,8 @@ import {
 } from './drive.js';
 
 export async function listGoals(): Promise<(Goal & { resources: GoalResource[] })[]> {
-  const allGoals = await db.select().from(goals).orderBy(asc(goals.createdAt));
-  const allResources = await db.select().from(goalResources);
+  const allGoals = await db.select().from(goals).where(tenantEq(goals.tenantId)).orderBy(asc(goals.createdAt));
+  const allResources = await db.select().from(goalResources).where(tenantEq(goalResources.tenantId));
   const byGoal = new Map<string, GoalResource[]>();
   for (const r of allResources) {
     const arr = byGoal.get(r.goalId) ?? [];
@@ -39,7 +40,7 @@ export async function createGoal(input: CreateGoalInput, whoId: string): Promise
   // F25: owner is EITHER a user OR a group. If a group is set, leave the
   // user owner null so the XOR CHECK holds.
   const ownerId = input.ownerGroupId != null ? null : (input.ownerId ?? null);
-  const [row] = await db.insert(goals).values({
+  const [row] = await db.insert(goals).values(stampTenant({
     clientId: input.clientId,
     projectId: input.projectId,
     title: input.title,
@@ -56,7 +57,7 @@ export async function createGoal(input: CreateGoalInput, whoId: string): Promise
     health: input.health ?? null,
     progress: input.progress ?? null,
     dependsOn: input.dependsOn ?? null,
-  }).returning();
+  })).returning();
   if (!row) throw new Error('goal insert failed');
   emit.toOrg(EV.GOAL_CREATED, { id: row.id, by: whoId, at: new Date().toISOString() });
   await appendActivity({ whoId, kind: 'goal.create', target: `${row.title} added` });
@@ -89,7 +90,7 @@ export async function updateGoal(id: string, patch: UpdateGoalInput, whoId: stri
   if (patch.health !== undefined) upd.health = patch.health;
   if (patch.progress !== undefined) upd.progress = patch.progress;
   if (patch.dependsOn !== undefined) upd.dependsOn = patch.dependsOn;
-  const [row] = await db.update(goals).set(upd).where(eq(goals.id, id)).returning();
+  const [row] = await db.update(goals).set(upd).where(and(eq(goals.id, id), tenantEq(goals.tenantId))).returning();
   if (!row) throw new HttpError(404, 'goal_not_found');
   emit.toOrg(EV.GOAL_UPDATED, { id: row.id, by: whoId, at: new Date().toISOString() });
   return row;
@@ -99,7 +100,7 @@ export async function moveGoal(id: string, input: MoveGoalInput, whoId: string):
   const [row] = await db
     .update(goals)
     .set({ status: input.status, updatedAt: new Date().toISOString() })
-    .where(eq(goals.id, id))
+    .where(and(eq(goals.id, id), tenantEq(goals.tenantId)))
     .returning();
   if (!row) throw new HttpError(404, 'goal_not_found');
   emit.toOrg(EV.GOAL_MOVED, { id: row.id, by: whoId, at: new Date().toISOString() });
@@ -118,14 +119,14 @@ export async function addResource(
 ): Promise<GoalResource> {
   const [row] = await db
     .insert(goalResources)
-    .values({
+    .values(stampTenant({
       goalId,
       kind: input.kind,
       title: input.title,
       url: input.url,
       meta: input.meta,
       addedBy: whoId,
-    })
+    }))
     .returning();
   if (!row) throw new Error('resource insert failed');
   emit.toOrg(EV.GOAL_RESOURCE_ADDED, { id: goalId, by: whoId, at: new Date().toISOString() });
@@ -134,7 +135,7 @@ export async function addResource(
 }
 
 export async function removeResource(goalId: string, resourceId: string, whoId: string): Promise<void> {
-  const [row] = await db.delete(goalResources).where(eq(goalResources.id, resourceId)).returning({ id: goalResources.id });
+  const [row] = await db.delete(goalResources).where(and(eq(goalResources.id, resourceId), tenantEq(goalResources.tenantId))).returning({ id: goalResources.id });
   if (!row) throw new HttpError(404, 'resource_not_found');
   emit.toOrg(EV.GOAL_RESOURCE_REMOVED, { id: goalId, by: whoId, at: new Date().toISOString() });
 }
@@ -188,7 +189,7 @@ export async function uploadGoalResource(
   file: { originalname: string; mimetype: string; buffer: Buffer; size: number },
   whoId: string,
 ): Promise<GoalResource> {
-  const [goal] = await db.select().from(goals).where(eq(goals.id, goalId)).limit(1);
+  const [goal] = await db.select().from(goals).where(and(eq(goals.id, goalId), tenantEq(goals.tenantId))).limit(1);
   if (!goal) throw new HttpError(404, 'goal_not_found');
 
   if (!(await driveIsConnected())) {
@@ -207,7 +208,7 @@ export async function uploadGoalResource(
 
   const [row] = await db
     .insert(goalResources)
-    .values({
+    .values(stampTenant({
       goalId,
       kind,
       title: file.originalname,
@@ -217,7 +218,7 @@ export async function uploadGoalResource(
       mimeType: file.mimetype,
       sizeBytes: file.size,
       addedBy: whoId,
-    })
+    }))
     .returning();
   if (!row) throw new Error('resource insert failed');
 

@@ -27,7 +27,16 @@ app.use(
   }),
 );
 app.use(compression());
-app.use(express.json({ limit: '1mb' }));
+app.use(
+  express.json({
+    limit: '1mb',
+    // Hoppa: stash the raw body so the provisioning webhook can verify its
+    // HMAC signature over the exact bytes the marketing site signed.
+    verify: (req, _res, buf) => {
+      (req as unknown as { rawBody?: Buffer }).rawBody = buf;
+    },
+  }),
+);
 app.use(cookieParser());
 app.use(sessionMiddleware);
 app.use(

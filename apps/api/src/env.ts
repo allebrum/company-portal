@@ -32,6 +32,13 @@ const EnvSchema = z.object({
   ADMIN_EMAIL: z.string().email().optional(),
   ADMIN_PASSWORD: z.string().min(8).optional(),
   ALLOWED_EMAIL_DOMAINS: z.string().optional(),
+  // Hoppa (Phase 3) — the separate marketing site that owns Stripe billing +
+  // subscription truth. All optional: when unset, subscription gating no-ops
+  // to "allow" and the provisioning webhook is disabled, so Hoppa boots and
+  // runs even before the marketing site exists.
+  MARKETING_API_URL: z.string().url().optional(),     // e.g. https://hoppa.app/api
+  MARKETING_API_KEY: z.string().optional(),           // bearer for subscription/billing reads
+  PROVISIONING_SECRET: z.string().optional(),         // HMAC shared secret for the inbound provisioning webhook
 });
 
 export const env = EnvSchema.parse(process.env);
@@ -68,3 +75,10 @@ export const gmailOAuthConfigured = !!(
   env.GOOGLE_OAUTH_CLIENT_SECRET &&
   gmailRedirectUrl
 );
+
+// Hoppa: the subscription API is "configured" only when both the base URL and
+// the API key are present. When false, gating allows everything (single
+// self-hosted workspace mode / pre-marketing-site).
+export const subscriptionsConfigured = !!(env.MARKETING_API_URL && env.MARKETING_API_KEY);
+// The provisioning webhook is only mounted/active when its HMAC secret is set.
+export const provisioningConfigured = !!env.PROVISIONING_SECRET;

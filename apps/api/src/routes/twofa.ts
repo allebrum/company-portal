@@ -32,10 +32,11 @@ import {
 export const twofaRouter = Router();
 
 // Promote a pending (primary-auth-passed) session to fully authenticated.
-function promote(req: Request, res: Response, next: NextFunction, userId: string): void {
+// Hoppa: carry the workspace resolved at the primary-auth step onto `user`.
+function promote(req: Request, res: Response, next: NextFunction, userId: string, tenantId: string): void {
   req.session.regenerate((err) => {
     if (err) return next(err);
-    req.session.user = { userId };
+    req.session.user = { userId, tenantId };
     req.session.save(async (saveErr) => {
       if (saveErr) return next(saveErr);
       try {
@@ -44,7 +45,7 @@ function promote(req: Request, res: Response, next: NextFunction, userId: string
           res.status(401).json({ error: 'unauthorized' });
           return;
         }
-        const permissions = [...(await getEffectivePermissions(userId))];
+        const permissions = [...(await getEffectivePermissions(userId, tenantId))];
         res.json({
           user: {
             id: u.id,
@@ -95,7 +96,7 @@ twofaRouter.post('/2fa/totp', rateLimit({ key: '2fa', max: 10, windowSec: 60 }),
       res.status(401).json({ error: 'invalid_code' });
       return;
     }
-    promote(req, res, next, pending.userId);
+    promote(req, res, next, pending.userId, pending.tenantId);
   } catch (e) {
     next(e);
   }
@@ -133,7 +134,7 @@ twofaRouter.post('/2fa/webauthn/verify', rateLimit({ key: '2fa', max: 10, window
       res.status(401).json({ error: 'verification_failed' });
       return;
     }
-    promote(req, res, next, pending.userId);
+    promote(req, res, next, pending.userId, pending.tenantId);
   } catch (e) {
     next(e);
   }

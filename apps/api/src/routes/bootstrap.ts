@@ -20,7 +20,7 @@ bootstrapRouter.use(requireAuth);
 bootstrapRouter.get('/', async (req, res, next) => {
   try {
     const me = req.session.user!;
-    const permSet = await getEffectivePermissions(me.userId);
+    const permSet = await getEffectivePermissions(me.userId, me.tenantId);
     const canViewAll = permSet.has('time_entry.view_all');
     const [
       meRow,

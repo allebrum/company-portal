@@ -6,18 +6,23 @@ import { EV } from '@allebrum/shared';
 import { emit } from '../realtime/emit.js';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';
+import { tenantEq, stampTenant } from '../tenancy/scope.js';
 
 /** Returns all todos visible to viewerId — public ones + private ones assigned to viewer. */
 export async function listVisibleTodos(viewerId: string): Promise<Todo[]> {
   return db
     .select()
     .from(todos)
-    .where(or(eq(todos.private, false), eq(todos.assigneeId, viewerId)))
+    .where(and(tenantEq(todos.tenantId), or(eq(todos.private, false), eq(todos.assigneeId, viewerId))))
     .orderBy(desc(todos.createdAt));
 }
 
 export async function getTodo(id: string): Promise<Todo | undefined> {
-  const rows = await db.select().from(todos).where(eq(todos.id, id)).limit(1);
+  const rows = await db
+    .select()
+    .from(todos)
+    .where(and(eq(todos.id, id), tenantEq(todos.tenantId)))
+    .limit(1);
   return rows[0];
 }
 
@@ -46,7 +51,7 @@ export async function createTodo(input: CreateTodoInput, whoId: string): Promise
       : (input.assigneeId ?? whoId);
   const [row] = await db
     .insert(todos)
-    .values({
+    .values(stampTenant({
       title: input.title,
       description: input.description ?? null,
       assigneeId,
@@ -61,7 +66,7 @@ export async function createTodo(input: CreateTodoInput, whoId: string): Promise
       private: input.private,
       checklist: input.checklist,
       attachments: input.attachments ?? [],
-    })
+    }))
     .returning();
   if (!row) throw new Error('todo insert failed');
   emitTodo('created', row, whoId);
@@ -99,7 +104,11 @@ export async function updateTodo(id: string, patch: UpdateTodoInput, whoId: stri
   if (patch.checklist !== undefined) upd.checklist = patch.checklist;
   if (patch.attachments !== undefined) upd.attachments = patch.attachments;
 
-  const [row] = await db.update(todos).set(upd).where(eq(todos.id, id)).returning();
+  const [row] = await db
+    .update(todos)
+    .set(upd)
+    .where(and(eq(todos.id, id), tenantEq(todos.tenantId)))
+    .returning();
   if (!row) throw new HttpError(404, 'todo_not_found');
 
   // If private flipped or assignee changed, emit to all impacted parties.
@@ -129,7 +138,7 @@ export async function toggleTodo(id: string, whoId: string): Promise<Todo> {
   const [row] = await db
     .update(todos)
     .set({ status: next, updatedAt: new Date().toISOString() })
-    .where(eq(todos.id, id))
+    .where(and(eq(todos.id, id), tenantEq(todos.tenantId)))
     .returning();
   if (!row) throw new HttpError(404, 'todo_not_found');
   emitTodo('updated', row, whoId);
@@ -140,7 +149,7 @@ export async function toggleTodo(id: string, whoId: string): Promise<Todo> {
 }
 
 export async function deleteTodo(id: string, whoId: string): Promise<void> {
-  const [row] = await db.delete(todos).where(eq(todos.id, id)).returning({
+  const [row] = await db.delete(todos).where(and(eq(todos.id, id), tenantEq(todos.tenantId))).returning({
     id: todos.id,
     private: todos.private,
     assigneeId: todos.assigneeId,
@@ -154,5 +163,5 @@ export async function logTimeToTodo(id: string, addMin: number): Promise<void> {
   await db
     .update(todos)
     .set({ loggedMin: sql`${todos.loggedMin} + ${addMin}`, updatedAt: new Date().toISOString() })
-    .where(eq(todos.id, id));
+    .where(and(eq(todos.id, id), tenantEq(todos.tenantId)));
 }

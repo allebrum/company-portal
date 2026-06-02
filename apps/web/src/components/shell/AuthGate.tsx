@@ -2,9 +2,10 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Menu } from 'lucide-react';
+import { Menu, Lock } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useBootstrap } from '@/hooks/useResources';
+import { api, ApiError } from '@/lib/api';
 import { Sidebar } from './Sidebar';
 import { TimerBar } from './TimerBar';
 import { ClientSpaceOverlay } from '@/components/space/ClientSpaceOverlay';
@@ -105,6 +106,11 @@ function ShellWithBootstrap({ children }: { children: ReactNode }) {
       </div>
     );
   }
+  // Hoppa: a 402 from the subscription gate → show the billing screen instead
+  // of the generic error (the workspace's subscription lapsed/canceled).
+  if (isError && error instanceof ApiError && error.status === 402) {
+    return <SubscriptionRequired />;
+  }
   if (isError) {
     return (
       <div className="min-h-screen grid place-items-center text-red-600 text-sm">
@@ -156,6 +162,80 @@ function ShellWithBootstrap({ children }: { children: ReactNode }) {
           <div className="px-4 sm:px-6 py-6 max-w-7xl w-full mx-auto">{children}</div>
         </div>
       </main>
+    </div>
+  );
+}
+
+/**
+ * Hoppa: shown when the active workspace's subscription is inactive (402 from
+ * the gate). The owner can open Stripe's billing portal to re-subscribe; a
+ * multi-workspace user can switch to an active workspace; anyone can sign out.
+ */
+function SubscriptionRequired() {
+  const { me, switchWorkspace, logout } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const others = (me?.workspaces ?? []).filter((w) => w.id !== me?.tenantId);
+
+  const manageBilling = async () => {
+    setBusy(true);
+    try {
+      const { url } = await api.post<{ url: string }>('/billing/portal', {});
+      window.location.assign(url);
+    } catch {
+      setBusy(false);
+      // 503 billing_unavailable (marketing site unreachable / no billing id).
+      alert('Billing isn’t available right now. Please contact support to manage your subscription.');
+    }
+  };
+
+  return (
+    <div className="min-h-screen grid place-items-center bg-gray-50 px-4">
+      <div className="max-w-md w-full bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center">
+        <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 grid place-items-center mx-auto mb-4">
+          <Lock className="w-6 h-6" />
+        </div>
+        <h1 className="text-xl font-bold text-gray-900">Subscription required</h1>
+        <p className="mt-2 text-sm text-gray-500">
+          This workspace doesn’t have an active subscription. Reactivate it to get back into{' '}
+          <span className="font-semibold">{me?.workspaces?.find((w) => w.id === me?.tenantId)?.name ?? 'your workspace'}</span>.
+        </p>
+        <button
+          type="button"
+          onClick={manageBilling}
+          disabled={busy}
+          className="mt-6 w-full rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-semibold py-2.5 disabled:opacity-60"
+        >
+          {busy ? 'Opening…' : 'Manage billing'}
+        </button>
+
+        {others.length > 0 && (
+          <div className="mt-6 pt-5 border-t border-gray-100 text-left">
+            <div className="text-[11px] uppercase tracking-widest text-gray-400 font-semibold mb-2">
+              Switch to another workspace
+            </div>
+            <div className="space-y-1.5">
+              {others.map((w) => (
+                <button
+                  key={w.id}
+                  type="button"
+                  onClick={() => void switchWorkspace(w.id)}
+                  className="w-full text-left px-3 py-2 rounded-lg border border-gray-200 hover:border-brand-300 hover:bg-brand-50 text-sm font-semibold text-gray-800"
+                >
+                  {w.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => void logout()}
+          className="mt-6 text-xs font-semibold text-gray-500 hover:text-gray-800"
+        >
+          Sign out
+        </button>
+      </div>
     </div>
   );
 }

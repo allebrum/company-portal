@@ -3,6 +3,8 @@ import { and, desc, eq, gt, isNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { uploadQrSessionFiles, uploadQrSessions, users } from '../db/schema.js';
 import { HttpError } from '../middleware/errorHandler.js';
+import { currentTenantId, withTenant } from '../tenancy/context.js';
+import { tenantEq } from '../tenancy/scope.js';
 import { uploadSpaceFile } from './spaceFiles.js';
 import { uploadTodoFile } from './todoFiles.js';
 import { uploadFile } from './drive.js';
@@ -66,6 +68,7 @@ export async function createUploadQrSession(args: {
   const [row] = await db
     .insert(uploadQrSessions)
     .values({
+      tenantId: currentTenantId(),
       token,
       createdByUserId: args.createdBy,
       targetKind,
@@ -125,7 +128,7 @@ export async function listActiveUploadQrSessions(): Promise<ActiveUploadQrSessio
     })
     .from(uploadQrSessions)
     .leftJoin(users, eq(users.id, uploadQrSessions.createdByUserId))
-    .where(and(isNull(uploadQrSessions.revokedAt), gt(uploadQrSessions.expiresAt, nowIso)))
+    .where(and(tenantEq(uploadQrSessions.tenantId), isNull(uploadQrSessions.revokedAt), gt(uploadQrSessions.expiresAt, nowIso)))
     .orderBy(desc(uploadQrSessions.createdAt));
 }
 
@@ -134,7 +137,7 @@ export async function revokeUploadQrSession(id: string): Promise<void> {
   const [updated] = await db
     .update(uploadQrSessions)
     .set({ revokedAt: nowIso, updatedAt: nowIso })
-    .where(and(eq(uploadQrSessions.id, id), isNull(uploadQrSessions.revokedAt)))
+    .where(and(eq(uploadQrSessions.id, id), tenantEq(uploadQrSessions.tenantId), isNull(uploadQrSessions.revokedAt)))
     .returning({ id: uploadQrSessions.id });
   if (!updated) throw new HttpError(404, 'upload_qr_not_found');
 }
@@ -171,7 +174,7 @@ export async function listUploadQrSessionFiles(sessionId: string): Promise<Uploa
       createdAt: uploadQrSessionFiles.createdAt,
     })
     .from(uploadQrSessionFiles)
-    .where(eq(uploadQrSessionFiles.sessionId, sessionId))
+    .where(and(eq(uploadQrSessionFiles.sessionId, sessionId), tenantEq(uploadQrSessionFiles.tenantId)))
     .orderBy(desc(uploadQrSessionFiles.createdAt));
 }
 
@@ -184,6 +187,11 @@ export async function uploadViaQrSession(
   failed: Array<{ name: string; error: string }>;
 }> {
   const session = await getUploadQrSession(token);
+  // The public token-upload path has no request tenant context — establish it
+  // from the session so the tenant-scoped upload services (uploadSpaceFile,
+  // uploadTodoFile, uploadGoalResource, drive uploadFile) resolve the right
+  // workspace.
+  return withTenant(session.tenantId, async () => {
   const target = fromTarget(session);
   const uploadTitle = options?.uploadTitle ?? null;
   const uploadNotes = options?.uploadNotes ?? null;
@@ -204,6 +212,7 @@ export async function uploadViaQrSession(
         });
         uploaded.push({ name: out.file.title, id: out.file.id, url: out.file.url });
         await db.insert(uploadQrSessionFiles).values({
+          tenantId: session.tenantId,
           sessionId: session.id,
           uploadTitle,
           uploadNotes,
@@ -228,6 +237,7 @@ export async function uploadViaQrSession(
         });
         uploaded.push({ name: out.file.title, id: out.file.id, url: out.file.url });
         await db.insert(uploadQrSessionFiles).values({
+          tenantId: session.tenantId,
           sessionId: session.id,
           uploadTitle,
           uploadNotes,
@@ -255,6 +265,7 @@ export async function uploadViaQrSession(
         );
         uploaded.push({ name: out.title, id: out.id, url: out.url });
         await db.insert(uploadQrSessionFiles).values({
+          tenantId: session.tenantId,
           sessionId: session.id,
           uploadTitle,
           uploadNotes,
@@ -276,6 +287,7 @@ export async function uploadViaQrSession(
         url: driveEntry.webViewLink ?? `https://drive.google.com/file/d/${driveEntry.id}/view`,
       });
       await db.insert(uploadQrSessionFiles).values({
+        tenantId: session.tenantId,
         sessionId: session.id,
         uploadTitle,
         uploadNotes,
@@ -305,4 +317,5 @@ export async function uploadViaQrSession(
   }
 
   return { uploaded, failed };
+  });
 }

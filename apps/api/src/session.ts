@@ -5,9 +5,13 @@ import { redisSession } from './redis.js';
 
 declare module 'express-session' {
   interface SessionData {
-    user?: { userId: string };
-    // Primary auth passed but a second factor is still required.
-    pending?: { userId: string };
+    // Hoppa: the session carries the active workspace (`tenantId`) alongside
+    // the user id. Set at login once the user's tenant is resolved; changed
+    // by the workspace switcher (Phase 2).
+    user?: { userId: string; tenantId: string };
+    // Primary auth passed but a second factor is still required. Carries the
+    // resolved tenant so the 2FA-complete step can promote it onto `user`.
+    pending?: { userId: string; tenantId: string };
     // Transient WebAuthn challenge for register/authenticate ceremonies.
     webauthnChallenge?: string;
     oauthState?: string;

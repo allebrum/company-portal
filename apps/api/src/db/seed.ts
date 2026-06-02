@@ -4,6 +4,8 @@ import { sql } from 'drizzle-orm';
 import { db, sqlClient } from './client.js';
 import {
   users,
+  tenants,
+  tenantMembers,
   groups,
   permissions,
   groupPermissions,
@@ -68,7 +70,9 @@ async function clearAll(): Promise<void> {
       ${userGroups},
       ${groups},
       ${permissions},
-      ${users}
+      ${tenantMembers},
+      ${users},
+      ${tenants}
     restart identity cascade
   `);
 }
@@ -81,6 +85,13 @@ async function main(): Promise<void> {
   // eslint-disable-next-line no-console
   console.log('[seed] clearing existing data...');
   await clearAll();
+
+  // ---- Tenant (single demo workspace) ----
+  const [tenant] = await db
+    .insert(tenants)
+    .values({ name: 'Demo Workspace', slug: 'demo', status: 'active' })
+    .returning();
+  const TENANT_ID = tenant!.id;
 
   // ---- Users ----
   const userSeeds = [
@@ -123,6 +134,7 @@ async function main(): Promise<void> {
     groupIds[gname] = id;
     await db.insert(groups).values({
       id,
+      tenantId: TENANT_ID,
       name: gname,
       description: `${gname} (system group)`,
       isSystem: true,
@@ -130,15 +142,20 @@ async function main(): Promise<void> {
     });
     const perms = SYSTEM_GROUP_PERMISSIONS[gname];
     if (perms.length > 0) {
-      await db.insert(groupPermissions).values(perms.map((p) => ({ groupId: id, permissionKey: p })));
+      await db.insert(groupPermissions).values(perms.map((p) => ({ groupId: id, permissionKey: p, tenantId: TENANT_ID })));
     }
   }
   for (const u of userSeeds) {
-    await db.insert(userGroups).values({ userId: userIds[u.key]!, groupId: groupIds[u.group]! });
+    await db.insert(userGroups).values({ userId: userIds[u.key]!, groupId: groupIds[u.group]!, tenantId: TENANT_ID });
   }
 
-  // ---- App settings (singleton) ----
-  await db.insert(appSettings).values({ id: 'singleton' });
+  // ---- Tenant membership: enroll every seeded user; first user is owner ----
+  await db.insert(tenantMembers).values(
+    userSeeds.map((u, i) => ({ tenantId: TENANT_ID, userId: userIds[u.key]!, isOwner: i === 0 })),
+  );
+
+  // ---- App settings (one row per tenant) ----
+  await db.insert(appSettings).values({ tenantId: TENANT_ID });
 
   // ---- Clients ----
   const clientSeeds = [
@@ -153,7 +170,7 @@ async function main(): Promise<void> {
   for (const c of clientSeeds) {
     const id = randomUUID();
     clientIds[c.key] = id;
-    await db.insert(clients).values({ id, name: c.name, kind: c.kind, color: c.color });
+    await db.insert(clients).values({ id, tenantId: TENANT_ID, name: c.name, kind: c.kind, color: c.color });
   }
 
   // ---- Projects ----
@@ -173,6 +190,7 @@ async function main(): Promise<void> {
     projectIds[p.key] = id;
     await db.insert(projects).values({
       id,
+      tenantId: TENANT_ID,
       clientId: clientIds[p.clientKey]!,
       name: p.name,
       code: p.code,
@@ -196,6 +214,7 @@ async function main(): Promise<void> {
     periodIds[p.key] = id;
     await db.insert(payPeriods).values({
       id,
+      tenantId: TENANT_ID,
       label: p.label,
       startDate: p.start,
       endDate: p.end,
@@ -213,7 +232,7 @@ async function main(): Promise<void> {
 
   // ---- Pay config ----
   await db.insert(payConfig).values({
-    id: 'singleton',
+    tenantId: TENANT_ID,
     cadence: 'by-date',
     payDates: [15, 'last'],
     weekendRule: 'prior',
@@ -241,6 +260,7 @@ async function main(): Promise<void> {
     goalIds[g.key] = id;
     await db.insert(goals).values({
       id,
+      tenantId: TENANT_ID,
       clientId: clientIds[g.clientKey]!,
       projectId: projectIds[g.projectKey]!,
       title: g.title,
@@ -280,6 +300,7 @@ async function main(): Promise<void> {
   ];
   for (const r of resources) {
     await db.insert(goalResources).values({
+      tenantId: TENANT_ID,
       goalId: goalIds[r.goalKey]!,
       kind: r.kind,
       title: r.title,
@@ -329,6 +350,7 @@ async function main(): Promise<void> {
   ];
   for (const t of todoSeeds) {
     await db.insert(todos).values({
+      tenantId: TENANT_ID,
       title: t.title,
       assigneeId: userIds[t.assigneeKey]!,
       clientId: clientIds[t.clientKey]!,
@@ -394,6 +416,7 @@ async function main(): Promise<void> {
           if (status === 'submitted') submittedAt = `${iso}T18:00:00Z`;
         }
         await db.insert(timeEntries).values({
+          tenantId: TENANT_ID,
           userId: userIds[uk]!,
           projectId: projectIds[projKey]!,
           note: task,
@@ -413,6 +436,7 @@ async function main(): Promise<void> {
 
   // ---- Integrations + Drive ----
   await db.insert(integrations).values({
+    tenantId: TENANT_ID,
     kind: 'drive',
     connected: true,
     account: 'senica@allebrum.com',
@@ -422,9 +446,9 @@ async function main(): Promise<void> {
     syncIntervalHours: 4,
     config: {},
   });
-  await db.insert(integrations).values({ kind: 'github', connected: false, config: {} });
-  await db.insert(integrations).values({ kind: 'slack', connected: false, config: {} });
-  await db.insert(integrations).values({ kind: 'quickbooks', connected: false, config: {} });
+  await db.insert(integrations).values({ tenantId: TENANT_ID, kind: 'github', connected: false, config: {} });
+  await db.insert(integrations).values({ tenantId: TENANT_ID, kind: 'slack', connected: false, config: {} });
+  await db.insert(integrations).values({ tenantId: TENANT_ID, kind: 'quickbooks', connected: false, config: {} });
 
   const folderSeeds = [
     { key: 'df1', drivePath: 'Allebrum LLC / Clients / CDT', clientKey: 'cdt', itemCount: 142, lastSync: '2026-05-14T08:12:00Z' },
@@ -439,6 +463,7 @@ async function main(): Promise<void> {
     folderIds[f.key] = id;
     await db.insert(driveLinkedFolders).values({
       id,
+      tenantId: TENANT_ID,
       drivePath: f.drivePath,
       clientId: clientIds[f.clientKey]!,
       itemCount: f.itemCount,
@@ -460,6 +485,7 @@ async function main(): Promise<void> {
   ];
   for (const it of driveItemSeeds) {
     await db.insert(driveItems).values({
+      tenantId: TENANT_ID,
       folderId: folderIds[it.folderKey]!,
       kind: it.kind,
       title: it.title,
@@ -479,6 +505,7 @@ async function main(): Promise<void> {
   ];
   for (const a of initialActivity) {
     await db.insert(activityLog).values({
+      tenantId: TENANT_ID,
       whoId: userIds[a.whoKey]!,
       kind: a.kind,
       target: a.target,

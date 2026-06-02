@@ -120,6 +120,34 @@
       "when": 1780395600000,
       "tag": "0016_solid_chimera",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1780395600001,
+      "tag": "0017_curved_skreet",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1780395600002,
+      "tag": "0018_jittery_machine_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1780395600003,
+      "tag": "0019_fancy_otto_octavius",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1780500000000,
+      "tag": "0020_converge_uploadqr_billing_exempt",
+      "breakpoints": true
     }
   ]
 }

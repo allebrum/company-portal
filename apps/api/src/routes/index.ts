@@ -20,12 +20,27 @@ import { bootstrapRouter } from './bootstrap.js';
 import { rbacRouter } from './rbac.js';
 import { settingsRouter } from './settings.js';
 import { twofaRouter } from './twofa.js';
+import { tenantContext } from '../middleware/tenantContext.js';
+import { requireActiveSubscription } from '../middleware/requireActiveSubscription.js';
+import { provisioningRouter } from './provisioning.js';
+import { billingRouter } from './billing.js';
+import { provisioningConfigured } from '../env.js';
 
 export const apiRouter = Router();
 
 apiRouter.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
+
+// Hoppa: bind the request's active workspace (from session.user.tenantId) to
+// an AsyncLocalStorage context for all downstream services. No-op for routes
+// reached before login (auth, public portal/QR) — they pass through and any
+// service that needs a tenant will throw, which is correct for those paths.
+apiRouter.use(tenantContext);
+// Hoppa: gate business routes on the workspace's subscription. Exempts auth /
+// billing / provisioning / portal / public; no-ops to "allow" when billing
+// isn't configured. Lapsed workspaces get 402 on everything else.
+apiRouter.use(requireActiveSubscription);
 
 apiRouter.use('/auth', authRouter);
 apiRouter.use('/auth', twofaRouter);
@@ -49,3 +64,9 @@ apiRouter.use('/upload/qr', uploadQrRouter);
 apiRouter.use('/bootstrap', bootstrapRouter);
 apiRouter.use('/rbac', rbacRouter);
 apiRouter.use('/settings', settingsRouter);
+// Hoppa Phase 3: billing portal (session-gated, subscription-exempt) +
+// provisioning webhook (HMAC-gated, only mounted when the secret is set).
+apiRouter.use('/billing', billingRouter);
+if (provisioningConfigured) {
+  apiRouter.use('/provisioning', provisioningRouter);
+}

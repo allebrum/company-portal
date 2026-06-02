@@ -23,6 +23,7 @@ import { appendActivity } from './activity.js';
 import { getTodo, logTimeToTodo } from './todos.js';
 import { periodForDate } from './payPeriods.js';
 import { HttpError } from '../middleware/errorHandler.js';
+import { tenantEq, stampTenant } from '../tenancy/scope.js';
 
 function minutesBetween(startIso: string, endIso: string): number {
   return Math.max(1, Math.round((new Date(endIso).getTime() - new Date(startIso).getTime()) / 60000));
@@ -30,12 +31,16 @@ function minutesBetween(startIso: string, endIso: string): number {
 
 // ---- Timer ----
 export async function getActiveTimer(userId: string): Promise<ActiveTimer | undefined> {
-  const rows = await db.select().from(activeTimers).where(eq(activeTimers.userId, userId)).limit(1);
+  const rows = await db
+    .select()
+    .from(activeTimers)
+    .where(and(eq(activeTimers.userId, userId), tenantEq(activeTimers.tenantId)))
+    .limit(1);
   return rows[0];
 }
 
 export async function listActiveTimers(): Promise<ActiveTimer[]> {
-  return db.select().from(activeTimers);
+  return db.select().from(activeTimers).where(tenantEq(activeTimers.tenantId));
 }
 
 export async function startTimer(userId: string, input: StartTimerInput): Promise<ActiveTimer> {
@@ -54,14 +59,14 @@ export async function startTimer(userId: string, input: StartTimerInput): Promis
   const startedAt = new Date().toISOString();
   const [row] = await db
     .insert(activeTimers)
-    .values({
+    .values(stampTenant({
       userId,
       projectId,
       note: input.note,
       todoId: input.todoId ?? null,
       spaceBlockId: input.spaceBlockId ?? null,
       startedAt,
-    })
+    }))
     .returning();
   if (!row) throw new Error('timer insert failed');
   emit.toUserAndApprovers(userId, EV.TIMER_STARTED, {
@@ -83,7 +88,7 @@ export async function stopTimer(userId: string): Promise<TimeEntry | null> {
   const period = await periodForDate(t.startedAt);
   const [entry] = await db
     .insert(timeEntries)
-    .values({
+    .values(stampTenant({
       userId,
       projectId: t.projectId,
       note: t.note,
@@ -94,9 +99,11 @@ export async function stopTimer(userId: string): Promise<TimeEntry | null> {
       status: 'draft',
       todoId: t.todoId ?? null,
       spaceBlockId: t.spaceBlockId ?? null,
-    })
+    }))
     .returning();
-  await db.delete(activeTimers).where(eq(activeTimers.userId, userId));
+  await db
+    .delete(activeTimers)
+    .where(and(eq(activeTimers.userId, userId), tenantEq(activeTimers.tenantId)));
   if (!entry) throw new Error('entry insert failed');
   if (t.todoId) await logTimeToTodo(t.todoId, durationMin);
 
@@ -124,7 +131,7 @@ export async function listEntries(
   canViewAll: boolean,
   q: EntryListQuery,
 ): Promise<TimeEntry[]> {
-  const conds = [];
+  const conds = [tenantEq(timeEntries.tenantId)];
   // Without time_entry.view_all, a user only sees their own entries.
   if (!canViewAll) {
     conds.push(eq(timeEntries.userId, viewerId));
@@ -136,9 +143,9 @@ export async function listEntries(
   if (q.from) conds.push(gte(timeEntries.startIso, q.from + 'T00:00:00Z'));
   if (q.to) conds.push(lte(timeEntries.startIso, q.to + 'T23:59:59Z'));
 
-  const where = conds.length > 0 ? and(...conds) : undefined;
+  const where = and(...conds);
   const query = db.select().from(timeEntries).orderBy(desc(timeEntries.startIso)).limit(q.limit);
-  return where ? query.where(where) : query;
+  return query.where(where);
 }
 
 export async function createManualEntry(userId: string, input: ManualEntryInput): Promise<TimeEntry> {
@@ -152,7 +159,7 @@ export async function createManualEntry(userId: string, input: ManualEntryInput)
   }
   const [row] = await db
     .insert(timeEntries)
-    .values({
+    .values(stampTenant({
       userId,
       projectId,
       note: input.note,
@@ -162,7 +169,7 @@ export async function createManualEntry(userId: string, input: ManualEntryInput)
       payPeriodId: period?.id ?? null,
       status: 'draft',
       todoId: input.todoId ?? null,
-    })
+    }))
     .returning();
   if (!row) throw new Error('entry insert failed');
   if (input.todoId) await logTimeToTodo(input.todoId, durationMin);
@@ -176,7 +183,11 @@ export async function updateEntry(
   canManageAll: boolean,
   patch: Partial<ManualEntryInput>,
 ): Promise<TimeEntry> {
-  const rows = await db.select().from(timeEntries).where(eq(timeEntries.id, id)).limit(1);
+  const rows = await db
+    .select()
+    .from(timeEntries)
+    .where(and(eq(timeEntries.id, id), tenantEq(timeEntries.tenantId)))
+    .limit(1);
   const row = rows[0];
   if (!row) throw new HttpError(404, 'entry_not_found');
   const canEdit = row.userId === viewerId && row.status === 'draft';
@@ -197,14 +208,22 @@ export async function updateEntry(
     upd.durationMin = minutesBetween(nextStart, nextEnd);
   }
   if (patch.todoId !== undefined) upd.todoId = patch.todoId;
-  const [updated] = await db.update(timeEntries).set(upd).where(eq(timeEntries.id, id)).returning();
+  const [updated] = await db
+    .update(timeEntries)
+    .set(upd)
+    .where(and(eq(timeEntries.id, id), tenantEq(timeEntries.tenantId)))
+    .returning();
   if (!updated) throw new HttpError(404, 'entry_not_found');
   emit.toUser(updated.userId, EV.ENTRY_UPDATED, { id: updated.id, by: viewerId, at: new Date().toISOString() });
   return updated;
 }
 
 export async function deleteEntry(id: string, viewerId: string, canManageAll: boolean): Promise<void> {
-  const rows = await db.select().from(timeEntries).where(eq(timeEntries.id, id)).limit(1);
+  const rows = await db
+    .select()
+    .from(timeEntries)
+    .where(and(eq(timeEntries.id, id), tenantEq(timeEntries.tenantId)))
+    .limit(1);
   const row = rows[0];
   if (!row) throw new HttpError(404, 'entry_not_found');
 
@@ -226,14 +245,14 @@ export async function deleteEntry(id: string, viewerId: string, canManageAll: bo
     const periodRows = await db
       .select({ status: payPeriods.status })
       .from(payPeriods)
-      .where(eq(payPeriods.id, row.payPeriodId))
+      .where(and(eq(payPeriods.id, row.payPeriodId), tenantEq(payPeriods.tenantId)))
       .limit(1);
     if (periodRows[0]?.status === 'closed') {
       throw new HttpError(409, 'entry_in_closed_period');
     }
   }
 
-  await db.delete(timeEntries).where(eq(timeEntries.id, id));
+  await db.delete(timeEntries).where(and(eq(timeEntries.id, id), tenantEq(timeEntries.tenantId)));
   emit.toUser(row.userId, EV.ENTRY_DELETED, { id: row.id, by: viewerId, at: new Date().toISOString() });
   // Audit non-draft deletes so the activity feed shows that a user
   // withdrew an already-submitted/approved entry. Draft deletes happen
@@ -257,6 +276,7 @@ export async function submitEntries(ids: string[], whoId: string): Promise<numbe
       and(
         inArray(timeEntries.id, ids),
         or(eq(timeEntries.status, 'draft'), eq(timeEntries.status, 'rejected')),
+        tenantEq(timeEntries.tenantId),
       ),
     )
     .returning({ id: timeEntries.id, userId: timeEntries.userId });
@@ -284,7 +304,7 @@ export async function approveEntries(ids: string[], whoId: string): Promise<numb
   const result = await db
     .update(timeEntries)
     .set({ status: 'approved', approvedBy: whoId, approvedAt: now, rejectionNote: null, updatedAt: now })
-    .where(inArray(timeEntries.id, ids))
+    .where(and(inArray(timeEntries.id, ids), tenantEq(timeEntries.tenantId)))
     .returning({ id: timeEntries.id, userId: timeEntries.userId });
   const userIds = [...new Set(result.map((r) => r.userId))];
   for (const uid of userIds) {
@@ -310,7 +330,7 @@ export async function rejectEntries(ids: string[], note: string, whoId: string):
   const result = await db
     .update(timeEntries)
     .set({ status: 'rejected', rejectionNote: note, updatedAt: now })
-    .where(inArray(timeEntries.id, ids))
+    .where(and(inArray(timeEntries.id, ids), tenantEq(timeEntries.tenantId)))
     .returning({ id: timeEntries.id, userId: timeEntries.userId });
   const userIds = [...new Set(result.map((r) => r.userId))];
   for (const uid of userIds) {
@@ -353,7 +373,7 @@ export async function exportEntriesCsv(
   ]);
   const todoIds = [...new Set(entries.map((e) => e.todoId).filter((x): x is string => !!x))];
   const todosArr = todoIds.length
-    ? await db.select().from(todos).where(inArray(todos.id, todoIds))
+    ? await db.select().from(todos).where(and(inArray(todos.id, todoIds), tenantEq(todos.tenantId)))
     : [];
 
   const userById = new Map(usersArr.map((u) => [u.id, u]));
@@ -421,7 +441,7 @@ export async function reopenEntries(ids: string[], whoId: string): Promise<numbe
   const result = await db
     .update(timeEntries)
     .set({ status: 'submitted', approvedBy: null, approvedAt: null, updatedAt: now })
-    .where(inArray(timeEntries.id, ids))
+    .where(and(inArray(timeEntries.id, ids), tenantEq(timeEntries.tenantId)))
     .returning({ id: timeEntries.id, userId: timeEntries.userId });
   const userIds = [...new Set(result.map((r) => r.userId))];
   for (const uid of userIds) {

@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@allebrum/web", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "hoppa-marketing",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:/Users/sturb/allebrumtime/hoppa-marketing/src/server.js"],
+      "port": 8080
+    }
+  ]
+}

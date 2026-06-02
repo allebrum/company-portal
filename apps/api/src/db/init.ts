@@ -13,7 +13,8 @@ import { randomUUID } from 'node:crypto';
 import argon2 from 'argon2';
 import { sql, eq } from 'drizzle-orm';
 import { db, sqlClient } from './client.js';
-import { users, groups, permissions, groupPermissions, userGroups, appSettings } from './schema.js';
+import { users, groups, permissions, groupPermissions, userGroups, appSettings, tenants, tenantMembers } from './schema.js';
+import { asc } from 'drizzle-orm';
 import {
   PERMISSIONS,
   PERMISSION_LABELS,
@@ -43,6 +44,23 @@ async function main(): Promise<void> {
     .map((d) => d.trim().toLowerCase())
     .filter(Boolean);
 
+  // 0. Hoppa: ensure the default workspace exists (migration 0016 creates it,
+  //    but on any path where it's missing, create it). Everything init seeds
+  //    is attached to this tenant so the bootstrap workspace is coherent.
+  let defaultTenantId: string;
+  {
+    const [t] = await db.select({ id: tenants.id }).from(tenants).orderBy(asc(tenants.createdAt)).limit(1);
+    if (t) {
+      defaultTenantId = t.id;
+    } else {
+      const [created] = await db
+        .insert(tenants)
+        .values({ name: 'Hoppa', slug: 'hoppa', status: 'active' })
+        .returning({ id: tenants.id });
+      defaultTenantId = created!.id;
+    }
+  }
+
   // 1. Permission catalog — insert missing, then refresh labels/category so
   //    the catalog always matches @allebrum/shared.
   await db
@@ -69,6 +87,7 @@ async function main(): Promise<void> {
       gid = randomUUID();
       await db.insert(groups).values({
         id: gid,
+        tenantId: defaultTenantId,
         name: gname,
         description: `${gname} (system group)`,
         isSystem: true,
@@ -80,16 +99,17 @@ async function main(): Promise<void> {
     if (perms.length > 0) {
       await db
         .insert(groupPermissions)
-        .values(perms.map((perm) => ({ groupId: gid!, permissionKey: perm })))
+        .values(perms.map((perm) => ({ groupId: gid!, permissionKey: perm, tenantId: defaultTenantId })))
         .onConflictDoNothing();
     }
   }
 
-  // 3. App-settings singleton — create only if missing (preserves any
+  // 3. App-settings — one row per tenant (Phase 2 re-key dropped `id`).
+  //    Create the default workspace's row only if missing (preserves any
   //    admin-customised settings on later deploys).
   await db
     .insert(appSettings)
-    .values({ id: 'singleton', allowedEmailDomains: allowedDomains })
+    .values({ tenantId: defaultTenantId, allowedEmailDomains: allowedDomains })
     .onConflictDoNothing();
 
   // 4. Break-glass admin — only if that email does not already exist.
@@ -112,9 +132,25 @@ async function main(): Promise<void> {
     });
     await db
       .insert(userGroups)
-      .values({ userId: id, groupId: groupIdByName.Owner! })
+      .values({ userId: id, groupId: groupIdByName.Owner!, tenantId: defaultTenantId })
       .onConflictDoNothing();
     adminCreated = true;
+  }
+
+  // 5. Hoppa: ensure the admin is a member of the default workspace so login
+  //    can resolve their tenant. Idempotent across re-runs.
+  {
+    const [admin] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(sql`lower(${users.email}) = ${adminEmail}`)
+      .limit(1);
+    if (admin) {
+      await db
+        .insert(tenantMembers)
+        .values({ tenantId: defaultTenantId, userId: admin.id, isOwner: true })
+        .onConflictDoNothing();
+    }
   }
 
   // eslint-disable-next-line no-console

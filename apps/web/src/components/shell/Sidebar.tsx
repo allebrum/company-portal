@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Home, Briefcase, Clock, CheckSquare, Target, Shield, BarChart3, Settings, FolderOpen, Wrench } from 'lucide-react';
@@ -22,6 +23,47 @@ const NAV: { id: string; href: string; label: string; Icon: typeof Home; anyPerm
   { id: 'tools', href: '/tools', label: 'Tools', Icon: Wrench },
   { id: 'admin', href: '/admin', label: 'Admin', Icon: Settings },
 ];
+
+/**
+ * Hoppa: workspace switcher. Renders only when the user belongs to more than
+ * one workspace; switching clears caches + refetches everything via the auth
+ * context so no other workspace's data lingers.
+ */
+function WorkspaceSwitcher() {
+  const { me, switchWorkspace } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const workspaces = me?.workspaces ?? [];
+  if (workspaces.length <= 1) return null;
+  return (
+    <div className="px-3 pb-3">
+      <label className="block text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">
+        Workspace
+      </label>
+      <select
+        value={me?.tenantId ?? ''}
+        disabled={busy}
+        onChange={async (e) => {
+          const next = e.target.value;
+          if (!next || next === me?.tenantId) return;
+          setBusy(true);
+          try {
+            await switchWorkspace(next);
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className="w-full text-sm font-semibold text-gray-800 bg-white border border-gray-200 rounded-lg px-2.5 py-2 outline-none focus:border-brand-400 disabled:opacity-60"
+      >
+        {workspaces.map((w) => (
+          <option key={w.id} value={w.id}>
+            {w.name}
+            {w.isOwner ? ' · owner' : ''}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -61,6 +103,8 @@ export function Sidebar() {
           </div>
         </div>
       </div>
+
+      <WorkspaceSwitcher />
 
       <nav className="px-2 pt-2 pb-4 flex-1 overflow-y-auto">
         {NAV.filter((item) => !item.anyPerm || item.anyPerm.some((p) => can(p))).map((item) => {

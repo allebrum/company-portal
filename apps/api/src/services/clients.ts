@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { clients, type Client } from '../db/schema.js';
 import type { CreateClientInput, UpdateClientInput } from '@allebrum/shared';
@@ -7,13 +7,14 @@ import { EV } from '@allebrum/shared';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { isConnected as driveIsConnected, ensureClientFolder } from './drive.js';
+import { tenantEq, stampTenant } from '../tenancy/scope.js';
 
 export async function listClients(): Promise<Client[]> {
-  return db.select().from(clients).orderBy(asc(clients.name));
+  return db.select().from(clients).where(tenantEq(clients.tenantId)).orderBy(asc(clients.name));
 }
 
 export async function createClient(input: CreateClientInput, whoId: string): Promise<Client> {
-  const [inserted] = await db.insert(clients).values(input).returning();
+  const [inserted] = await db.insert(clients).values(stampTenant(input)).returning();
   if (!inserted) throw new Error('client insert failed');
   let row = inserted;
 
@@ -28,7 +29,7 @@ export async function createClient(input: CreateClientInput, whoId: string): Pro
       const [updated] = await db
         .select()
         .from(clients)
-        .where(eq(clients.id, row.id))
+        .where(and(eq(clients.id, row.id), tenantEq(clients.tenantId)))
         .limit(1);
       if (updated) row = updated;
       void folderId;
@@ -60,7 +61,11 @@ export async function updateClient(
   // draft / 404 publicly, non-null = live).
   if (patch.portalSlug !== undefined) upd.portalSlug = patch.portalSlug;
   if (patch.portalPublishedAt !== undefined) upd.portalPublishedAt = patch.portalPublishedAt;
-  const [row] = await db.update(clients).set(upd).where(eq(clients.id, id)).returning();
+  const [row] = await db
+    .update(clients)
+    .set(upd)
+    .where(and(eq(clients.id, id), tenantEq(clients.tenantId)))
+    .returning();
   if (!row) throw new HttpError(404, 'client_not_found');
   emit.toOrg(EV.CLIENT_UPDATED, { id: row.id, by: whoId, at: new Date().toISOString() });
   await appendActivity({ whoId, kind: 'client.update', target: `${row.name} updated` });

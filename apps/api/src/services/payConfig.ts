@@ -6,15 +6,16 @@ import { appendActivity } from './activity.js';
 import { emit } from '../realtime/emit.js';
 import { EV } from '@allebrum/shared';
 import { regenerateFuturePeriods } from './payPeriods.js';
+import { currentTenantId } from '../tenancy/context.js';
 
+// Hoppa: pay_config is one row per workspace. Pay routes are always
+// authenticated, so the active tenant is in the request context.
 export async function getConfig(): Promise<PayConfig> {
-  const rows = await db.select().from(payConfig).limit(1);
+  const tenantId = currentTenantId();
+  const rows = await db.select().from(payConfig).where(eq(payConfig.tenantId, tenantId)).limit(1);
   if (rows[0]) return rows[0];
-  const [created] = await db
-    .insert(payConfig)
-    .values({ id: 'singleton' })
-    .returning();
-  if (!created) throw new Error('failed to create pay_config singleton');
+  const [created] = await db.insert(payConfig).values({ tenantId }).returning();
+  if (!created) throw new Error('failed to create pay_config row');
   return created;
 }
 
@@ -28,13 +29,14 @@ export async function updateConfig(patch: Partial<PayConfigInput>, whoId: string
   if (patch.processingBufferDays !== undefined) upd.processingBufferDays = patch.processingBufferDays;
   if (patch.autoClose !== undefined) upd.autoClose = patch.autoClose;
   if (patch.approverId !== undefined) upd.approverId = patch.approverId;
+  const tenantId = currentTenantId();
   const [updated] = await db
     .update(payConfig)
     .set(upd)
-    .where(eq(payConfig.id, 'singleton'))
+    .where(eq(payConfig.tenantId, tenantId))
     .returning();
   if (!updated) throw new Error('pay_config update failed');
-  emit.toOrg(EV.PAY_CONFIG_UPDATED, { id: 'singleton', by: whoId, at: new Date().toISOString() });
+  emit.toOrg(EV.PAY_CONFIG_UPDATED, { id: tenantId, by: whoId, at: new Date().toISOString() });
   await appendActivity({ whoId, kind: 'period.config', target: 'Pay schedule updated' });
   // Regenerate future periods from the new schedule so admins never need
   // to manually click "Generate". Errors logged but don't fail the save —
