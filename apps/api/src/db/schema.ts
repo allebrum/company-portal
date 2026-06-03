@@ -93,10 +93,22 @@ export const tenants = pgTable('tenants', {
   // workspace so the internal/self-host tenant is never 402'd once SaaS gating
   // is enabled. New paid workspaces stay false and resolve via the marketing API.
   billingExempt: boolean('billing_exempt').notNull().default(false),
+  // ---- Custom Stripe billing (self-owned trial + off-session recurring) ----
+  // Stripe only stores the card + processes charges; we own the schedule.
+  // `billingExternalId` above is the Stripe customer id. These are null for the
+  // exempt internal workspace + self-host (no Stripe). Set on paid signups.
+  stripePaymentMethodId: text('stripe_payment_method_id'),
+  // 'trialing' | 'active' | 'past_due' | 'canceled' (null = not billing-managed)
+  billingStatus: text('billing_status'),
+  trialEndsAt: timestamp('trial_ends_at', { withTimezone: true, mode: 'string' }),
+  nextBillAt: timestamp('next_bill_at', { withTimezone: true, mode: 'string' }),
+  failedAttempts: integer('failed_attempts').notNull().default(0),
+  lastPaymentError: text('last_payment_error'),
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
   slugIdx: uniqueIndex('tenants_slug_idx').on(t.slug),
+  nextBillIdx: index('tenants_next_bill_idx').on(t.nextBillAt),
   billingIdx: uniqueIndex('tenants_billing_idx').on(t.billingExternalId),
 }));
 

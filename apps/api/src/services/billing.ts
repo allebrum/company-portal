@@ -1,0 +1,181 @@
+import Stripe from 'stripe';
+import { eq } from 'drizzle-orm';
+import { env, billingConfigured } from '../env.js';
+import { db } from '../db/client.js';
+import { tenants, type Tenant } from '../db/schema.js';
+
+/**
+ * Custom Stripe billing (consolidated in-app).
+ *
+ * No Stripe Prices / Products / Subscriptions: Stripe only stores the card
+ * (SetupIntent, off-session) and processes our charges. WE own the schedule —
+ * a self-tracked 30-day trial, then an off-session PaymentIntent every
+ * BILLING_INTERVAL_DAYS for MONTHLY_PRICE_CENTS. State lives on the `tenants`
+ * row; the daily job (services/billingJob.ts) drives the recurring charges and
+ * webhooks are the authoritative outcome.
+ *
+ * Everything here throws `billing_not_configured` when STRIPE_SECRET_KEY is
+ * unset, so callers must guard on `billingConfigured`. Subscription gating
+ * treats unconfigured as "allow everyone" (self-host).
+ */
+
+export type BillingStatus = 'trialing' | 'active' | 'past_due' | 'canceled';
+
+let _stripe: Stripe | null = null;
+export function stripe(): Stripe {
+  if (!billingConfigured) throw new Error('billing_not_configured');
+  if (!_stripe) _stripe = new Stripe(env.STRIPE_SECRET_KEY!);
+  return _stripe;
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+function addDays(from: string | Date, days: number): string {
+  const d = typeof from === 'string' ? new Date(from) : from;
+  return new Date(d.getTime() + days * 86_400_000).toISOString();
+}
+
+// ---- Stripe operations (server-side only) -----------------------------------
+
+/** Create a Stripe customer (one per workspace). Returns the customer id. */
+export async function createStripeCustomer(args: {
+  email: string;
+  name?: string | null;
+  workspaceName?: string | null;
+}): Promise<string> {
+  const customer = await stripe().customers.create({
+    email: args.email,
+    name: args.name ?? undefined,
+    metadata: { workspace_name: args.workspaceName ?? '' },
+  });
+  return customer.id;
+}
+
+/** SetupIntent to capture + save the card off-session. Frontend confirms it. */
+export async function createSetupIntent(customerId: string): Promise<string> {
+  const si = await stripe().setupIntents.create({
+    customer: customerId,
+    usage: 'off_session',
+    payment_method_types: ['card'],
+  });
+  if (!si.client_secret) throw new Error('setup_intent_no_client_secret');
+  return si.client_secret;
+}
+
+/** Make a payment method the customer's default (called on setup_intent.succeeded). */
+export async function setDefaultPaymentMethod(customerId: string, paymentMethodId: string): Promise<void> {
+  await stripe().customers.update(customerId, {
+    invoice_settings: { default_payment_method: paymentMethodId },
+  });
+}
+
+/**
+ * Off-session recurring charge. The idempotency key (built by the caller from
+ * tenant + period + attempt) guarantees a job retry within the same attempt
+ * never double-charges. Throws a Stripe error on decline/auth-required, which
+ * the caller maps to past_due.
+ */
+export async function chargeOffSession(args: {
+  customerId: string;
+  paymentMethodId: string;
+  amountCents: number;
+  currency: string;
+  tenantId: string;
+  idempotencyKey: string;
+}): Promise<Stripe.PaymentIntent> {
+  return stripe().paymentIntents.create(
+    {
+      amount: args.amountCents,
+      currency: args.currency,
+      customer: args.customerId,
+      payment_method: args.paymentMethodId,
+      off_session: true,
+      confirm: true,
+      metadata: { tenant_id: args.tenantId },
+    },
+    { idempotencyKey: args.idempotencyKey },
+  );
+}
+
+/** Verify + parse a Stripe webhook from the raw request bytes. */
+export function constructWebhookEvent(rawBody: Buffer, signature: string): Stripe.Event {
+  return stripe().webhooks.constructEvent(rawBody, signature, env.STRIPE_WEBHOOK_SECRET!);
+}
+
+// ---- Tenant billing-state mutations -----------------------------------------
+
+export async function getTenantByCustomerId(customerId: string): Promise<Tenant | undefined> {
+  const [row] = await db.select().from(tenants).where(eq(tenants.billingExternalId, customerId)).limit(1);
+  return row;
+}
+
+/** Start the self-owned trial on a freshly-provisioned paid workspace. */
+export async function startTrial(tenantId: string): Promise<{ trialEndsAt: string; nextBillAt: string }> {
+  const trialEndsAt = addDays(nowIso(), env.TRIAL_DAYS);
+  const nextBillAt = trialEndsAt; // first charge fires when the trial ends
+  await db
+    .update(tenants)
+    .set({
+      billingStatus: 'trialing',
+      trialEndsAt,
+      nextBillAt,
+      failedAttempts: 0,
+      lastPaymentError: null,
+      updatedAt: nowIso(),
+    })
+    .where(eq(tenants.id, tenantId));
+  return { trialEndsAt, nextBillAt };
+}
+
+/** Persist + default the saved card (from the setup_intent.succeeded webhook). */
+export async function storePaymentMethod(customerId: string, paymentMethodId: string): Promise<void> {
+  await setDefaultPaymentMethod(customerId, paymentMethodId);
+  await db
+    .update(tenants)
+    .set({ stripePaymentMethodId: paymentMethodId, updatedAt: nowIso() })
+    .where(eq(tenants.billingExternalId, customerId));
+}
+
+/** A charge succeeded → active, advance the next bill date one interval out. */
+export async function markPaid(tenantId: string): Promise<void> {
+  await db
+    .update(tenants)
+    .set({
+      billingStatus: 'active',
+      nextBillAt: addDays(nowIso(), env.BILLING_INTERVAL_DAYS),
+      failedAttempts: 0,
+      lastPaymentError: null,
+      updatedAt: nowIso(),
+    })
+    .where(eq(tenants.id, tenantId));
+}
+
+/** A charge failed → past_due; retry the next day (caller stops at max retries). */
+export async function markPastDue(tenantId: string, reason: string, attempts: number): Promise<void> {
+  await db
+    .update(tenants)
+    .set({
+      billingStatus: 'past_due',
+      failedAttempts: attempts,
+      lastPaymentError: reason.slice(0, 500),
+      nextBillAt: addDays(nowIso(), 1),
+      updatedAt: nowIso(),
+    })
+    .where(eq(tenants.id, tenantId));
+}
+
+/** Exhausted retries → canceled; stop charging (no next_bill_at advance). */
+export async function markCanceled(tenantId: string, reason: string): Promise<void> {
+  await db
+    .update(tenants)
+    .set({
+      billingStatus: 'canceled',
+      lastPaymentError: reason.slice(0, 500),
+      nextBillAt: null,
+      updatedAt: nowIso(),
+    })
+    .where(eq(tenants.id, tenantId));
+}
+
+export { nowIso, addDays };

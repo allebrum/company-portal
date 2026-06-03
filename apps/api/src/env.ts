@@ -45,6 +45,19 @@ const EnvSchema = z.object({
   // separate static site. (z.coerce.boolean would treat "false" as truthy.)
   SERVE_WEB: z.string().optional().transform((v) => v === 'true' || v === '1'),
   WEB_DIST_DIR: z.string().optional(),                // path to apps/web/out (defaults derived in index.ts)
+  // Custom Stripe billing (consolidated in-app). All optional: when
+  // STRIPE_SECRET_KEY is unset, billing is dormant and gating allows everyone
+  // (self-host / pre-billing). We own the 30-day trial + recurring schedule;
+  // Stripe only stores the card and runs the off-session charges (no Stripe
+  // Prices/Products/Subscriptions).
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  STRIPE_PUBLISHABLE_KEY: z.string().optional(),      // surfaced to the browser via GET /billing/config
+  MONTHLY_PRICE_CENTS: z.coerce.number().int().min(0).default(0),  // smallest unit, e.g. 2999 = $29.99
+  BILLING_CURRENCY: z.string().default('usd'),
+  TRIAL_DAYS: z.coerce.number().int().min(0).default(30),
+  BILLING_INTERVAL_DAYS: z.coerce.number().int().min(1).default(30),
+  BILLING_MAX_RETRIES: z.coerce.number().int().min(1).default(4),  // past_due retries before canceled
 });
 
 export const env = EnvSchema.parse(process.env);
@@ -88,3 +101,10 @@ export const gmailOAuthConfigured = !!(
 export const subscriptionsConfigured = !!(env.MARKETING_API_URL && env.MARKETING_API_KEY);
 // The provisioning webhook is only mounted/active when its HMAC secret is set.
 export const provisioningConfigured = !!env.PROVISIONING_SECRET;
+
+// Custom Stripe billing is active only when the secret key is set. When false,
+// signup/charges are disabled and subscription gating allows everyone (the
+// app runs as a single self-hosted workspace with no billing).
+export const billingConfigured = !!env.STRIPE_SECRET_KEY;
+// Stripe webhook signature verification needs the webhook secret too.
+export const billingWebhookConfigured = !!(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET);
