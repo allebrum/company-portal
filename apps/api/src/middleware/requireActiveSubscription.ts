@@ -1,26 +1,18 @@
 import type { Request, Response, NextFunction } from 'express';
 import { getTenant } from '../services/tenants.js';
-import { getSubscription, isActive } from '../services/subscriptions.js';
+import { tenantIsActive } from '../services/subscriptions.js';
 
 /**
- * Hoppa Phase 3 — gate business routes on the workspace's subscription.
+ * Gate business routes on the workspace's subscription (consolidated in-app
+ * Stripe billing). Mounted globally after `tenantContext`.
  *
- * Mounted globally after `tenantContext`. Behavior:
- *  - No staff session (unauth / client-portal / public routes): pass through;
- *    those routes have their own auth and aren't billed.
- *  - Exempt staff paths (/auth, /billing): always pass so a lapsed owner can
- *    still log in, switch workspace, and reach the billing portal.
- *  - Otherwise: look up the workspace's subscription via the marketing API
- *    (cached). Active/trialing → allow. Canceled/past-due → 402.
- *
- * Fail policy:
- *  - Billing unconfigured (no MARKETING_API_*): getSubscription returns a
- *    synthetic active record → everything passes (single self-hosted workspace).
- *  - Transient upstream failure (getSubscription returns null due to a network
- *    blip, not a 404): fall back to the tenant's mirror `status` column (last
- *    known good) so a marketing-site outage doesn't lock out paying customers.
+ *  - No staff session (unauth / client-portal / public routes): pass through.
+ *  - Exempt staff paths (/auth, /billing, …): always pass so a lapsed owner
+ *    can still log in, switch workspace, and reach the billing screen.
+ *  - Otherwise: read the tenant's local billing_status. active/trialing →
+ *    allow; past_due/canceled → 402 (block immediately). billing_exempt and
+ *    self-host (no STRIPE_SECRET_KEY) always pass — see `tenantIsActive`.
  */
-
 const EXEMPT_PREFIXES = ['/auth', '/billing', '/provisioning', '/health', '/q', '/portal'];
 
 function isExempt(path: string): boolean {
@@ -39,19 +31,7 @@ export async function requireActiveSubscription(req: Request, res: Response, nex
   }
   try {
     const tenant = await getTenant(tenantId);
-    // Grandfathered workspaces (the internal / self-host default tenant) bypass
-    // the subscription check entirely, even when SaaS gating is configured.
-    if (tenant?.billingExempt) {
-      next();
-      return;
-    }
-    const sub = await getSubscription(tenant?.billingExternalId ?? null);
-    if (isActive(sub)) {
-      next();
-      return;
-    }
-    // Transient upstream failure → grace on the last-known-good mirror status.
-    if (!sub && (tenant?.status === 'active' || tenant?.status === 'trialing')) {
+    if (tenantIsActive(tenant)) {
       next();
       return;
     }

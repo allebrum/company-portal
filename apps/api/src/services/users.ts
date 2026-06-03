@@ -11,7 +11,6 @@ import { issueToken, invalidateTokensFor, INVITE_TTL_MS } from '../auth/tokens.j
 import { sendInviteEmail } from './mail.js';
 import { currentTenantId } from '../tenancy/context.js';
 import { ensureMembership, getDefaultTenantId, getTenant } from './tenants.js';
-import { getSubscription } from './subscriptions.js';
 
 function initialsFrom(name: string): string {
   return name
@@ -58,14 +57,13 @@ export async function inviteUser(args: {
   const existing = await findByEmail(args.email);
   if (existing) throw new HttpError(409, 'email_taken');
 
-  // Hoppa: seat enforcement. The workspace's seat limit comes from its
-  // subscription (marketing site). When billing is unconfigured the limit is
-  // null and invites are unlimited. Otherwise reject once the active member
-  // count would exceed the plan's seats.
+  // Hoppa: seat enforcement. The workspace's seat limit lives on the tenant
+  // row (tenant.seatLimit). Null = unlimited (the flat-price custom-billing
+  // model doesn't meter seats by default, and self-host is always unlimited).
+  // Otherwise reject once the active member count would exceed it.
   const inviteTenantId = currentTenantId();
   const tenant = await getTenant(inviteTenantId);
-  const sub = await getSubscription(tenant?.billingExternalId ?? null);
-  const seatLimit = sub?.seats ?? tenant?.seatLimit ?? null;
+  const seatLimit = tenant?.seatLimit ?? null;
   if (seatLimit != null) {
     const [memberCount] = await db
       .select({ n: count() })

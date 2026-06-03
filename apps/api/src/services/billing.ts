@@ -137,13 +137,26 @@ export async function storePaymentMethod(customerId: string, paymentMethodId: st
     .where(eq(tenants.billingExternalId, customerId));
 }
 
-/** A charge succeeded → active, advance the next bill date one interval out. */
+/**
+ * A charge succeeded → active, advance the next bill date one interval out.
+ * Idempotent: if next_bill_at is already in the future (the other code path —
+ * job or webhook — already advanced this period), leave it. So the daily job's
+ * synchronous result AND the payment_intent.succeeded webhook can both call
+ * this without double-advancing.
+ */
 export async function markPaid(tenantId: string): Promise<void> {
+  const [t] = await db
+    .select({ nextBillAt: tenants.nextBillAt })
+    .from(tenants)
+    .where(eq(tenants.id, tenantId))
+    .limit(1);
+  const alreadyAdvanced = t?.nextBillAt && new Date(t.nextBillAt).getTime() > Date.now();
+  const nextBillAt = alreadyAdvanced ? t!.nextBillAt! : addDays(nowIso(), env.BILLING_INTERVAL_DAYS);
   await db
     .update(tenants)
     .set({
       billingStatus: 'active',
-      nextBillAt: addDays(nowIso(), env.BILLING_INTERVAL_DAYS),
+      nextBillAt,
       failedAttempts: 0,
       lastPaymentError: null,
       updatedAt: nowIso(),
