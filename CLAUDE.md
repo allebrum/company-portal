@@ -49,15 +49,20 @@ never gated. `hoppa` is kept as a frozen safety-net / staging branch
 - Multi-tenancy (Hoppa): row-level `tenant_id`, AsyncLocalStorage request
   context (`tenancy/context.ts`), `tenantEq()`/`stampTenant()` helpers
   (`tenancy/scope.ts`). `tenants` + `tenant_members` tables.
-- Subscriptions: Hoppa **reads** status from the marketing site
-  (`services/subscriptions.ts`); `requireActiveSubscription` gates business
-  routes. Marketing site is the billing source of truth.
+- Subscriptions: billing is **consolidated in-app** (custom Stripe, no Stripe
+  Prices/Subscriptions). Per-workspace billing state lives on the `tenants` row
+  (`billing_status`, `trial_ends_at`, `next_bill_at`, …); `tenantIsActive()`
+  (`services/subscriptions.ts`) + `requireActiveSubscription` gate business
+  routes. Dormant unless `STRIPE_SECRET_KEY` is set (self-host = no billing);
+  `billing_exempt` tenants always pass. See `STRIPE_BILLING_REWORK.md`.
 
 ## Reference docs
 - `HOPPA_MARKETING_CONTRACT.md` — the marketing ⇄ Hoppa API contract
   (provisioning webhook, `GET /subscriptions/:id`, `POST /billing-portal`).
-- `STRIPE_BILLING_REWORK.md` — **current initiative (PAUSED):** custom Stripe
-  billing (SetupIntent + self-owned 30-day trial + off-session recurring charge
-  from an env price; no Stripe Prices/Products/Subscriptions). Full exploration,
-  data model, flow, env vars, and **open decisions** live there. Resume from
-  that doc. Paused to fix the overall setup first.
+- `STRIPE_BILLING_REWORK.md` — **BUILT** on branch `stripe-billing` (off
+  `main`): custom Stripe billing (SetupIntent + self-owned 30-day trial +
+  off-session recurring charge from env `MONTHLY_PRICE_CENTS`; no Stripe
+  Prices/Products/Subscriptions), **consolidated in-app** (not the marketing
+  site). Env-gated + dormant until Stripe keys are set, so safe to merge before
+  going live. Data model, flow, key files, and the "To go live" steps (needs the
+  user's Stripe account) live there.

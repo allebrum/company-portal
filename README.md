@@ -84,10 +84,25 @@ Default seed users (password printed on `db:seed`):
 ## Project layout
 
 ```
-apps/web        Next.js static-export frontend (8 pages)
+apps/web        Next.js static-export frontend
 apps/api        Express + Socket.IO backend
 packages/shared Zod schemas + enum constants used by both
 ```
+
+## Billing (optional SaaS mode)
+
+Hoppa ships an optional custom Stripe billing flow — **no Stripe
+Prices/Products/Subscriptions**: a SetupIntent saves the card, we track a
+30-day trial ourselves, then charge off-session every 30 days for an env-set
+price. It's **dormant unless `STRIPE_SECRET_KEY` is set**, so self-host is
+unaffected. To enable, set the `STRIPE_*` / `MONTHLY_PRICE_CENTS` / `TRIAL_DAYS`
+vars (see `.env.example`), add a Stripe webhook → `/api/billing/stripe/webhook`
+(`setup_intent.succeeded`, `payment_intent.succeeded`,
+`payment_intent.payment_failed`), then visit `/signup`.
+
+Test cards (Stripe test mode): `4242 4242 4242 4242` (success),
+`4000 0025 0000 3155` (SCA-required), `4000 0000 0000 0002` (decline). Full
+detail + the data model live in `STRIPE_BILLING_REWORK.md`.
 
 ## Manual end-to-end test
 
