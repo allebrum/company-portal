@@ -50,14 +50,16 @@ export default function TodosPage() {
     });
   }, [todos, scope, showDone, me]);
 
-  // Keyboard shortcut: N opens create
+  // Keyboard shortcut: Cmd/Ctrl+Shift+N opens create
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
-      if (e.key === 'n' || e.key === 'N') {
-        setEditing(null);
-        setModalOpen(true);
-      }
+      const target = e.target as HTMLElement | null;
+      if (target && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)) return;
+      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
+      if (e.key.toLowerCase() !== 'n') return;
+      e.preventDefault();
+      setEditing(null);
+      setModalOpen(true);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

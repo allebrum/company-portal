@@ -1,19 +1,19 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Pilcrow, Heading1, Heading2, Heading3,
   List, ListOrdered, CheckSquare,
   Quote, Sparkles, Minus,
-  Target, CheckCircle, Timer, Link as LinkIcon, Image as EmbedIcon, AtSign,
+  Target, CheckCircle, Timer, Link as LinkIcon, Image as EmbedIcon, AtSign, Upload,
 } from 'lucide-react';
 
 export type SlashCommandId =
   | 'text' | 'h1' | 'h2' | 'h3'
   | 'bullet' | 'numbered' | 'checkbox'
   | 'quote' | 'callout' | 'divider'
-  | 'todo' | 'goal' | 'timer' | 'link' | 'embed' | 'mention';
+  | 'todo' | 'goal' | 'timer' | 'link' | 'embed' | 'mention' | 'upload';
 
 type CommandDef = {
   id: SlashCommandId;
@@ -31,6 +31,7 @@ const COMMANDS: CommandDef[] = [
   { id: 'link',     label: 'Link to item',   hint: 'Reference an existing goal/todo/file',group: 'create',keywords: ['link','ref','to'],      icon: LinkIcon },
   { id: 'embed',    label: 'Embed',          hint: 'Embed a URL (Figma, Drive, GitHub…)',group: 'create', keywords: ['embed','url','iframe'], icon: EmbedIcon },
   { id: 'mention',  label: 'Mention a teammate', hint: 'Insert @FirstName',              group: 'create', keywords: ['mention','at','user'],  icon: AtSign },
+  { id: 'upload',   label: 'Image/file', hint: 'Insert via modal: computer, QR, or space files', group: 'create', keywords: ['upload','file','image','photo'], icon: Upload },
 
   { id: 'h1',       label: 'Heading 1',      hint: 'Big section title',                  group: 'heading', keywords: ['h1','heading','title'],   icon: Heading1 },
   { id: 'h2',       label: 'Heading 2',      hint: 'Subsection title',                   group: 'heading', keywords: ['h2','heading'],           icon: Heading2 },
@@ -53,8 +54,8 @@ const GROUP_LABELS: Record<CommandDef['group'], string> = {
 
 /**
  * Slash-command popover. Anchored to the screen position of the caret when
- * the user types `/`. Owns its own filter input (autofocused) so the
- * editor block can hand off keyboard focus cleanly.
+ * the user types `/`. Filtering comes from the inline typed token (e.g.
+ * `/upl`) so focus stays in the editor and the user can keep typing.
  *
  * Keyboard: ↑↓ to move, Enter to pick, Esc to close. ESC sets a global
  * `data-space-modal-open` body attribute while open so the overlay's ESC
@@ -63,25 +64,22 @@ const GROUP_LABELS: Record<CommandDef['group'], string> = {
 export function SlashMenu({
   open,
   anchorRect,
+  query,
   onPick,
   onClose,
 }: {
   open: boolean;
   anchorRect: { x: number; y: number } | null;
+  query: string;
   onPick: (id: SlashCommandId) => void;
   onClose: () => void;
 }) {
-  const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) {
-      setQuery('');
       setActive(0);
       document.body.setAttribute('data-space-modal-open', '1');
-      // Defer focus so the input is mounted before we ask for it.
-      requestAnimationFrame(() => inputRef.current?.focus());
     } else {
       document.body.removeAttribute('data-space-modal-open');
     }
@@ -102,24 +100,36 @@ export function SlashMenu({
     setActive(0);
   }, [filtered.length]);
 
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setActive((i) => Math.min(filtered.length - 1, i + 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setActive((i) => Math.max(0, i - 1));
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      const cmd = filtered[active];
-      if (cmd) onPick(cmd.id);
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      onClose();
-    }
-  };
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setActive((i) => Math.min(filtered.length - 1, i + 1));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setActive((i) => Math.max(0, i - 1));
+        return;
+      }
+      if (e.key === 'Enter') {
+        if (filtered.length === 0) return;
+        e.preventDefault();
+        const cmd = filtered[active];
+        if (cmd) onPick(cmd.id);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open, filtered, active, onPick, onClose]);
 
-  if (!open || !anchorRect) return null;
+  if (!open || !anchorRect || filtered.length === 0) return null;
 
   // Group the filtered list so we can render group headings.
   const grouped: { group: CommandDef['group']; items: CommandDef[] }[] = [];
@@ -149,55 +159,44 @@ export function SlashMenu({
         }}
         onMouseDown={(e) => e.preventDefault()}
       >
-        <div className="px-2 py-1.5 border-b border-gray-100">
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder="Filter commands…"
-            className="w-full px-2 py-1 text-sm outline-none"
-          />
+        <div className="px-3 py-2 border-b border-gray-100 text-[11px] text-gray-500">
+          /{query}
         </div>
         <div className="max-h-80 overflow-y-auto py-1">
-          {filtered.length === 0 ? (
-            <div className="px-3 py-3 text-sm text-gray-400">No matching commands.</div>
-          ) : (
-            grouped.map((g) => (
-              <div key={g.group} className="py-1">
-                <div className="px-3 pb-1 text-[10px] uppercase tracking-widest font-bold text-gray-400">
-                  {GROUP_LABELS[g.group]}
-                </div>
-                {g.items.map((c) => {
-                  const idx = flat.indexOf(c);
-                  const isActive = idx === active;
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onMouseEnter={() => setActive(idx)}
-                      onClick={() => onPick(c.id)}
-                      className={`w-full text-left px-3 py-1.5 flex items-center gap-2 ${
-                        isActive ? 'bg-brand-50' : 'hover:bg-gray-50'
-                      }`}
-                    >
-                      <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${
-                        isActive ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-500'
-                      }`}>
-                        <c.icon className="w-4 h-4" />
-                      </span>
-                      <span className="flex-1 min-w-0">
-                        <span className={`block text-sm font-semibold truncate ${isActive ? 'text-brand-800' : 'text-gray-900'}`}>
-                          {c.label}
-                        </span>
-                        <span className="block text-[11px] text-gray-500 truncate">{c.hint}</span>
-                      </span>
-                    </button>
-                  );
-                })}
+          {grouped.map((g) => (
+            <div key={g.group} className="py-1">
+              <div className="px-3 pb-1 text-[10px] uppercase tracking-widest font-bold text-gray-400">
+                {GROUP_LABELS[g.group]}
               </div>
-            ))
-          )}
+              {g.items.map((c) => {
+                const idx = flat.indexOf(c);
+                const isActive = idx === active;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onMouseEnter={() => setActive(idx)}
+                    onClick={() => onPick(c.id)}
+                    className={`w-full text-left px-3 py-1.5 flex items-center gap-2 ${
+                      isActive ? 'bg-brand-50' : 'hover:bg-gray-50'
+                    }`}
+                  >
+                    <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                      isActive ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-500'
+                    }`}>
+                      <c.icon className="w-4 h-4" />
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className={`block text-sm font-semibold truncate ${isActive ? 'text-brand-800' : 'text-gray-900'}`}>
+                        {c.label}
+                      </span>
+                      <span className="block text-[11px] text-gray-500 truncate">{c.hint}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
       </div>
     </>,

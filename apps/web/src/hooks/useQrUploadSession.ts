@@ -11,6 +11,7 @@ export type QrUploadTarget =
   | { kind: 'goal'; goalId: string };
 
 export type CreateQrUploadSessionResult = {
+  id: string;
   token: string;
   uploadUrl: string;
   label: string;

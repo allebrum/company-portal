@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { Trash2, GripVertical, Sparkles, Minus, Play, Square, Target, CheckCircle, Link as LinkIcon, ExternalLink, AtSign, Image as EmbedIcon } from 'lucide-react';
+import { Trash2, Sparkles, Play, Square, Target, CheckCircle, Link as LinkIcon, ExternalLink, Image as EmbedIcon, Upload, Camera, QrCode, FolderOpen, Copy } from 'lucide-react';
+import { QRCodeCanvas } from 'qrcode.react';
 import { SlashMenu, type SlashCommandId } from './SlashMenu';
 import { EmbedDialog, type EmbedDialogValue } from './pickers/EmbedDialog';
 import { LinkPicker } from './pickers/LinkPicker';
@@ -14,7 +15,12 @@ import {
 import { useMyTimer } from '@/hooks/useTimer';
 import { useAuth } from '@/hooks/useAuth';
 import { useSpaceData, useUpdateSpaceBlocks, useUpdateSpaceFiles } from '@/hooks/useSpace';
+import { useUploadManager } from '@/contexts/UploadManagerContext';
+import { useCreateQrUploadSession, useQrUploadSessionFiles } from '@/hooks/useQrUploadSession';
 import { useToast } from '@/components/ui/Toast';
+import { Modal } from '@/components/ui/Modal';
+import { Button } from '@/components/ui/Button';
+import { API_URL } from '@/lib/env';
 import { fmtTimer, PRIORITY_DOT } from '@/lib/formatters';
 import { rollupProgress } from '@/lib/roadmap';
 import type { SpaceBlock, SpaceFile } from '@allebrum/shared';
@@ -64,8 +70,33 @@ export function NotesTab({ scope }: { scope: Scope }) {
   const saveFiles = useUpdateSpaceFiles(scope);
   const { me } = useAuth();
   const toast = useToast();
+  const uploadMgr = useUploadManager();
   const [blocks, dispatch] = useReducer(reducer, [] as SpaceBlock[]);
   const initialized = useRef(false);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [insertAssetOpen, setInsertAssetOpen] = useState(false);
+  const [insertAssetTab, setInsertAssetTab] = useState<'computer' | 'qr' | 'space'>('computer');
+  const [insertAnchorId, setInsertAnchorId] = useState<string | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraStarting, setCameraStarting] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [spaceFileQuery, setSpaceFileQuery] = useState('');
+  const createQrSession = useCreateQrUploadSession();
+  const [qrInsertSession, setQrInsertSession] = useState<{
+    id: string;
+    uploadUrl: string;
+    expiresAt: string;
+    anchorId: string;
+  } | null>(null);
+  const [seenQrInsertIds, setSeenQrInsertIds] = useState<string[]>([]);
+  const [pendingUploadLinks, setPendingUploadLinks] = useState<Array<{
+    uploadId: string;
+    afterBlockId: string;
+    fileName: string;
+    isImage: boolean;
+  }>>([]);
 
   // Sync from server on first load + scope change. After that, the local
   // reducer is the source of truth and we push out via debounced save.
@@ -102,10 +133,51 @@ export function NotesTab({ scope }: { scope: Scope }) {
   }, [blocks]);
 
   // ----- slash menu -----
-  const [slash, setSlash] = useState<{ blockId: string; rect: { x: number; y: number } | null } | null>(null);
+  const [slash, setSlash] = useState<{ blockId: string; rect: { x: number; y: number } | null; query: string } | null>(null);
   const [linkOpen, setLinkOpen] = useState<{ blockId: string } | null>(null);
   const [mentionOpen, setMentionOpen] = useState<{ blockId: string } | null>(null);
   const [embedOpen, setEmbedOpen] = useState<{ blockId: string } | null>(null);
+  const qrSessionFiles = useQrUploadSessionFiles(qrInsertSession?.id ?? null, !!qrInsertSession?.id);
+
+  const openInsertAssetModal = (anchorId: string, tab: 'computer' | 'qr' | 'space' = 'computer') => {
+    setInsertAnchorId(anchorId);
+    setInsertAssetTab(tab);
+    setInsertAssetOpen(true);
+  };
+
+  const stopCamera = () => {
+    const s = streamRef.current;
+    if (s) {
+      s.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraOpen(false);
+    setCameraStarting(false);
+  };
+
+  const startCamera = async () => {
+    setCameraError(null);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('This browser does not support direct camera capture.');
+      return;
+    }
+    try {
+      setCameraStarting(true);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      setCameraOpen(true);
+      setCameraStarting(false);
+    } catch {
+      setCameraStarting(false);
+      setCameraError('Camera permission was denied or unavailable. You can still choose a file or use QR upload.');
+    }
+  };
 
   // ----- block ops -----
   const insertAfter = (afterId: string | null, b?: Partial<SpaceBlock>) => {
@@ -138,7 +210,7 @@ export function NotesTab({ scope }: { scope: Scope }) {
     setSlash(null);
     // Strip the trailing "/{query}" from the target's content so the visible
     // text doesn't show the slash residue when the user picks a command.
-    const trimmed = (target.content ?? '').replace(/\/[^/\n]*$/, '');
+    const trimmed = (target.content ?? '').replace(/(^|\s)\/[^\s/]*$/, '$1');
     convertBlock(target.id, { content: trimmed });
 
     if (cmd === 'h1' || cmd === 'h2' || cmd === 'h3' || cmd === 'text' ||
@@ -203,7 +275,205 @@ export function NotesTab({ scope }: { scope: Scope }) {
       setEmbedOpen({ blockId: target.id });
       return;
     }
+    if (cmd === 'upload') {
+      openInsertAssetModal(target.id, 'computer');
+      return;
+    }
   };
+
+  const queueUploads = (list: File[], afterOverride?: string | null) => {
+    if (list.length === 0) return;
+    if (scope.kind !== 'client' && scope.kind !== 'project') {
+      toast.error('Open a client or project space to upload files.');
+      return;
+    }
+    const afterBlockId = afterOverride ?? insertAnchorId ?? blocks[blocks.length - 1]?.id ?? blockId();
+    const scopeLabel = scope.kind === 'project'
+      ? `${data.project?.name ?? 'Project'}${data.client?.name ? ` · ${data.client.name}` : ''}`
+      : data.client?.name ?? 'Client';
+    const ids = uploadMgr.enqueue({
+      target: { kind: 'space', scopeKind: scope.kind, scopeId: scope.id },
+      scopeLabel,
+      files: list,
+    });
+    const refs = ids.map((uploadId, idx) => ({
+      uploadId,
+      afterBlockId,
+      fileName: list[idx]?.name ?? 'file',
+      isImage: (list[idx]?.type ?? '').startsWith('image/'),
+    }));
+    setPendingUploadLinks((prev) => [...prev, ...refs]);
+    toast.success(`${list.length} file${list.length === 1 ? '' : 's'} queued`);
+  };
+
+  const onUploadPicked = (files: FileList | null, afterOverride?: string | null) => {
+    if (!files || files.length === 0) return;
+    queueUploads(Array.from(files), afterOverride);
+  };
+
+  const captureFromCamera = async () => {
+    const video = videoRef.current;
+    if (!video || video.videoWidth === 0 || video.videoHeight === 0) {
+      setCameraError('Camera is not ready yet. Try again in a moment.');
+      return;
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      setCameraError('Could not capture image from camera.');
+      return;
+    }
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+    if (!blob) {
+      setCameraError('Could not capture image from camera.');
+      return;
+    }
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const file = new File([blob], `photo-${ts}.jpg`, { type: 'image/jpeg' });
+    queueUploads([file], insertAnchorId);
+    stopCamera();
+    setInsertAssetOpen(false);
+  };
+
+  useEffect(() => {
+    if (!cameraOpen) return;
+    const el = videoRef.current;
+    const stream = streamRef.current;
+    if (!el || !stream) return;
+    el.srcObject = stream;
+    void el.play().catch(() => undefined);
+  }, [cameraOpen]);
+
+  useEffect(() => {
+    if (insertAssetTab !== 'computer') stopCamera();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [insertAssetTab]);
+
+  useEffect(() => {
+    if (insertAssetOpen) return;
+    stopCamera();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [insertAssetOpen]);
+
+  useEffect(() => () => {
+    stopCamera();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const createQrInsertSession = async () => {
+    if (scope.kind !== 'client' && scope.kind !== 'project') {
+      toast.error('Open a client or project space to use QR uploads.');
+      return;
+    }
+    const anchorId = insertAnchorId ?? blocks[blocks.length - 1]?.id ?? blockId();
+    try {
+      const out = await createQrSession.mutateAsync({
+        target: { kind: 'space', scopeKind: scope.kind, scopeId: scope.id },
+        label: scope.kind === 'project' ? (data.project?.name ?? 'Project notes') : (data.client?.name ?? 'Client notes'),
+        expiresInHours: 24,
+      });
+      setQrInsertSession({
+        id: out.id,
+        uploadUrl: out.uploadUrl,
+        expiresAt: out.expiresAt,
+        anchorId,
+      });
+      setSeenQrInsertIds([]);
+      toast.success('QR upload session ready');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not create QR session');
+    }
+  };
+
+  const insertSpaceFile = (file: SpaceFile) => {
+    const afterBlockId = insertAnchorId ?? blocks[blocks.length - 1]?.id ?? blockId();
+    const inserted: SpaceBlock = {
+      id: blockId(),
+      type: 'embed',
+      content: file.title,
+      embedUrl: file.url,
+      embedKind: guessEmbedKind(file.url),
+    };
+    dispatch({ type: 'insert', after: afterBlockId, block: inserted });
+    if (isLikelyImage(file.title, file.url)) {
+      dispatch({ type: 'insert', after: inserted.id, block: emptyText() });
+    }
+    setInsertAssetOpen(false);
+  };
+
+  const copyQrLink = async () => {
+    if (!qrInsertSession?.uploadUrl) return;
+    try {
+      await navigator.clipboard.writeText(qrInsertSession.uploadUrl);
+      toast.success('Upload link copied');
+    } catch {
+      toast.error('Could not copy upload link');
+    }
+  };
+
+  useEffect(() => {
+    if (pendingUploadLinks.length === 0) return;
+    const completed: string[] = [];
+    for (const pending of pendingUploadLinks) {
+      const item = uploadMgr.items.find((x) => x.id === pending.uploadId);
+      if (!item) continue;
+      if (item.status === 'done' && item.driveFileId) {
+        const url = `https://drive.google.com/file/d/${item.driveFileId}/view`;
+        const inserted: SpaceBlock = {
+          id: blockId(),
+          type: 'embed',
+          content: pending.fileName,
+          embedUrl: url,
+          embedKind: 'drive',
+        };
+        dispatch({ type: 'insert', after: pending.afterBlockId, block: inserted });
+        if (pending.isImage) {
+          dispatch({ type: 'insert', after: inserted.id, block: emptyText() });
+        }
+        completed.push(pending.uploadId);
+      } else if (item.status === 'failed' || item.status === 'cancelled') {
+        completed.push(pending.uploadId);
+        if (item.status === 'failed') {
+          toast.error(item.error || `Upload failed: ${pending.fileName}`);
+        }
+      }
+    }
+    if (completed.length > 0) {
+      setPendingUploadLinks((prev) => prev.filter((x) => !completed.includes(x.uploadId)));
+    }
+  }, [pendingUploadLinks, uploadMgr.items, toast]);
+
+  useEffect(() => {
+    if (!qrInsertSession?.id) return;
+    const rows = qrSessionFiles.data ?? [];
+    if (rows.length === 0) return;
+    const seen = new Set(seenQrInsertIds);
+    const toInsert = [...rows].reverse().filter((r) => !seen.has(r.id) && !!r.storedFileUrl);
+    if (toInsert.length === 0) return;
+
+    let cursor = qrInsertSession.anchorId;
+    for (const row of toInsert) {
+      const inserted: SpaceBlock = {
+        id: blockId(),
+        type: 'embed',
+        content: row.uploadTitle?.trim() || row.originalName,
+        embedUrl: row.storedFileUrl!,
+        embedKind: 'drive',
+      };
+      dispatch({ type: 'insert', after: cursor, block: inserted });
+      cursor = inserted.id;
+      if ((row.mimeType ?? '').startsWith('image/') || isLikelyImage(row.originalName, row.storedFileUrl ?? undefined)) {
+        const spacer = emptyText();
+        dispatch({ type: 'insert', after: cursor, block: spacer });
+        cursor = spacer.id;
+      }
+    }
+    setSeenQrInsertIds((prev) => [...prev, ...toInsert.map((r) => r.id)]);
+    toast.success(`Inserted ${toInsert.length} QR upload${toInsert.length === 1 ? '' : 's'} into notes`);
+  }, [qrInsertSession, qrSessionFiles.data, seenQrInsertIds, toast]);
 
   // ----- "create real" helpers -----
   const createTodo = useCreateTodo();
@@ -253,7 +523,7 @@ export function NotesTab({ scope }: { scope: Scope }) {
     if (!mentionOpen) return;
     const b = blocks.find((x) => x.id === mentionOpen.blockId);
     if (b) {
-      const trimmed = (b.content ?? '').replace(/\/[^/\n]*$/, '');
+      const trimmed = (b.content ?? '').replace(/(^|\s)\/[^\s/]*$/, '$1');
       convertBlock(b.id, { content: `${trimmed}@${name.split(' ')[0]} ` });
     }
     setMentionOpen(null);
@@ -287,6 +557,12 @@ export function NotesTab({ scope }: { scope: Scope }) {
 
   if (data.loading || scope.kind === 'all') return null;
 
+  const filteredSpaceFiles = data.spaceFiles.filter((f) => {
+    const q = spaceFileQuery.trim().toLowerCase();
+    if (!q) return true;
+    return f.title.toLowerCase().includes(q) || f.url.toLowerCase().includes(q);
+  });
+
   return (
     <div className="max-w-3xl mx-auto">
       {blocks.map((b, i) => (
@@ -301,7 +577,13 @@ export function NotesTab({ scope }: { scope: Scope }) {
           onInsertSibling={(typeOverride) =>
             insertAfter(b.id, typeOverride ? { type: typeOverride } : undefined)
           }
-          onOpenSlash={(rect) => setSlash({ blockId: b.id, rect })}
+          onOpenSlash={(next) => {
+            if (!next) {
+              setSlash((prev) => (prev?.blockId === b.id ? null : prev));
+              return;
+            }
+            setSlash({ blockId: b.id, rect: next.rect, query: next.query });
+          }}
         />
       ))}
       <button
@@ -312,9 +594,173 @@ export function NotesTab({ scope }: { scope: Scope }) {
         Click to write, or press <kbd className="font-mono text-[11px] bg-gray-100 px-1 rounded">/</kbd> for commands…
       </button>
 
+      <input
+        ref={uploadInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          onUploadPicked(e.target.files);
+          setInsertAssetOpen(false);
+          e.target.value = '';
+        }}
+      />
+      <Modal
+        open={insertAssetOpen}
+        onClose={() => {
+          setInsertAssetOpen(false);
+          stopCamera();
+        }}
+        title="Insert image or file"
+        size="lg"
+        layerBase={145}
+      >
+        <div className="space-y-4">
+          <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1">
+            <button
+              type="button"
+              onClick={() => setInsertAssetTab('computer')}
+              className={`px-3 py-1.5 text-sm font-semibold rounded-md ${insertAssetTab === 'computer' ? 'bg-white text-brand-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+            >
+              From computer
+            </button>
+            <button
+              type="button"
+              onClick={() => setInsertAssetTab('qr')}
+              className={`px-3 py-1.5 text-sm font-semibold rounded-md ${insertAssetTab === 'qr' ? 'bg-white text-brand-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+            >
+              QR / phone
+            </button>
+            <button
+              type="button"
+              onClick={() => setInsertAssetTab('space')}
+              className={`px-3 py-1.5 text-sm font-semibold rounded-md ${insertAssetTab === 'space' ? 'bg-white text-brand-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+            >
+              From space files
+            </button>
+          </div>
+
+          {insertAssetTab === 'computer' && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => uploadInputRef.current?.click()}
+                className="rounded-xl border border-gray-200 bg-white p-4 text-left hover:border-brand-300 hover:shadow-sm"
+              >
+                <Upload className="w-5 h-5 text-brand-700 mb-2" />
+                <div className="text-sm font-semibold text-gray-900">Choose files</div>
+                <div className="text-xs text-gray-500 mt-1">Pick images or documents from your computer.</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => void startCamera()}
+                className="rounded-xl border border-gray-200 bg-white p-4 text-left hover:border-brand-300 hover:shadow-sm"
+              >
+                <Camera className="w-5 h-5 text-brand-700 mb-2" />
+                <div className="text-sm font-semibold text-gray-900">Take photo</div>
+                <div className="text-xs text-gray-500 mt-1">Open live camera preview and capture directly into notes.</div>
+              </button>
+            </div>
+          )}
+
+          {insertAssetTab === 'computer' && (cameraOpen || cameraStarting || cameraError) && (
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2">
+              {cameraStarting && (
+                <div className="text-sm text-gray-600">Opening camera…</div>
+              )}
+              {cameraOpen && (
+                <>
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full max-h-80 rounded-lg bg-black object-contain"
+                  />
+                  <div className="flex items-center gap-2">
+                    <Button variant="primary" onClick={() => void captureFromCamera()}>
+                      <Camera className="w-4 h-4" /> Capture
+                    </Button>
+                    <Button variant="outline" onClick={stopCamera}>Cancel camera</Button>
+                  </div>
+                </>
+              )}
+              {cameraError && (
+                <div className="text-xs text-red-600">{cameraError}</div>
+              )}
+            </div>
+          )}
+
+          {insertAssetTab === 'qr' && (
+            <div className="space-y-3">
+              {!qrInsertSession ? (
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-sm text-gray-700 mb-3">Generate a QR upload session to send photos/files from your phone into this notes thread.</div>
+                  <Button variant="primary" onClick={() => void createQrInsertSession()} disabled={createQrSession.isPending}>
+                    <QrCode className="w-4 h-4" /> {createQrSession.isPending ? 'Generating…' : 'Generate QR code'}
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <div className="rounded-2xl border border-gray-200 bg-white p-4 grid place-items-center">
+                    <QRCodeCanvas value={qrInsertSession.uploadUrl} size={220} includeMargin />
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-[12px] text-gray-700 break-all">
+                    {qrInsertSession.uploadUrl}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" onClick={copyQrLink}><Copy className="w-4 h-4" /> Copy link</Button>
+                    <a href={qrInsertSession.uploadUrl} target="_blank" rel="noreferrer">
+                      <Button variant="ghost"><ExternalLink className="w-4 h-4" /> Open upload page</Button>
+                    </a>
+                  </div>
+                  <div className="text-[11px] text-gray-500">
+                    New uploads are auto-inserted into notes as they arrive.
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {insertAssetTab === 'space' && (
+            <div className="space-y-3">
+              <input
+                value={spaceFileQuery}
+                onChange={(e) => setSpaceFileQuery(e.target.value)}
+                placeholder="Search file title or URL"
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand-400"
+              />
+              {filteredSpaceFiles.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-sm text-gray-500">
+                  No space files found.
+                </div>
+              ) : (
+                <div className="max-h-72 overflow-y-auto space-y-1.5 pr-1">
+                  {filteredSpaceFiles.map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => insertSpaceFile(f)}
+                      className="w-full text-left rounded-lg border border-gray-200 px-3 py-2 hover:border-brand-300 hover:bg-brand-50/40"
+                    >
+                      <div className="flex items-center gap-2">
+                        <FolderOpen className="w-4 h-4 text-gray-400 shrink-0" />
+                        <span className="text-sm font-semibold text-gray-900 truncate">{f.title}</span>
+                      </div>
+                      <div className="mt-1 text-[11px] text-gray-500 truncate">{f.meta || f.url}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </Modal>
+
       <SlashMenu
         open={!!slash}
         anchorRect={slash?.rect ?? null}
+        query={slash?.query ?? ''}
         onPick={onPickSlash}
         onClose={() => setSlash(null)}
       />
@@ -339,6 +785,11 @@ export function NotesTab({ scope }: { scope: Scope }) {
       />
     </div>
   );
+}
+
+function isLikelyImage(name?: string, url?: string): boolean {
+  const value = `${name ?? ''} ${url ?? ''}`;
+  return /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif)(?:$|\?|#)/i.test(value);
 }
 
 function focusBlock(id: string) {
@@ -390,7 +841,7 @@ function BlockRow({
   onConvert: (patch: Partial<SpaceBlock>) => void;
   onChangeContent: (c: string) => void;
   onInsertSibling: (typeOverride?: SpaceBlock['type']) => void;
-  onOpenSlash: (rect: { x: number; y: number }) => void;
+  onOpenSlash: (next: { rect: { x: number; y: number }; query: string } | null) => void;
 }) {
   return (
     <div className="group relative pl-8 -ml-8 py-0.5">
@@ -425,7 +876,7 @@ function BlockBody(props: {
   onConvert: (patch: Partial<SpaceBlock>) => void;
   onChangeContent: (c: string) => void;
   onInsertSibling: (typeOverride?: SpaceBlock['type']) => void;
-  onOpenSlash: (rect: { x: number; y: number }) => void;
+  onOpenSlash: (next: { rect: { x: number; y: number }; query: string } | null) => void;
   onRemove: () => void;
 }) {
   const { block } = props;
@@ -467,10 +918,11 @@ function EditableBlock({
   onConvert: (patch: Partial<SpaceBlock>) => void;
   onChangeContent: (c: string) => void;
   onInsertSibling: (typeOverride?: SpaceBlock['type']) => void;
-  onOpenSlash: (rect: { x: number; y: number }) => void;
+  onOpenSlash: (next: { rect: { x: number; y: number }; query: string } | null) => void;
   onRemove: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [focused, setFocused] = useState(false);
   // Set innerText only on initial mount + on remote/type changes so the
   // caret isn't reset on every keystroke. React state for content lags the
   // DOM here intentionally.
@@ -488,11 +940,16 @@ function EditableBlock({
     if (!el) return;
     const text = el.innerText;
     onChangeContent(text);
-    // Slash-trigger: if the user typed "/" anywhere, open the menu at caret.
-    if (text.endsWith('/')) {
+    // Slash trigger: only when typing a command token at the end of the line.
+    // Requires start-of-line or whitespace before `/`, so dates like 06/05
+    // do not open the command menu.
+    const m = text.match(/(?:^|\s)\/([^\s/]*)$/);
+    if (m) {
       const rect = caretRect();
-      if (rect) onOpenSlash(rect);
+      if (rect) onOpenSlash({ rect, query: m[1] ?? '' });
+      return;
     }
+    onOpenSlash(null);
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -568,8 +1025,10 @@ function EditableBlock({
         data-block-id={block.id}
         onInput={onInput}
         onKeyDown={onKeyDown}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         className={cls}
-        data-placeholder={placeholderFor(block)}
+        data-placeholder={placeholderFor(block, focused)}
       />
     </div>
   );
@@ -588,7 +1047,7 @@ function blockClassName(block: SpaceBlock, _i: number, _all: SpaceBlock[]): stri
   }
 }
 
-function placeholderFor(block: SpaceBlock): string {
+function placeholderFor(block: SpaceBlock, focused: boolean): string {
   switch (block.type) {
     case 'h1':       return 'Heading 1';
     case 'h2':       return 'Heading 2';
@@ -598,7 +1057,7 @@ function placeholderFor(block: SpaceBlock): string {
     case 'bullet':   return 'List item';
     case 'numbered': return 'List item';
     case 'checkbox': return 'Task';
-    default:         return "Press '/' for commands";
+    default:         return focused ? "Press '/' for commands" : '';
   }
 }
 
@@ -743,6 +1202,57 @@ function LinkBlockCard({ block }: { block: SpaceBlock }) {
 
 function EmbedBlockCard({ block }: { block: SpaceBlock }) {
   const Icon = EmbedIcon;
+  const driveId = extractDriveFileId(block.embedUrl ?? '');
+  const looksLikeImage = /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif)$/i.test(block.content ?? '');
+  const imageCandidates = driveId
+    ? [
+        `${API_URL}/api/integrations/drive/file/${driveId}/content`,
+        `https://drive.google.com/uc?export=view&id=${driveId}`,
+        `https://drive.google.com/thumbnail?id=${driveId}&sz=w1600`,
+        block.embedUrl ?? '',
+      ].filter(Boolean)
+    : [block.embedUrl ?? ''].filter(Boolean);
+  const [imageSrcIndex, setImageSrcIndex] = useState(0);
+  const imageSrc = imageCandidates[imageSrcIndex] ?? null;
+  const canTryAnotherImageSrc = imageSrcIndex < imageCandidates.length - 1;
+
+  useEffect(() => {
+    setImageSrcIndex(0);
+  }, [block.embedUrl]);
+
+  if (looksLikeImage && imageSrc) {
+    return (
+      <div className="my-2 rounded-xl border border-gray-200 bg-white overflow-hidden">
+        <a href={block.embedUrl} target="_blank" rel="noreferrer" className="block hover:opacity-95 transition-opacity">
+          <img
+            src={imageSrc}
+            alt={block.content ?? 'Uploaded image'}
+            className="w-full max-h-[480px] object-contain bg-gray-50"
+            loading="lazy"
+            onError={() => {
+              if (canTryAnotherImageSrc) {
+                setImageSrcIndex((i) => i + 1);
+              }
+            }}
+          />
+        </a>
+        <div className="px-3 py-2 flex items-center gap-2 border-t border-gray-100">
+          <EmbedIcon className="w-4 h-4 text-brand-600 shrink-0" />
+          <a
+            href={block.embedUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="flex-1 min-w-0 text-sm text-gray-800 truncate hover:text-brand-700"
+            title={block.embedUrl}
+          >
+            {block.content || block.embedUrl}
+          </a>
+          <ExternalLink className="w-3.5 h-3.5 text-gray-400" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <Card>
       <Icon className="w-4 h-4 text-brand-600 shrink-0" />
@@ -759,6 +1269,20 @@ function EmbedBlockCard({ block }: { block: SpaceBlock }) {
       <ExternalLink className="w-3.5 h-3.5 text-gray-400" />
     </Card>
   );
+}
+
+function extractDriveFileId(url: string): string | null {
+  if (!url) return null;
+  const byPath = /\/d\/([a-zA-Z0-9_-]+)/.exec(url);
+  if (byPath?.[1]) return byPath[1];
+  try {
+    const parsed = new URL(url);
+    const byQuery = parsed.searchParams.get('id');
+    if (byQuery) return byQuery;
+  } catch {
+    // non-URL string; ignore and fall through
+  }
+  return null;
 }
 
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {

@@ -141,11 +141,11 @@ export function Sidebar() {
           <div className="space-y-2 text-xs text-gray-500">
             <div className="flex items-center justify-between">
               <span>Start timer</span>
-              <kbd className="kbd">T</kbd>
+              <kbd className="kbd">Cmd/Ctrl+Shift+T</kbd>
             </div>
             <div className="flex items-center justify-between">
               <span>New to-do</span>
-              <kbd className="kbd">N</kbd>
+              <kbd className="kbd">Cmd/Ctrl+Shift+N</kbd>
             </div>
           </div>
         </div>

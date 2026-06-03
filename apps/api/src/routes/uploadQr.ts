@@ -61,7 +61,7 @@ uploadQrRouter.post('/sessions/:id/revoke', requireAuth, requirePermission('inte
   }
 });
 
-uploadQrRouter.get('/sessions/:id/files', requireAuth, requirePermission('integrations.manage'), async (req, res, next) => {
+uploadQrRouter.get('/sessions/:id/files', requireAuth, uploadAccess, async (req, res, next) => {
   try {
     const rows = await listUploadQrSessionFiles(req.params.id!);
     res.json(rows);
@@ -85,7 +85,7 @@ uploadQrRouter.post('/sessions', requireAuth, uploadAccess, validate(CreateUploa
     });
 
     const uploadUrl = `${env.WEB_ORIGIN.replace(/\/$/, '')}/upload/qr?token=${encodeURIComponent(row.token)}`;
-    res.status(201).json({ token: row.token, uploadUrl, label: row.label, expiresAt: row.expiresAt });
+    res.status(201).json({ id: row.id, token: row.token, uploadUrl, label: row.label, expiresAt: row.expiresAt });
   } catch (e) {
     next(e);
   }
