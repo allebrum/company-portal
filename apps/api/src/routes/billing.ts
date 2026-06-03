@@ -15,6 +15,7 @@ import {
   markPastDue,
   constructWebhookEvent,
 } from '../services/billing.js';
+import { chargeTenantNow } from '../services/billingJob.js';
 import { issueToken, INVITE_TTL_MS } from '../auth/tokens.js';
 import { sendInviteEmail } from '../services/mail.js';
 
@@ -209,6 +210,22 @@ billingRouter.post('/update-card', requireAuth, async (req, res, next) => {
     }
     const clientSecret = await createSetupIntent(t.billingExternalId);
     res.json({ clientSecret, publishableKey: env.STRIPE_PUBLISHABLE_KEY ?? null });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Charge now (e.g. right after the owner replaced a failing card) so access is
+// restored immediately rather than waiting for the nightly job.
+billingRouter.post('/retry', requireAuth, async (req, res, next) => {
+  try {
+    if (!billingConfigured) {
+      res.status(503).json({ error: 'billing_not_configured' });
+      return;
+    }
+    const me = req.session.user!;
+    const result = await chargeTenantNow(me.tenantId);
+    res.json({ result });
   } catch (e) {
     next(e);
   }

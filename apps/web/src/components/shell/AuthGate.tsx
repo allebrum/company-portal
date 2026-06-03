@@ -10,6 +10,7 @@ import { Sidebar } from './Sidebar';
 import { TimerBar } from './TimerBar';
 import { ClientSpaceOverlay } from '@/components/space/ClientSpaceOverlay';
 import { UploadTray } from '@/components/upload/UploadTray';
+import { StripeCardForm } from '@/components/billing/StripeCardForm';
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
@@ -21,6 +22,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // redirect-to-login + render-without-shell path treats all of them the same.
   const PUBLIC_ROUTES = new Set([
     '/login',
+    '/signup',
     '/forgot-password',
     '/reset-password',
     '/accept-invite',
@@ -183,18 +185,33 @@ function ShellWithBootstrap({ children }: { children: ReactNode }) {
 function SubscriptionRequired() {
   const { me, switchWorkspace, logout } = useAuth();
   const [busy, setBusy] = useState(false);
+  const [card, setCard] = useState<{ clientSecret: string; publishableKey: string } | null>(null);
+  const [billingErr, setBillingErr] = useState<string | null>(null);
   const others = (me?.workspaces ?? []).filter((w) => w.id !== me?.tenantId);
 
-  const manageBilling = async () => {
+  const startUpdateCard = async () => {
     setBusy(true);
+    setBillingErr(null);
     try {
-      const { url } = await api.post<{ url: string }>('/billing/portal', {});
-      window.location.assign(url);
+      const r = await api.post<{ clientSecret: string; publishableKey: string | null }>('/billing/update-card', {});
+      if (!r.publishableKey) throw new Error('no_publishable_key');
+      setCard({ clientSecret: r.clientSecret, publishableKey: r.publishableKey });
     } catch {
+      setBillingErr('Billing isn’t available right now. Please contact support.');
+    } finally {
       setBusy(false);
-      // 503 billing_unavailable (marketing site unreachable / no billing id).
-      alert('Billing isn’t available right now. Please contact support to manage your subscription.');
     }
+  };
+
+  // Card saved → charge immediately so access is restored without waiting for
+  // the nightly job; then reload to re-run the subscription gate.
+  const afterCardSaved = async () => {
+    try {
+      await api.post('/billing/retry', {});
+    } catch {
+      /* the daily job will retry */
+    }
+    window.location.reload();
   };
 
   return (
@@ -208,14 +225,28 @@ function SubscriptionRequired() {
           This workspace doesn’t have an active subscription. Reactivate it to get back into{' '}
           <span className="font-semibold">{me?.workspaces?.find((w) => w.id === me?.tenantId)?.name ?? 'your workspace'}</span>.
         </p>
-        <button
-          type="button"
-          onClick={manageBilling}
-          disabled={busy}
-          className="mt-6 w-full rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-semibold py-2.5 disabled:opacity-60"
-        >
-          {busy ? 'Opening…' : 'Manage billing'}
-        </button>
+        {billingErr && <div className="mt-4 text-sm text-red-600">{billingErr}</div>}
+
+        {card ? (
+          <div className="mt-6 text-left">
+            <StripeCardForm
+              publishableKey={card.publishableKey}
+              clientSecret={card.clientSecret}
+              submitLabel="Save card & reactivate"
+              returnUrl={typeof window !== 'undefined' ? window.location.href : '/'}
+              onComplete={afterCardSaved}
+            />
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void startUpdateCard()}
+            disabled={busy}
+            className="mt-6 w-full rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-semibold py-2.5 disabled:opacity-60"
+          >
+            {busy ? 'Opening…' : 'Update payment method'}
+          </button>
+        )}
 
         {others.length > 0 && (
           <div className="mt-6 pt-5 border-t border-gray-100 text-left">

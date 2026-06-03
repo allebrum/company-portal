@@ -3,6 +3,7 @@ import { db } from '../db/client.js';
 import { tenants, type Tenant } from '../db/schema.js';
 import { env, billingConfigured } from '../env.js';
 import { chargeOffSession, markPaid, markPastDue, markCanceled, nowIso } from './billing.js';
+import { getTenant } from './tenants.js';
 
 /**
  * Daily recurring-billing job (in-process node-cron).
@@ -63,6 +64,19 @@ async function chargeTenant(t: Tenant): Promise<ChargeResult> {
     }
     return fail(reason);
   }
+}
+
+/**
+ * Charge a single workspace immediately (used by POST /billing/retry after an
+ * owner replaces a failing card, so access is restored without waiting for the
+ * nightly run). Same idempotency + state transitions as the daily job.
+ */
+export async function chargeTenantNow(tenantId: string): Promise<ChargeResult> {
+  if (!billingConfigured) return 'skipped';
+  const t = await getTenant(tenantId);
+  if (!t || t.billingExempt) return 'skipped';
+  if (!['trialing', 'active', 'past_due'].includes(t.billingStatus ?? '')) return 'skipped';
+  return chargeTenant(t);
 }
 
 export async function runDailyBilling(): Promise<{
