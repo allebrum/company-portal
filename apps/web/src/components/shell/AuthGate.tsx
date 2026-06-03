@@ -22,7 +22,6 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // redirect-to-login + render-without-shell path treats all of them the same.
   const PUBLIC_ROUTES = new Set([
     '/login',
-    '/signup',
     '/forgot-password',
     '/reset-password',
     '/accept-invite',

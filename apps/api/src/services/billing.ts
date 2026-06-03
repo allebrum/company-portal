@@ -63,6 +63,23 @@ export async function createSetupIntent(customerId: string): Promise<string> {
   return si.client_secret;
 }
 
+/**
+ * Retrieve a SetupIntent to validate it server-side (the marketing signup
+ * `/complete` step: only grant access if the card was actually saved). Returns
+ * its status plus the resolved customer + payment-method ids.
+ */
+export async function getSetupIntent(setupIntentId: string): Promise<{
+  status: Stripe.SetupIntent.Status;
+  customerId: string | null;
+  paymentMethodId: string | null;
+}> {
+  const si = await stripe().setupIntents.retrieve(setupIntentId);
+  const customerId = typeof si.customer === 'string' ? si.customer : (si.customer?.id ?? null);
+  const paymentMethodId =
+    typeof si.payment_method === 'string' ? si.payment_method : (si.payment_method?.id ?? null);
+  return { status: si.status, customerId, paymentMethodId };
+}
+
 /** Make a payment method the customer's default (called on setup_intent.succeeded). */
 export async function setDefaultPaymentMethod(customerId: string, paymentMethodId: string): Promise<void> {
   await stripe().customers.update(customerId, {

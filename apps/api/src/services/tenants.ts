@@ -73,6 +73,41 @@ export async function getTenant(id: string): Promise<Tenant | undefined> {
 }
 
 /**
+ * The owner user of a tenant (the member flagged `is_owner`). Used by the
+ * marketing-signup `/complete` step to mint the auto-login handoff token for
+ * the right user. Oldest membership wins if (defensively) there's more than one.
+ */
+export async function getOwnerUserId(tenantId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ userId: tenantMembers.userId })
+    .from(tenantMembers)
+    .where(and(eq(tenantMembers.tenantId, tenantId), eq(tenantMembers.isOwner, true)))
+    .orderBy(asc(tenantMembers.createdAt))
+    .limit(1);
+  return row?.userId ?? null;
+}
+
+/**
+ * Find an existing billing workspace this user OWNS (has a Stripe customer id).
+ * Lets `/billing/signup` be idempotent on retry: a double-submit reuses the
+ * already-provisioned tenant + customer instead of creating duplicates. Returns
+ * the oldest such tenant, or undefined if the user owns no billing workspace.
+ */
+export async function findOwnedBillingTenant(userId: string): Promise<Tenant | undefined> {
+  const owned = await db
+    .select({ tenantId: tenantMembers.tenantId })
+    .from(tenantMembers)
+    .innerJoin(tenants, eq(tenants.id, tenantMembers.tenantId))
+    .where(and(eq(tenantMembers.userId, userId), eq(tenantMembers.isOwner, true)))
+    .orderBy(asc(tenants.createdAt));
+  for (const o of owned) {
+    const t = await getTenant(o.tenantId);
+    if (t?.billingExternalId) return t;
+  }
+  return undefined;
+}
+
+/**
  * Ensure a user is enrolled in a tenant. Idempotent — used by db:init to put
  * the break-glass admin into the default workspace, and later by invite
  * acceptance / provisioning.

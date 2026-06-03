@@ -58,6 +58,12 @@ const EnvSchema = z.object({
   TRIAL_DAYS: z.coerce.number().int().min(0).default(30),
   BILLING_INTERVAL_DAYS: z.coerce.number().int().min(1).default(30),
   BILLING_MAX_RETRIES: z.coerce.number().int().min(1).default(4),  // past_due retries before canceled
+  // Marketing BFF shared secret. The marketing site's signup service is the
+  // only caller of /billing/signup + /billing/complete + /billing/status-by-ref;
+  // when set, those endpoints require a matching `X-Signup-Key` header so the
+  // public can't drive signup directly (bypassing the BFF's rate-limit). When
+  // unset (self-host), the endpoints stay open.
+  SIGNUP_BFF_SECRET: z.string().optional(),
 });
 
 export const env = EnvSchema.parse(process.env);

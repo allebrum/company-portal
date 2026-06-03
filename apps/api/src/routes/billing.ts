@@ -1,23 +1,35 @@
-import { Router } from 'express';
+import { Router, type Request, type Response, type NextFunction } from 'express';
+import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
+import argon2 from 'argon2';
+import { eq } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { env, billingConfigured, billingWebhookConfigured } from '../env.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { validate, getValidated } from '../middleware/validate.js';
-import { getTenant, provisionTenant } from '../services/tenants.js';
+import { db } from '../db/client.js';
+import { users } from '../db/schema.js';
+import {
+  getTenant,
+  provisionTenant,
+  findOwnedBillingTenant,
+  getOwnerUserId,
+} from '../services/tenants.js';
+import { findByEmail, getUser } from '../services/users.js';
 import {
   createStripeCustomer,
   createSetupIntent,
+  getSetupIntent,
   startTrial,
   storePaymentMethod,
   markPaid,
   markPastDue,
   constructWebhookEvent,
+  nowIso,
 } from '../services/billing.js';
 import { chargeTenantNow } from '../services/billingJob.js';
-import { issueToken, INVITE_TTL_MS } from '../auth/tokens.js';
-import { sendInviteEmail } from '../services/mail.js';
+import { issueToken, HANDOFF_TTL_MS } from '../auth/tokens.js';
 
 /**
  * Custom Stripe billing surface (consolidated in-app). Mounted at /billing,
@@ -38,6 +50,28 @@ function slugify(s: string): string {
   );
 }
 
+/**
+ * Gate the signup endpoints to the marketing BFF. When SIGNUP_BFF_SECRET is set
+ * (SaaS), require a matching `X-Signup-Key` header so the public can't drive
+ * signup directly and bypass the BFF's rate-limit. When unset (self-host), the
+ * endpoints stay open. Constant-time compare to avoid leaking the secret.
+ */
+function requireSignupKey(req: Request, res: Response, next: NextFunction): void {
+  const secret = env.SIGNUP_BFF_SECRET;
+  if (!secret) {
+    next();
+    return;
+  }
+  const provided = req.header('x-signup-key') ?? '';
+  const a = Buffer.from(provided);
+  const b = Buffer.from(secret);
+  if (a.length === b.length && timingSafeEqual(a, b)) {
+    next();
+    return;
+  }
+  res.status(401).json({ error: 'unauthorized' });
+}
+
 // ---- Public: browser billing config (publishable key, price, trial) ----------
 billingRouter.get('/config', (_req, res) => {
   res.json({
@@ -49,15 +83,22 @@ billingRouter.get('/config', (_req, res) => {
   });
 });
 
-// ---- Public: self-serve signup → workspace + trial + card-capture intent -----
+// ---- Signup step 1: account + workspace + trial + card-capture intent --------
+// Called by the marketing BFF (not the browser directly). Collects the password
+// up front (the portal is the login authority), provisions the workspace, starts
+// the trial, and returns a SetupIntent client_secret for the browser to confirm
+// the card. The auto-login handoff is NOT minted here — only after the card is
+// validated in /complete.
 const SignupSchema = z.object({
   email: z.string().email(),
+  password: z.string().min(8).max(200),
   workspaceName: z.string().min(1).max(80),
   ownerName: z.string().max(120).optional(),
 });
 
 billingRouter.post(
   '/signup',
+  requireSignupKey,
   rateLimit({ key: 'signup', max: 10, windowSec: 60 }),
   validate(SignupSchema),
   async (req, res, next) => {
@@ -70,56 +111,141 @@ billingRouter.post(
       const email = input.email.trim().toLowerCase();
       const ownerName = input.ownerName?.trim() || email;
 
-      // 1. Stripe customer (stores the card; no charge).
-      const customerId = await createStripeCustomer({
-        email,
-        name: ownerName,
-        workspaceName: input.workspaceName,
-      });
-      // 2. Provision the workspace + owner (global identity by email).
-      const { tenantId, ownerUserId, created } = await provisionTenant({
-        name: input.workspaceName,
-        slug: slugify(input.workspaceName),
-        ownerEmail: email,
-        ownerName,
-        billingExternalId: customerId,
-      });
-      // 3. Start the self-owned trial (no charge until it ends).
-      const { trialEndsAt } = await startTrial(tenantId);
-      // 4. SetupIntent client_secret for the frontend to confirm the card.
-      const clientSecret = await createSetupIntent(customerId);
-      // 5. Invite the owner to set a password + land in their workspace.
-      const { rawToken, expiresAt } = await issueToken(
-        { kind: 'user', userId: ownerUserId },
-        'invite',
-        INVITE_TTL_MS,
-      );
-      const inviteUrl = `${env.WEB_ORIGIN}/accept-invite?token=${encodeURIComponent(rawToken)}`;
-      if (created) {
-        try {
-          await sendInviteEmail({
-            senderUserId: null,
-            to: email,
-            inviterName: input.workspaceName,
-            acceptUrl: inviteUrl,
-            expiresAt,
-          });
-        } catch {
-          /* best-effort — the URL is returned regardless */
-        }
+      // Idempotent on retry: if this email already OWNS a billing workspace
+      // (double-submit), reuse that tenant + Stripe customer instead of making
+      // duplicates; just refresh the SetupIntent below.
+      const existingUser = await findByEmail(email);
+      const reuse = existingUser ? await findOwnedBillingTenant(existingUser.id) : undefined;
+
+      let tenantId: string;
+      let ownerUserId: string;
+      let customerId: string;
+      if (reuse?.billingExternalId) {
+        tenantId = reuse.id;
+        ownerUserId = existingUser!.id;
+        customerId = reuse.billingExternalId;
+      } else {
+        // 1. Stripe customer (stores the card; no charge).
+        customerId = await createStripeCustomer({
+          email,
+          name: ownerName,
+          workspaceName: input.workspaceName,
+        });
+        // 2. Provision the workspace + owner (global identity by email).
+        const prov = await provisionTenant({
+          name: input.workspaceName,
+          slug: slugify(input.workspaceName),
+          ownerEmail: email,
+          ownerName,
+          billingExternalId: customerId,
+        });
+        tenantId = prov.tenantId;
+        ownerUserId = prov.ownerUserId;
+        // 3. Start the self-owned trial (no charge until it ends).
+        await startTrial(tenantId);
       }
+
+      // 4. Set the owner's password (the portal is the login authority). Only
+      //    for a brand-new or not-yet-credentialed owner — never overwrite an
+      //    existing active user's password (collision guard: a teammate buying a
+      //    new workspace keeps their existing credential and logs into it).
+      const owner = await getUser(ownerUserId);
+      if (owner && (!owner.passwordHash || owner.status !== 'active')) {
+        const passwordHash = await argon2.hash(input.password);
+        await db
+          .update(users)
+          .set({ passwordHash, status: 'active', updatedAt: nowIso() })
+          .where(eq(users.id, ownerUserId));
+      }
+
+      // 5. SetupIntent client_secret for the frontend to confirm the card.
+      const clientSecret = await createSetupIntent(customerId);
+      const t = await getTenant(tenantId);
 
       res.status(201).json({
         clientSecret,
         publishableKey: env.STRIPE_PUBLISHABLE_KEY ?? null,
-        inviteUrl,
-        trialEndsAt,
+        signupRef: tenantId,
+        trialEndsAt: t?.trialEndsAt ?? null,
       });
     } catch (e) {
       next(e);
     }
   },
 );
+
+// ---- Signup step 2: validate the saved card, then grant access ---------------
+// Called by the BFF after the browser confirms the SetupIntent. Validates the
+// SetupIntent succeeded server-side ("validate payment intent"), stores the
+// card, and mints a single-use auto-login handoff URL into the portal.
+const CompleteSchema = z.object({
+  signupRef: z.string().min(1),
+  setupIntentId: z.string().min(1),
+});
+
+billingRouter.post(
+  '/complete',
+  requireSignupKey,
+  rateLimit({ key: 'signup-complete', max: 20, windowSec: 60 }),
+  validate(CompleteSchema),
+  async (req, res, next) => {
+    try {
+      if (!billingConfigured) {
+        res.status(503).json({ error: 'billing_not_configured' });
+        return;
+      }
+      const { signupRef, setupIntentId } = getValidated<typeof CompleteSchema._type>(req);
+      const tenant = await getTenant(signupRef);
+      if (!tenant?.billingExternalId) {
+        res.status(404).json({ error: 'unknown_signup' });
+        return;
+      }
+      // Validate the card was actually saved, and that it belongs to this
+      // workspace's customer (so a leaked SetupIntent id can't cross workspaces).
+      const si = await getSetupIntent(setupIntentId);
+      if (si.status !== 'succeeded') {
+        res.status(400).json({ error: 'card_not_confirmed' });
+        return;
+      }
+      if (si.customerId && si.customerId !== tenant.billingExternalId) {
+        res.status(400).json({ error: 'customer_mismatch' });
+        return;
+      }
+      if (si.paymentMethodId) {
+        await storePaymentMethod(tenant.billingExternalId, si.paymentMethodId);
+      }
+      // Mint the single-use auto-login handoff for the workspace owner.
+      const ownerId = await getOwnerUserId(tenant.id);
+      if (!ownerId) {
+        res.status(500).json({ error: 'no_owner' });
+        return;
+      }
+      const { rawToken } = await issueToken({ kind: 'user', userId: ownerId }, 'portal-login', HANDOFF_TTL_MS);
+      const handoffUrl = `${env.WEB_ORIGIN}/auth/handoff?token=${encodeURIComponent(rawToken)}`;
+      res.json({ handoffUrl });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+// ---- BFF read: subscription status by signup ref (for the marketing site) ----
+billingRouter.get('/status-by-ref/:ref', requireSignupKey, async (req, res, next) => {
+  try {
+    const tenant = await getTenant(req.params.ref);
+    if (!tenant) {
+      res.status(404).json({ error: 'not_found' });
+      return;
+    }
+    res.json({
+      status: tenant.billingStatus ?? null,
+      trialEndsAt: tenant.trialEndsAt ?? null,
+      nextBillAt: tenant.nextBillAt ?? null,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
 
 // ---- Public: Stripe webhook (source of truth) --------------------------------
 billingRouter.post('/stripe/webhook', async (req, res) => {

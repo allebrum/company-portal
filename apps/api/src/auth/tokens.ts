@@ -7,9 +7,12 @@ import { HttpError } from '../middleware/errorHandler.js';
 /**
  * Allowed token kinds. F1 introduced `invite` + `reset` for staff users.
  * F23 added `portal-magic` for external client-portal contacts — same
- * single-use machinery, different subject.
+ * single-use machinery, different subject. `portal-login` is the marketing
+ * signup → portal auto-login handoff: minted server-side after a validated
+ * SetupIntent, consumed once by GET /auth/handoff to establish the session.
+ * (`kind` is a plain text column with no CHECK, so no migration is needed.)
  */
-export type AuthTokenKind = 'invite' | 'reset' | 'portal-magic';
+export type AuthTokenKind = 'invite' | 'reset' | 'portal-magic' | 'portal-login';
 
 /**
  * Token subject — exactly one of staff user OR external contact. The
@@ -135,3 +138,4 @@ function sha256(s: string): string {
 export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;  // 7 days
 export const RESET_TTL_MS = 60 * 60 * 1000;            // 1 hour
 export const PORTAL_MAGIC_TTL_MS = 30 * 24 * 60 * 60 * 1000;  // 30 days for portal magic links
+export const HANDOFF_TTL_MS = 10 * 60 * 1000;          // 10 min — marketing signup auto-login handoff

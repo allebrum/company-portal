@@ -228,6 +228,59 @@ authRouter.get('/google/callback', async (req, res, next) => {
   }
 });
 
+// ---- Marketing signup → portal auto-login handoff ----
+//
+// The marketing signup flow (billing /complete) mints a single-use
+// 'portal-login' token after the card is validated and redirects the browser
+// here. We consume it and establish a first-party portal session, so the user
+// lands in their new workspace without a second login. No `requireAuth` (this
+// IS the login), and it lives under /auth so the subscription gate exempts it.
+authRouter.get('/handoff', async (req, res, next) => {
+  const fail = (reason: string) =>
+    res.redirect(`${env.WEB_ORIGIN}/login?error=${encodeURIComponent(reason)}`);
+  try {
+    const token = typeof req.query.token === 'string' ? req.query.token : '';
+    if (!token) return fail('handoff_expired');
+
+    let subject;
+    try {
+      subject = await consumeToken(token, 'portal-login');
+    } catch {
+      return fail('handoff_expired');
+    }
+    if (subject.kind !== 'user') return fail('handoff_expired');
+    const userId = subject.userId;
+
+    const tenantId = await resolveLoginTenantId(userId);
+    if (!tenantId) return fail('no_workspace');
+
+    // Mirror the Google-callback pattern: a 2FA-enrolled user completes the
+    // second factor on /login before the full session is granted.
+    if (await needsSecondFactor(userId)) {
+      req.session.regenerate((err) => {
+        if (err) return next(err);
+        req.session.pending = { userId, tenantId };
+        req.session.save((saveErr) => {
+          if (saveErr) return next(saveErr);
+          res.redirect(`${env.WEB_ORIGIN}/login?mfa=1`);
+        });
+      });
+      return;
+    }
+
+    req.session.regenerate((err) => {
+      if (err) return next(err);
+      req.session.user = { userId, tenantId };
+      req.session.save((saveErr) => {
+        if (saveErr) return next(saveErr);
+        res.redirect(`${env.WEB_ORIGIN}/dashboard`);
+      });
+    });
+  } catch {
+    return fail('handoff_failed');
+  }
+});
+
 // ---- Password reset / accept-invite ----
 //
 // All three routes are rate-limited and gated on `passwordLoginEnabled` —
