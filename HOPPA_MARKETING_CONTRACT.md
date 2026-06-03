@@ -1,5 +1,15 @@
 # Hoppa ⇄ Marketing site — integration contract
 
+> **⚠️ VESTIGIAL — superseded.** This describes an earlier design where the
+> marketing site **owned** billing + the subscription source of truth, and the
+> portal validated via a remote `MARKETING_API_*` client + an HMAC provisioning
+> webhook. The shipped model is the inverse: **the portal owns billing** (DB +
+> Stripe + cron + local gating) and the marketing site is a **stateless signup
+> BFF** that proxies to the portal's `/billing` endpoints and ends in a
+> `/auth/handoff` auto-login. See `STRIPE_BILLING_REWORK.md`. The endpoints below
+> stay dormant unless `PROVISIONING_SECRET` / `MARKETING_API_*` are set; kept for
+> reference / possible future use.
+
 The **Hoppa SaaS app** (this repo, `hoppa` branch) and the **marketing site**
 (separate repo, Next.js + Stripe) are independent deployments. The marketing
 site owns **sign-up + Stripe billing + the subscription source of truth**;

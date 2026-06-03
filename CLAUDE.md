@@ -49,20 +49,30 @@ never gated. `hoppa` is kept as a frozen safety-net / staging branch
 - Multi-tenancy (Hoppa): row-level `tenant_id`, AsyncLocalStorage request
   context (`tenancy/context.ts`), `tenantEq()`/`stampTenant()` helpers
   (`tenancy/scope.ts`). `tenants` + `tenant_members` tables.
-- Subscriptions: billing is **consolidated in-app** (custom Stripe, no Stripe
-  Prices/Subscriptions). Per-workspace billing state lives on the `tenants` row
-  (`billing_status`, `trial_ends_at`, `next_bill_at`, …); `tenantIsActive()`
-  (`services/subscriptions.ts`) + `requireActiveSubscription` gate business
-  routes. Dormant unless `STRIPE_SECRET_KEY` is set (self-host = no billing);
-  `billing_exempt` tenants always pass. See `STRIPE_BILLING_REWORK.md`.
+- Subscriptions: the **portal owns billing** (custom Stripe, no Stripe
+  Prices/Subscriptions) — DB state on the `tenants` row (`billing_status`,
+  `trial_ends_at`, `next_bill_at`, …), the Stripe key, the off-session charge
+  cron, and the webhook. Gating reads **local** `tenantIsActive()`
+  (`services/subscriptions.ts`) + `requireActiveSubscription`. **Signup runs on
+  the marketing site** (`company-portal-saas`), a stateless BFF that proxies to
+  the portal's `/billing` endpoints (shared `SIGNUP_BFF_SECRET` → `X-Signup-Key`)
+  and ends in a single-use `/auth/handoff` auto-login. Dormant unless
+  `STRIPE_SECRET_KEY` is set; `billing_exempt` tenants always pass. See
+  `STRIPE_BILLING_REWORK.md`.
 
 ## Reference docs
-- `HOPPA_MARKETING_CONTRACT.md` — the marketing ⇄ Hoppa API contract
-  (provisioning webhook, `GET /subscriptions/:id`, `POST /billing-portal`).
-- `STRIPE_BILLING_REWORK.md` — **BUILT** on branch `stripe-billing` (off
-  `main`): custom Stripe billing (SetupIntent + self-owned 30-day trial +
-  off-session recurring charge from env `MONTHLY_PRICE_CENTS`; no Stripe
-  Prices/Products/Subscriptions), **consolidated in-app** (not the marketing
-  site). Env-gated + dormant until Stripe keys are set, so safe to merge before
-  going live. Data model, flow, key files, and the "To go live" steps (needs the
-  user's Stripe account) live there.
+- `STRIPE_BILLING_REWORK.md` — **BUILT** (current billing design): portal owns
+  the billing engine (DB state + Stripe key + off-session charge cron + webhook +
+  **local** subscription gating) on branch `stripe-billing`; **signup runs on the
+  marketing site** as a stateless BFF (`company-portal-saas`/`main`) that proxies
+  to `/billing/signup` + `/billing/complete` (shared `SIGNUP_BFF_SECRET`) and ends
+  in a single-use `/auth/handoff` auto-login. SetupIntent (no charge) + self-owned
+  30-day trial + recurring charge from env `MONTHLY_PRICE_CENTS`; no Stripe
+  Prices/Products/Subscriptions. Env-gated + dormant until Stripe keys + the
+  shared secret are set, so safe to merge before going live. Flow, key files, and
+  "To go live" (needs the user's Stripe account) live there.
+- `HOPPA_MARKETING_CONTRACT.md` — **VESTIGIAL.** An earlier "marketing owns
+  billing" contract (HMAC provisioning webhook, remote `MARKETING_API_*`
+  subscription client, `POST /billing-portal`). Superseded by the model above
+  (portal owns billing locally; the BFF only drives signup). Kept dormant —
+  nothing is wired to it unless `PROVISIONING_SECRET`/`MARKETING_API_*` are set.
