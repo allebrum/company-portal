@@ -22,10 +22,12 @@ Managed clusters for Hoppa: `hoppa-db` (Postgres 16), `hoppa-redis` (Valkey).
 `hoppa` has been **merged into `main`** (deliberately — the old "never merge"
 guardrail is retired). `main` is now ONE codebase serving two realities from
 config alone:
-- **Self-host / OSS:** no `MARKETING_API_*` → single default workspace, no
-  billing; `docker compose up` (Dockerfile + compose serve the whole app).
-- **SaaS:** set `MARKETING_API_URL` + `MARKETING_API_KEY` + `PROVISIONING_SECRET`
-  → multi-tenant + subscription gating + provisioning webhook.
+- **Self-host / OSS:** no `BILLING_ENFORCED` / `PROVISIONING_SECRET` → single
+  default workspace, ungated, no Stripe; `docker compose up` (Dockerfile +
+  compose serve the whole app).
+- **SaaS:** set `PROVISIONING_SECRET` + `MARKETING_ORIGIN` + `BILLING_ENFORCED`
+  → multi-tenant + subscription gating + the identity contract the marketing
+  billing service calls (billing itself lives in `company-portal-saas`).
 
 The prod app (`allebrum-portal`, watches `main`) was converted **in place**: on
 the convergence deploy, migrations `0017–0019` (hoppa's tenant work, renumbered
@@ -49,31 +51,30 @@ never gated. `hoppa` is kept as a frozen safety-net / staging branch
 - Multi-tenancy (Hoppa): row-level `tenant_id`, AsyncLocalStorage request
   context (`tenancy/context.ts`), `tenantEq()`/`stampTenant()` helpers
   (`tenancy/scope.ts`). `tenants` + `tenant_members` tables.
-- Subscriptions: the **portal owns billing** (custom Stripe, no Stripe
-  Prices/Subscriptions) — DB state on the `tenants` row (`billing_status`,
-  `trial_ends_at`, `next_bill_at`, …), the Stripe key, the off-session charge
-  cron, and the webhook. Gating reads **local** `tenantIsActive()`
-  (`services/subscriptions.ts`) + `requireActiveSubscription`. **Signup runs on
-  the marketing site** (`company-portal-saas`), a stateless BFF that proxies to
-  the portal's `/billing` endpoints (shared `SIGNUP_BFF_SECRET` → `X-Signup-Key`)
-  and ends in a single-use `/auth/handoff` auto-login. **Trial access requires a
-  card on file** (`tenantIsActive` gates `trialing` on a stored payment method).
-  Dormant unless `STRIPE_SECRET_KEY` is set; `billing_exempt` tenants always pass.
-  See `STRIPE_BILLING_REWORK.md`.
+- Subscriptions: **billing is split.** The **marketing service**
+  (`company-portal-saas`) is the billing engine — it owns Stripe (customer,
+  SetupIntent, the off-session recurring-charge cron, the webhook) and the
+  subscription STATE, which it writes into the `tenants` billing columns of THIS
+  database (it connects directly to the shared `allebrum-portal-db` via `pg`).
+  The **portal has NO Stripe** — it keeps the columns + reads `billing_status`
+  to gate (`tenantIsActive()` in `services/subscriptions.ts`, on env
+  `BILLING_ENFORCED`) and exposes an HMAC identity contract
+  (`routes/provisioning.ts`: `/provisioning/account` + `/handoff` +
+  `/billing-ref/validate`, shared `PROVISIONING_SECRET`) the marketing service
+  calls. Signup runs on the marketing `/signup`; it ends in a single-use
+  `/auth/handoff` auto-login. **Trial access requires a card on file.**
+  Self-host (`BILLING_ENFORCED` unset) → columns null → ungated, no Stripe.
+  `billing_exempt` tenants always pass. See `STRIPE_BILLING_REWORK.md`.
 
 ## Reference docs
-- `STRIPE_BILLING_REWORK.md` — **BUILT** (current billing design): portal owns
-  the billing engine (DB state + Stripe key + off-session charge cron + webhook +
-  **local** subscription gating) on branch `stripe-billing`; **signup runs on the
-  marketing site** as a stateless BFF (`company-portal-saas`/`main`) that proxies
-  to `/billing/signup` + `/billing/complete` (shared `SIGNUP_BFF_SECRET`) and ends
-  in a single-use `/auth/handoff` auto-login. SetupIntent (no charge) + self-owned
-  30-day trial + recurring charge from env `MONTHLY_PRICE_CENTS`; no Stripe
-  Prices/Products/Subscriptions. Env-gated + dormant until Stripe keys + the
-  shared secret are set, so safe to merge before going live. Flow, key files, and
-  "To go live" (needs the user's Stripe account) live there.
-- `HOPPA_MARKETING_CONTRACT.md` — **VESTIGIAL.** An earlier "marketing owns
-  billing" contract (HMAC provisioning webhook, remote `MARKETING_API_*`
-  subscription client, `POST /billing-portal`). Superseded by the model above
-  (portal owns billing locally; the BFF only drives signup). Kept dormant —
-  nothing is wired to it unless `PROVISIONING_SECRET`/`MARKETING_API_*` are set.
+- `STRIPE_BILLING_REWORK.md` — **BUILT** (current billing design): **billing is
+  split** — the marketing service (`company-portal-saas`/`billing-engine`) owns
+  Stripe + the recurring-charge cron + the subscription state, writing the
+  `tenants` billing columns directly in the shared `allebrum-portal-db`; the
+  portal (`company-portal`/`billing-split`) has NO Stripe and only reads those
+  columns to gate (`BILLING_ENFORCED`) + exposes the HMAC identity contract
+  (`PROVISIONING_SECRET`). SetupIntent (no charge) + 30-day card-required trial +
+  recurring charge from env `MONTHLY_PRICE_CENTS`; no Stripe
+  Prices/Products/Subscriptions. Inert until env is set, so safe to merge before
+  going live. Cross-service contract, key files, and "To go live" (needs the
+  user's Stripe account) live there.

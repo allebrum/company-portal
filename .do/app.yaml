@@ -44,14 +44,19 @@ services:
       - { key: ADMIN_EMAIL, scope: RUN_TIME, type: SECRET }
       - { key: ADMIN_PASSWORD, scope: RUN_TIME, type: SECRET }
       - { key: ALLOWED_EMAIL_DOMAINS, value: allebrum.com }
-      # SaaS mode (OPTIONAL — leave unset to run as a single workspace). When
-      # the marketing/billing site is live, set these as SECRETs to turn on
-      # subscription gating + the provisioning webhook. The default workspace is
-      # billing_exempt, so the internal team is never gated. See
-      # HOPPA_MARKETING_CONTRACT.md + STRIPE_BILLING_REWORK.md.
-      # - { key: MARKETING_API_URL, scope: RUN_TIME, type: SECRET }
-      # - { key: MARKETING_API_KEY, scope: RUN_TIME, type: SECRET }
+      # SaaS mode (OPTIONAL — leave unset to run as a single ungated workspace).
+      # Billing lives in the marketing service (allebrum/company-portal-saas),
+      # which writes the tenants billing columns in THIS database; the portal
+      # only reads them to gate + exposes the identity contract. When live, set:
+      #   PROVISIONING_SECRET — HMAC shared with the marketing service (mounts
+      #     /provisioning/account + /handoff + /billing-ref/validate).
+      #   MARKETING_ORIGIN    — marketing base URL (in-app "manage billing" link).
+      #   BILLING_ENFORCED    — "true" to actually gate (past_due/canceled/
+      #     trialing-no-card blocked; default workspace is billing_exempt).
+      # See STRIPE_BILLING_REWORK.md. No Stripe keys live in the portal.
       # - { key: PROVISIONING_SECRET, scope: RUN_TIME, type: SECRET }
+      # - { key: MARKETING_ORIGIN, value: https://hoppa-marketing-s7y49.ondigitalocean.app }
+      # - { key: BILLING_ENFORCED, value: "true" }
       # Gmail send uses the same Google OAuth app as login + Drive; the
       # callback URL is derived in env.ts (no extra env needed). Each
       # teammate connects their own Gmail under Settings → Integrations,
