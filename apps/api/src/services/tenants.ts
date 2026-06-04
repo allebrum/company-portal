@@ -13,11 +13,10 @@ import {
   type Tenant,
 } from '../db/schema.js';
 import { SYSTEM_GROUPS, SYSTEM_GROUP_PERMISSIONS } from '@allebrum/shared';
-import { env } from '../env.js';
 
 /**
  * A drizzle executor — the base `db` or a transaction handle. Lets the
- * provisioning helpers run inside `provisionBillingSignup`'s advisory-locked
+ * provisioning helpers run inside `provisionAccount`'s advisory-locked
  * transaction so a concurrent same-email signup can't create a duplicate
  * tenant/customer.
  */
@@ -248,37 +247,37 @@ export async function provisionTenant(
 }
 
 /**
- * Race-free billing signup provisioning. Wraps the whole find-or-create in a
- * transaction guarded by a per-email Postgres advisory lock, so two concurrent
- * `/billing/signup` calls for the same email can NEVER create duplicate tenants
- * or Stripe customers — the loser serializes behind the winner and resumes.
+ * Race-free account provisioning for the marketing billing service. Billing
+ * lives in the marketing service now: it creates the Stripe customer, then calls
+ * this (over the HMAC provisioning contract) to create the IDENTITY. A per-email
+ * Postgres advisory lock makes a duplicate tenant impossible; the loser resumes.
  *
- * Returns:
- *  - `created`/`resumed`: the workspace to attach the SetupIntent to.
- *  - `account_exists`: the email already belongs to a real (credentialed,
- *    active) account that doesn't own an in-progress billing workspace — the
- *    caller should tell them to sign in instead of silently attaching a new one.
+ * This sets the owner's password (argon2, on a brand-new / not-yet-credentialed
+ * owner only — never overwrites an existing one), records the Stripe customer id
+ * (`billingExternalId`, passed in), and marks the workspace `trialing` so the row
+ * is never left null (the gate is well-defined the instant it exists; trialing +
+ * no-card is blocked anyway). The marketing service owns the trial DATES — it
+ * stamps `trial_ends_at`/`next_bill_at` afterward.
  *
- * The single Stripe customer is created INSIDE the lock (via `createCustomer`)
- * only on the create path, so exactly one customer exists per signup. The
- * owner's password is set here too (on a brand-new / not-yet-credentialed owner)
- * so it's atomic with provisioning; an existing active user's password is never
- * overwritten.
+ * Returns the workspace to attach billing to, or `account_exists` when the email
+ * already belongs to a real credentialed account (the caller tells them to sign
+ * in). On `resumed` it returns the EXISTING tenant's `billingExternalId` so the
+ * marketing side can detach the spare customer it just created.
  */
-export type BillingSignupResult =
-  | { kind: 'created' | 'resumed'; tenantId: string; ownerUserId: string; customerId: string }
+export type ProvisionAccountResult =
+  | { kind: 'created' | 'resumed'; tenantId: string; ownerUserId: string; billingExternalId: string }
   | { kind: 'account_exists' };
 
-export async function provisionBillingSignup(args: {
+export async function provisionAccount(args: {
   email: string;
   ownerName: string;
   workspaceName: string;
   slug: string;
   /** Precomputed argon2 hash — set only on a brand-new / not-yet-credentialed owner. */
   passwordHash: string;
-  /** Creates the Stripe customer; called once, inside the lock, on the create path. */
-  createCustomer: () => Promise<string>;
-}): Promise<BillingSignupResult> {
+  /** Stripe customer id, created by the marketing service before this call. */
+  billingExternalId: string;
+}): Promise<ProvisionAccountResult> {
   const email = args.email.trim().toLowerCase();
   return db.transaction(async (tx) => {
     // Serialize all signups for this email (xact-scoped; released on commit).
@@ -294,7 +293,7 @@ export async function provisionBillingSignup(args: {
       // Retry / resume: reuse an already-owned billing workspace + its customer.
       const owned = await findOwnedBillingTenant(existingUser.id, tx);
       if (owned?.billingExternalId) {
-        return { kind: 'resumed', tenantId: owned.id, ownerUserId: existingUser.id, customerId: owned.billingExternalId };
+        return { kind: 'resumed', tenantId: owned.id, ownerUserId: existingUser.id, billingExternalId: owned.billingExternalId };
       }
       // A real prior account → don't silently attach a new paid workspace.
       if (existingUser.passwordHash && existingUser.status === 'active') {
@@ -303,15 +302,13 @@ export async function provisionBillingSignup(args: {
       // else (invited / passwordless, no billing) → fall through and provision.
     }
 
-    // New signup: create exactly one Stripe customer, then the workspace.
-    const customerId = await args.createCustomer();
     const prov = await provisionTenant(
       {
         name: args.workspaceName,
         slug: args.slug,
         ownerEmail: email,
         ownerName: args.ownerName,
-        billingExternalId: customerId,
+        billingExternalId: args.billingExternalId,
       },
       tx,
     );
@@ -326,23 +323,13 @@ export async function provisionBillingSignup(args: {
         .where(eq(users.id, prov.ownerUserId));
     }
 
-    // Start the self-owned trial atomically with provisioning so the workspace
-    // is never left at billing_status=null (which the gate would treat as
-    // "allow"). No charge until the trial ends; access still needs a card (the
-    // gate requires a stored payment method while trialing).
-    const trialEndsAt = new Date(Date.now() + env.TRIAL_DAYS * 86_400_000).toISOString();
+    // Mark trialing immediately so the row is never null (gate-safe). The
+    // marketing service stamps the trial dates; trialing + no card is blocked.
     await tx
       .update(tenants)
-      .set({
-        billingStatus: 'trialing',
-        trialEndsAt,
-        nextBillAt: trialEndsAt,
-        failedAttempts: 0,
-        lastPaymentError: null,
-        updatedAt: new Date().toISOString(),
-      })
+      .set({ billingStatus: 'trialing', failedAttempts: 0, lastPaymentError: null, updatedAt: new Date().toISOString() })
       .where(eq(tenants.id, prov.tenantId));
 
-    return { kind: 'created', tenantId: prov.tenantId, ownerUserId: prov.ownerUserId, customerId };
+    return { kind: 'created', tenantId: prov.tenantId, ownerUserId: prov.ownerUserId, billingExternalId: args.billingExternalId };
   });
 }

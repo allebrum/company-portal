@@ -7,13 +7,11 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import pinoHttp from 'pino-http';
-import cron from 'node-cron';
-import { env, isProd, billingConfigured } from './env.js';
+import { env, isProd } from './env.js';
 import { sessionMiddleware } from './session.js';
 import { apiRouter } from './routes/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { initIO } from './realtime/io.js';
-import { runDailyBilling } from './services/billingJob.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -93,19 +91,8 @@ httpServer.listen(env.API_PORT, () => {
   console.log(`[api] listening on :${env.API_PORT}  (origin=${env.WEB_ORIGIN})`);
 });
 
-// Custom Stripe billing: charge workspaces past their next_bill_at once a day.
-// In-process cron (single instance); idempotency keys keep it safe. Dormant
-// unless STRIPE_SECRET_KEY is set.
-if (billingConfigured) {
-  cron.schedule('0 2 * * *', () => {
-    void runDailyBilling().catch((e) => {
-      // eslint-disable-next-line no-console
-      console.error('[billing] daily job failed:', e);
-    });
-  });
-  // eslint-disable-next-line no-console
-  console.log('[billing] daily charge job scheduled (02:00 daily)');
-}
+// Billing (Stripe + the recurring-charge cron) lives in the separate marketing
+// service now; the portal only reads the tenant billing columns to gate.
 
 const shutdown = (signal: string) => {
   // eslint-disable-next-line no-console

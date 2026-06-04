@@ -10,7 +10,6 @@ import { Sidebar } from './Sidebar';
 import { TimerBar } from './TimerBar';
 import { ClientSpaceOverlay } from '@/components/space/ClientSpaceOverlay';
 import { UploadTray } from '@/components/upload/UploadTray';
-import { StripeCardForm } from '@/components/billing/StripeCardForm';
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
@@ -179,49 +178,31 @@ function ShellWithBootstrap({ children }: { children: ReactNode }) {
 
 /**
  * Hoppa: shown when the active workspace's subscription is inactive (402 from
- * the gate). The owner can open Stripe's billing portal to re-subscribe; a
- * multi-workspace user can switch to an active workspace; anyone can sign out.
+ * the gate). Billing lives on the marketing site, so "Update payment method"
+ * redirects to the marketing-hosted fix-card page (via a short-lived signed
+ * link); a multi-workspace user can switch to an active workspace; anyone can
+ * sign out.
  */
 function SubscriptionRequired() {
   const { me, switchWorkspace, logout } = useAuth();
   const [busy, setBusy] = useState(false);
-  const [card, setCard] = useState<{ clientSecret: string; publishableKey: string } | null>(null);
   const [billingErr, setBillingErr] = useState<string | null>(null);
   const others = (me?.workspaces ?? []).filter((w) => w.id !== me?.tenantId);
 
-  const startUpdateCard = async () => {
+  // Mint a signed "manage billing" link on the portal and hand off (top-level
+  // redirect) to the marketing-hosted card page; it stores the card + reactivates
+  // and redirects back to /dashboard (the portal session is still live).
+  const openManageBilling = async () => {
     setBusy(true);
     setBillingErr(null);
     try {
-      const r = await api.post<{ clientSecret: string; publishableKey: string | null }>('/billing/update-card', {});
-      if (!r.publishableKey) throw new Error('no_publishable_key');
-      setCard({ clientSecret: r.clientSecret, publishableKey: r.publishableKey });
+      const r = await api.post<{ url: string }>('/billing/manage-link', {});
+      if (!r.url) throw new Error('no_url');
+      window.location.assign(r.url);
     } catch {
       setBillingErr('Billing isn’t available right now. Please contact support.');
-    } finally {
       setBusy(false);
     }
-  };
-
-  // Card saved → store it (no charge), then reload to re-run the gate. A trialing
-  // workspace just needs a card on file to pass the gate (don't bill mid-trial);
-  // a past_due/canceled one additionally charges now so access is restored
-  // without waiting for the nightly job.
-  const afterCardSaved = async (setupIntentId?: string) => {
-    try {
-      if (setupIntentId) await api.post('/billing/confirm-setup', { setupIntentId });
-      const st = await api.get<{ billingStatus: string | null }>('/billing/status');
-      if (st.billingStatus === 'past_due' || st.billingStatus === 'canceled') {
-        try {
-          await api.post('/billing/retry', {});
-        } catch {
-          /* the daily job will retry */
-        }
-      }
-    } catch {
-      /* the webhook stores the card + the daily job reconciles */
-    }
-    window.location.reload();
   };
 
   return (
@@ -237,26 +218,14 @@ function SubscriptionRequired() {
         </p>
         {billingErr && <div className="mt-4 text-sm text-red-600">{billingErr}</div>}
 
-        {card ? (
-          <div className="mt-6 text-left">
-            <StripeCardForm
-              publishableKey={card.publishableKey}
-              clientSecret={card.clientSecret}
-              submitLabel="Save card & reactivate"
-              returnUrl={typeof window !== 'undefined' ? window.location.href : '/'}
-              onComplete={afterCardSaved}
-            />
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => void startUpdateCard()}
-            disabled={busy}
-            className="mt-6 w-full rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-semibold py-2.5 disabled:opacity-60"
-          >
-            {busy ? 'Opening…' : 'Update payment method'}
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => void openManageBilling()}
+          disabled={busy}
+          className="mt-6 w-full rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-semibold py-2.5 disabled:opacity-60"
+        >
+          {busy ? 'Opening…' : 'Update payment method'}
+        </button>
 
         {others.length > 0 && (
           <div className="mt-6 pt-5 border-t border-gray-100 text-left">

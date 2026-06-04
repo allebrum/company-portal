@@ -1,16 +1,16 @@
-import { billingConfigured } from '../env.js';
+import { billingEnforced } from '../env.js';
 import type { Tenant } from '../db/schema.js';
 
 /**
- * Local subscription gating for the consolidated in-app Stripe billing.
+ * Local subscription gate. Billing lives in the separate MARKETING service,
+ * which writes the tenant's `billing_status` (+ trial/card columns) directly in
+ * this database. The portal only READS it here — no Stripe, no remote call.
  *
- * Billing state lives on the tenant row (`billing_status`, set by signup + the
- * daily charge job + the Stripe webhooks). There is no external marketing API.
- * When billing isn't configured (self-host / pre-billing), every workspace is
- * treated as active so the app runs ungated.
+ * When `BILLING_ENFORCED` is false (self-host / pre-billing), every workspace is
+ * treated as active so the OSS app runs ungated with the billing columns null.
  */
 export function tenantIsActive(tenant: Tenant | undefined): boolean {
-  if (!billingConfigured) return true; // self-host / pre-billing: no gating
+  if (!billingEnforced) return true; // self-host / pre-billing: no gating
   if (!tenant) return false;
   if (tenant.billingExempt) return true; // grandfathered internal workspace
   const s = tenant.billingStatus;

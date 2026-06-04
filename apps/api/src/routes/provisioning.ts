@@ -1,22 +1,21 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import argon2 from 'argon2';
 import { env, provisioningConfigured } from '../env.js';
 import { rateLimit } from '../middleware/rateLimit.js';
-import { provisionTenant } from '../services/tenants.js';
-import { issueToken, INVITE_TTL_MS } from '../auth/tokens.js';
-import { sendInviteEmail } from '../services/mail.js';
+import { provisionAccount, getOwnerUserId, getTenant } from '../services/tenants.js';
+import { issueToken, HANDOFF_TTL_MS } from '../auth/tokens.js';
+import { verifyManageRef } from '../auth/manageRef.js';
 
 /**
- * Hoppa Phase 3 — inbound provisioning webhook from the marketing site.
+ * Identity contract for the marketing billing service (server-to-server, HMAC).
  *
- * Fired on Stripe `checkout.session.completed`: the marketing site POSTs the
- * new workspace + owner here, signed with an HMAC over the raw body using the
- * shared PROVISIONING_SECRET. We verify the signature, create the workspace +
- * owner (provisionTenant), issue an invite magic-link, and return it so the
- * marketing site can drop the owner straight into onboarding.
- *
- * No session — this is a server-to-server call. The HMAC IS the auth. The
- * router is only mounted when PROVISIONING_SECRET is set.
+ * Billing lives in the marketing service now; IDENTITY stays here. The marketing
+ * service creates the Stripe customer, then calls these endpoints — signed with
+ * an HMAC over the raw body using the shared PROVISIONING_SECRET — to create the
+ * account, mint the auto-login handoff, and validate the in-app "fix card" ref.
+ * The HMAC IS the auth (no session). The router is only mounted when
+ * PROVISIONING_SECRET is set (so self-host never exposes it).
  */
 export const provisioningRouter = Router();
 
@@ -33,6 +32,11 @@ function verifySignature(rawBody: Buffer | undefined, signature: string | undefi
   }
 }
 
+function authed(req: Request): boolean {
+  const rawBody = (req as unknown as { rawBody?: Buffer }).rawBody;
+  return verifySignature(rawBody, req.header('X-Hoppa-Signature') ?? undefined);
+}
+
 function slugify(s: string): string {
   return (
     s
@@ -45,60 +49,110 @@ function slugify(s: string): string {
   );
 }
 
-provisioningRouter.post('/tenant', rateLimit({ key: 'provision', max: 30, windowSec: 60 }), async (req, res, next) => {
+// ---- C1: create the account (identity) for a marketing-side signup -----------
+// The marketing service has already created the Stripe customer; it passes the
+// customer id in. We create the tenant + owner (race-safe), set the password,
+// record the customer id, and mark the workspace trialing.
+provisioningRouter.post('/account', rateLimit({ key: 'provision', max: 30, windowSec: 60 }), async (req, res, next) => {
   try {
     if (!provisioningConfigured) {
       res.status(503).json({ error: 'provisioning_not_configured' });
       return;
     }
-    const rawBody = (req as unknown as { rawBody?: Buffer }).rawBody;
-    const signature = req.header('X-Hoppa-Signature') ?? undefined;
-    if (!verifySignature(rawBody, signature)) {
+    if (!authed(req)) {
       res.status(401).json({ error: 'bad_signature' });
       return;
     }
-
     const body = req.body as {
-      billingExternalId?: string;
+      email?: string;
+      password?: string;
       workspaceName?: string;
-      ownerEmail?: string;
       ownerName?: string;
-      plan?: string;
-      seats?: number;
+      billingExternalId?: string;
     };
-    if (!body.workspaceName || !body.ownerEmail) {
-      res.status(400).json({ error: 'workspaceName_and_ownerEmail_required' });
+    if (!body.email || !body.password || !body.workspaceName || !body.billingExternalId) {
+      res.status(400).json({ error: 'missing_fields' });
       return;
     }
-
-    const { tenantId, ownerUserId } = await provisionTenant({
-      name: body.workspaceName,
+    const passwordHash = await argon2.hash(body.password);
+    const result = await provisionAccount({
+      email: body.email,
+      ownerName: body.ownerName?.trim() || body.email,
+      workspaceName: body.workspaceName,
       slug: slugify(body.workspaceName),
-      ownerEmail: body.ownerEmail,
-      ownerName: body.ownerName ?? body.ownerEmail,
-      billingExternalId: body.billingExternalId ?? null,
-      plan: body.plan ?? null,
-      seatLimit: typeof body.seats === 'number' ? body.seats : null,
+      passwordHash,
+      billingExternalId: body.billingExternalId,
     });
-
-    // Issue an invite magic-link so the owner sets their password + lands in
-    // the new workspace. Email send is best-effort (system sender may not be
-    // connected yet); the URL is always returned for the marketing site to use.
-    const { rawToken, expiresAt } = await issueToken({ kind: 'user', userId: ownerUserId }, 'invite', INVITE_TTL_MS);
-    const inviteUrl = `${env.WEB_ORIGIN}/accept-invite?token=${encodeURIComponent(rawToken)}`;
-    try {
-      await sendInviteEmail({
-        senderUserId: null,
-        to: body.ownerEmail,
-        inviterName: 'Hoppa',
-        acceptUrl: inviteUrl,
-        expiresAt,
-      });
-    } catch {
-      /* best-effort — the URL is returned regardless */
+    if (result.kind === 'account_exists') {
+      res.status(409).json({ error: 'account_exists' });
+      return;
     }
+    res.status(200).json({
+      tenantId: result.tenantId,
+      ownerUserId: result.ownerUserId,
+      billingExternalId: result.billingExternalId,
+      kind: result.kind,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
 
-    res.status(200).json({ tenantId, inviteUrl });
+// ---- C2: mint a single-use auto-login handoff for a provisioned tenant -------
+provisioningRouter.post('/handoff', async (req, res, next) => {
+  try {
+    if (!provisioningConfigured) {
+      res.status(503).json({ error: 'provisioning_not_configured' });
+      return;
+    }
+    if (!authed(req)) {
+      res.status(401).json({ error: 'bad_signature' });
+      return;
+    }
+    const body = req.body as { tenantId?: string };
+    if (!body.tenantId) {
+      res.status(400).json({ error: 'tenantId_required' });
+      return;
+    }
+    const ownerId = await getOwnerUserId(body.tenantId);
+    if (!ownerId) {
+      res.status(404).json({ error: 'unknown_tenant' });
+      return;
+    }
+    const { rawToken } = await issueToken({ kind: 'user', userId: ownerId }, 'portal-login', HANDOFF_TTL_MS);
+    res.status(200).json({ handoffUrl: `${env.WEB_ORIGIN}/auth/handoff?token=${encodeURIComponent(rawToken)}` });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ---- C3: validate a portal-signed "manage billing" ref (in-app fix-card) -----
+provisioningRouter.post('/billing-ref/validate', async (req, res, next) => {
+  try {
+    if (!provisioningConfigured) {
+      res.status(503).json({ error: 'provisioning_not_configured' });
+      return;
+    }
+    if (!authed(req)) {
+      res.status(401).json({ error: 'bad_signature' });
+      return;
+    }
+    const body = req.body as { manageRef?: string };
+    const parsed = body.manageRef ? verifyManageRef(body.manageRef) : null;
+    if (!parsed) {
+      res.status(401).json({ error: 'invalid_ref' });
+      return;
+    }
+    const tenant = await getTenant(parsed.tenantId);
+    if (!tenant?.billingExternalId) {
+      res.status(404).json({ error: 'unknown_tenant' });
+      return;
+    }
+    res.status(200).json({
+      tenantId: tenant.id,
+      billingExternalId: tenant.billingExternalId,
+      billingStatus: tenant.billingStatus ?? null,
+    });
   } catch (e) {
     next(e);
   }

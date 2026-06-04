@@ -32,38 +32,23 @@ const EnvSchema = z.object({
   ADMIN_EMAIL: z.string().email().optional(),
   ADMIN_PASSWORD: z.string().min(8).optional(),
   ALLOWED_EMAIL_DOMAINS: z.string().optional(),
-  // Hoppa (Phase 3) — the separate marketing site that owns Stripe billing +
-  // subscription truth. All optional: when unset, subscription gating no-ops
-  // to "allow" and the provisioning webhook is disabled, so Hoppa boots and
-  // runs even before the marketing site exists.
-  MARKETING_API_URL: z.string().url().optional(),     // e.g. https://hoppa.app/api
-  MARKETING_API_KEY: z.string().optional(),           // bearer for subscription/billing reads
-  PROVISIONING_SECRET: z.string().optional(),         // HMAC shared secret for the inbound provisioning webhook
+  // Hoppa SaaS — billing lives in the separate MARKETING service, which owns
+  // Stripe and writes the `tenants` billing columns directly in THIS database.
+  // The portal only READS them to gate, and exposes the identity provisioning
+  // contract (mounted only when PROVISIONING_SECRET is set). All optional →
+  // self-host runs ungated with no billing.
+  PROVISIONING_SECRET: z.string().optional(),    // HMAC shared secret with the marketing billing service
+  MARKETING_ORIGIN: z.string().url().optional(), // marketing base URL (in-app "manage billing" redirect)
+  // Gate enforcement: false (self-host / pre-billing) → every workspace active;
+  // SaaS sets true to block past_due / canceled / trialing-without-card. String→
+  // bool so "false" isn't truthy.
+  BILLING_ENFORCED: z.string().optional().transform((v) => v === 'true' || v === '1'),
   // Self-host single-container mode: when "true"/"1", the API also serves the
   // pre-built static web app (apps/web/out) at / so one process serves the
   // whole product on one origin. Off in the SaaS deploy, where the web is a
   // separate static site. (z.coerce.boolean would treat "false" as truthy.)
   SERVE_WEB: z.string().optional().transform((v) => v === 'true' || v === '1'),
   WEB_DIST_DIR: z.string().optional(),                // path to apps/web/out (defaults derived in index.ts)
-  // Custom Stripe billing (consolidated in-app). All optional: when
-  // STRIPE_SECRET_KEY is unset, billing is dormant and gating allows everyone
-  // (self-host / pre-billing). We own the 30-day trial + recurring schedule;
-  // Stripe only stores the card and runs the off-session charges (no Stripe
-  // Prices/Products/Subscriptions).
-  STRIPE_SECRET_KEY: z.string().optional(),
-  STRIPE_WEBHOOK_SECRET: z.string().optional(),
-  STRIPE_PUBLISHABLE_KEY: z.string().optional(),      // surfaced to the browser via GET /billing/config
-  MONTHLY_PRICE_CENTS: z.coerce.number().int().min(0).default(0),  // smallest unit, e.g. 2999 = $29.99
-  BILLING_CURRENCY: z.string().default('usd'),
-  TRIAL_DAYS: z.coerce.number().int().min(0).default(30),
-  BILLING_INTERVAL_DAYS: z.coerce.number().int().min(1).default(30),
-  BILLING_MAX_RETRIES: z.coerce.number().int().min(1).default(4),  // past_due retries before canceled
-  // Marketing BFF shared secret. The marketing site's signup service is the
-  // only caller of /billing/signup + /billing/complete + /billing/status-by-ref;
-  // when set, those endpoints require a matching `X-Signup-Key` header so the
-  // public can't drive signup directly (bypassing the BFF's rate-limit). When
-  // unset (self-host), the endpoints stay open.
-  SIGNUP_BFF_SECRET: z.string().optional(),
 });
 
 export const env = EnvSchema.parse(process.env);
@@ -101,16 +86,10 @@ export const gmailOAuthConfigured = !!(
   gmailRedirectUrl
 );
 
-// Hoppa: the subscription API is "configured" only when both the base URL and
-// the API key are present. When false, gating allows everything (single
-// self-hosted workspace mode / pre-marketing-site).
-export const subscriptionsConfigured = !!(env.MARKETING_API_URL && env.MARKETING_API_KEY);
-// The provisioning webhook is only mounted/active when its HMAC secret is set.
+// The identity provisioning contract (marketing → portal) is only mounted when
+// its shared HMAC secret is set.
 export const provisioningConfigured = !!env.PROVISIONING_SECRET;
 
-// Custom Stripe billing is active only when the secret key is set. When false,
-// signup/charges are disabled and subscription gating allows everyone (the
-// app runs as a single self-hosted workspace with no billing).
-export const billingConfigured = !!env.STRIPE_SECRET_KEY;
-// Stripe webhook signature verification needs the webhook secret too.
-export const billingWebhookConfigured = !!(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET);
+// Subscription gate enforcement. False (self-host / pre-billing) → every
+// workspace is treated active; SaaS sets BILLING_ENFORCED=true to gate.
+export const billingEnforced = env.BILLING_ENFORCED;

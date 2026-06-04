@@ -3,15 +3,17 @@ import { getTenant } from '../services/tenants.js';
 import { tenantIsActive } from '../services/subscriptions.js';
 
 /**
- * Gate business routes on the workspace's subscription (consolidated in-app
- * Stripe billing). Mounted globally after `tenantContext`.
+ * Gate business routes on the workspace's subscription. Billing lives in the
+ * separate marketing service; this only READS the tenant's local billing_status
+ * (written there). Mounted globally after `tenantContext`.
  *
  *  - No staff session (unauth / client-portal / public routes): pass through.
- *  - Exempt staff paths (/auth, /billing, …): always pass so a lapsed owner
- *    can still log in, switch workspace, and reach the billing screen.
- *  - Otherwise: read the tenant's local billing_status. active/trialing →
- *    allow; past_due/canceled → 402 (block immediately). billing_exempt and
- *    self-host (no STRIPE_SECRET_KEY) always pass — see `tenantIsActive`.
+ *  - Exempt staff paths (/auth, /billing, …): always pass so a lapsed owner can
+ *    still log in, switch workspace, and reach /billing/manage-link (the link to
+ *    the marketing-hosted fix-card page).
+ *  - Otherwise: active / trialing-with-card → allow; past_due / canceled /
+ *    trialing-no-card → 402. billing_exempt and self-host (BILLING_ENFORCED
+ *    false) always pass — see `tenantIsActive`.
  */
 const EXEMPT_PREFIXES = ['/auth', '/billing', '/provisioning', '/health', '/q', '/portal'];
 
