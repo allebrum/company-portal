@@ -90,7 +90,7 @@ type EnqueueArgs = {
 
 type UploadCtx = {
   items: UploadItem[];
-  enqueue: (args: EnqueueArgs) => void;
+  enqueue: (args: EnqueueArgs) => string[];
   cancel: (id: string) => void;
   retry: (id: string) => void;
   dismiss: (id: string) => void;
@@ -285,7 +285,7 @@ export function UploadManagerProvider({ children }: { children: ReactNode }) {
   }, [items, startUpload]);
 
   const enqueue = useCallback(({ target, scopeLabel, files }: EnqueueArgs) => {
-    if (files.length === 0) return;
+    if (files.length === 0) return [];
     const newItems: UploadItem[] = files.map((file) => {
       // Preflight the size cap so we don't waste bytes only to be 413'd.
       if (file.size > MAX_FILE_BYTES) {
@@ -310,6 +310,7 @@ export function UploadManagerProvider({ children }: { children: ReactNode }) {
       };
     });
     dispatch({ type: 'enqueue', items: newItems });
+    return newItems.map((it) => it.id);
   }, []);
 
   const cancel = useCallback((id: string) => {

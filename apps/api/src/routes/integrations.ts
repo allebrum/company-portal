@@ -240,6 +240,20 @@ integrationsRouter.get('/drive/file/:id/download', requirePermission('media.mana
   }
 });
 
+integrationsRouter.get('/drive/file/:id/content', driveAccess, async (req, res, next) => {
+  try {
+    const id = req.params.id!;
+    const meta = await getFileMeta(id);
+    const stream = await downloadFile(id);
+    res.setHeader('Content-Type', meta.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('Cache-Control', 'private, max-age=60');
+    stream.pipe(res);
+  } catch (e) {
+    next(e);
+  }
+});
+
 integrationsRouter.delete('/drive/file/:id', requirePermission('media.manage'), async (req, res, next) => {
   try {
     await deleteEntry(req.params.id!);

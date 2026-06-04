@@ -185,7 +185,7 @@ export function UploadTray() {
   return (
     <div
       ref={trayRef}
-      className="fixed z-[90] w-[360px] max-w-[calc(100vw-2rem)]"
+      className="fixed z-[220] w-[360px] max-w-[calc(100vw-2rem)]"
       style={{ left: position.x, top: position.y }}
     >
       <div className="rounded-2xl border border-gray-200 bg-white shadow-xl overflow-hidden">

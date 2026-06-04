@@ -5,11 +5,14 @@ import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+let modalLayerCounter = 0;
+
 export function Modal({
   open,
   onClose,
   title,
   size = 'md',
+  layerBase = 100,
   footer,
   children,
 }: {
@@ -17,12 +20,21 @@ export function Modal({
   onClose: () => void;
   title?: string;
   size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | 'screen';
+  layerBase?: number;
   footer?: React.ReactNode;
   children: React.ReactNode;
 }) {
   // Portal target only exists on the client (app is a static export).
   const [mounted, setMounted] = useState(false);
+  const [layerZ, setLayerZ] = useState<number>(layerBase);
   useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (!open) return;
+    // Monotonic layer assignment means the latest-opened modal always sits on top.
+    modalLayerCounter += 1;
+    setLayerZ(layerBase + modalLayerCounter);
+  }, [open, layerBase]);
 
   useEffect(() => {
     if (!open) return;
@@ -59,7 +71,7 @@ export function Modal({
   // containing block for fixed elements (e.g. the TimerBar's backdrop-filter)
   // or clips overflow. This keeps modals viewport-centered everywhere.
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
+    <div className="fixed inset-0 flex items-center justify-center p-4 sm:p-6" style={{ zIndex: layerZ }}>
       <div className="absolute inset-0 bg-gray-900/40 backdrop-blur-sm" onClick={onClose} />
       <div
         role="dialog"
