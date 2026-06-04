@@ -49,6 +49,12 @@ const EnvSchema = z.object({
   // separate static site. (z.coerce.boolean would treat "false" as truthy.)
   SERVE_WEB: z.string().optional().transform((v) => v === 'true' || v === '1'),
   WEB_DIST_DIR: z.string().optional(),                // path to apps/web/out (defaults derived in index.ts)
+  // Instance-level: is email+password login offered AT ALL on this deployment?
+  // Default true; a pure-SSO self-host sets PASSWORD_LOGIN_ENABLED=false to hide
+  // it entirely. This is the shared-login-page gate — per-WORKSPACE password
+  // policy (app_settings.passwordLoginEnabled) is enforced separately, against
+  // the user's resolved tenant at login (see routes/auth.ts).
+  PASSWORD_LOGIN_ENABLED: z.string().optional(),
 });
 
 export const env = EnvSchema.parse(process.env);
@@ -93,3 +99,10 @@ export const provisioningConfigured = !!env.PROVISIONING_SECRET;
 // Subscription gate enforcement. False (self-host / pre-billing) → every
 // workspace is treated active; SaaS sets BILLING_ENFORCED=true to gate.
 export const billingEnforced = env.BILLING_ENFORCED;
+
+// Instance-level password-login switch. Default ON; only an explicit
+// PASSWORD_LOGIN_ENABLED=false (or 0) turns the password surface off entirely
+// (pure-SSO deployments). Anything else — unset included — leaves it on.
+export const passwordLoginEnabled = !(
+  env.PASSWORD_LOGIN_ENABLED === 'false' || env.PASSWORD_LOGIN_ENABLED === '0'
+);

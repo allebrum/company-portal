@@ -8,7 +8,7 @@ import {
   ResetPasswordSchema,
   AcceptInviteSchema,
 } from '@allebrum/shared';
-import type { AuthConfig } from '@allebrum/shared';
+import type { AuthConfig, AuthMethods } from '@allebrum/shared';
 import { validate, getValidated } from '../middleware/validate.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
@@ -27,7 +27,8 @@ import { buildConsentUrl, exchangeCodeForProfile } from '../auth/google.js';
 import { needsSecondFactor } from '../services/twofa.js';
 import { db } from '../db/client.js';
 import { oauthTokens, users } from '../db/schema.js';
-import { env, googleOAuthConfigured } from '../env.js';
+import { env, googleOAuthConfigured, passwordLoginEnabled } from '../env.js';
+import { withTenant } from '../tenancy/context.js';
 import {
   issueToken,
   consumeToken,
@@ -39,13 +40,18 @@ import { appendActivity } from '../services/activity.js';
 
 export const authRouter = Router();
 
-// Public: lets the login page decide which methods to show.
+// Public: step 1 of login. The shared login page can't know a user's workspace
+// before they identify themselves, so the METHODS here are INSTANCE-level (is
+// password offered on this deployment + is Google configured). Per-account /
+// per-workspace refinement happens at `POST /auth/methods` once an email is
+// entered. Branding/legal links come from the default workspace so the initial
+// page still renders on-brand.
 authRouter.get('/config', async (_req, res, next) => {
   try {
     const s = await getSettings();
     const cfg: AuthConfig = {
-      passwordLoginEnabled: s.passwordLoginEnabled,
-      googleLoginEnabled: s.googleLoginEnabled && googleOAuthConfigured,
+      passwordLoginEnabled,
+      googleLoginEnabled: googleOAuthConfigured,
       termsUrl: s.termsUrl,
       privacyUrl: s.privacyUrl,
       portalName: s.portalName,
@@ -58,10 +64,69 @@ authRouter.get('/config', async (_req, res, next) => {
   }
 });
 
+// Public: step 2 of login — given an email, which methods does THIS account
+// support? Resolves the user's workspace and honors that workspace's policy
+// (app_settings.passwordLoginEnabled/googleLoginEnabled) + whether they have a
+// password set. Unknown emails get the instance defaults + default branding, so
+// the response doesn't trivially reveal whether an email exists (rate-limited
+// on top). Reuses ForgotPasswordSchema since both take just `{ email }`.
+authRouter.post(
+  '/methods',
+  rateLimit({ key: 'auth-methods', max: 20, windowSec: 60 }),
+  validate(ForgotPasswordSchema),
+  async (req, res, next) => {
+    try {
+      const { email } = getValidated<typeof ForgotPasswordSchema._type>(req);
+      const def = await getSettings(); // default workspace → fallback branding
+      const fallbackBranding = {
+        portalName: def.portalName,
+        brandPrimaryColor: def.brandPrimaryColor,
+        brandLogoDataUrl: def.brandLogoDataUrl,
+      };
+      // The Google callback resolves new sign-ins into the default workspace and
+      // enforces ITS email-domain allowlist, so only offer Google when this
+      // email's domain would actually pass (empty allowlist = any domain). This
+      // keeps SaaS users (non-listed domains) from seeing a button that 404s.
+      const domain = email.split('@')[1]?.toLowerCase() ?? '';
+      const googleDomainOk =
+        def.allowedEmailDomains.length === 0 ||
+        def.allowedEmailDomains.map((d) => d.toLowerCase()).includes(domain);
+      const googleAvailable = googleOAuthConfigured && googleDomainOk;
+
+      const user = await findByEmail(email);
+      const tenantId = user ? await resolveLoginTenantId(user.id) : null;
+      if (!user || !tenantId) {
+        // Unknown email (or known-but-no-workspace) → instance defaults. For a
+        // known user we still respect whether they actually have a password.
+        const methods: AuthMethods = {
+          password: passwordLoginEnabled && (user ? !!user.passwordHash : true),
+          google: googleAvailable,
+          ...fallbackBranding,
+        };
+        res.json(methods);
+        return;
+      }
+      const s = await withTenant(tenantId, () => getSettings());
+      const methods: AuthMethods = {
+        password: passwordLoginEnabled && !!user.passwordHash && s.passwordLoginEnabled,
+        google: googleAvailable && s.googleLoginEnabled,
+        portalName: s.portalName,
+        brandPrimaryColor: s.brandPrimaryColor,
+        brandLogoDataUrl: s.brandLogoDataUrl,
+      };
+      res.json(methods);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
 authRouter.post('/login', rateLimit({ key: 'login', max: 10, windowSec: 60 }), validate(LoginSchema), async (req, res, next) => {
   try {
-    const settings = await getSettings();
-    if (!settings.passwordLoginEnabled) {
+    // Instance-level off-switch first (pure-SSO deployments). The PER-WORKSPACE
+    // password policy is enforced below, against the user's RESOLVED tenant —
+    // NOT the default workspace (which is why SaaS signups used to get a 403).
+    if (!passwordLoginEnabled) {
       res.status(403).json({ error: 'password_login_disabled' });
       return;
     }
@@ -72,12 +137,20 @@ authRouter.post('/login', rateLimit({ key: 'login', max: 10, windowSec: 60 }), v
       return;
     }
 
-    // Hoppa: resolve the user's active workspace. Phase 1 — every user
-    // belongs to the default workspace. A user with no workspace can't enter
-    // the app (they'd need to subscribe on the marketing site first).
+    // Hoppa: resolve the user's active workspace. A user with no workspace
+    // can't enter the app (they'd need to subscribe on the marketing site
+    // first).
     const tenantId = await resolveLoginTenantId(user.id);
     if (!tenantId) {
       res.status(403).json({ error: 'no_workspace' });
+      return;
+    }
+
+    // Honor the RESOLVED workspace's password policy. A user who verified a
+    // password but whose workspace forbids it (SSO-only org) is rejected here.
+    const settings = await withTenant(tenantId, () => getSettings());
+    if (!settings.passwordLoginEnabled) {
+      res.status(403).json({ error: 'password_login_disabled' });
       return;
     }
 
@@ -287,9 +360,11 @@ authRouter.get('/handoff', async (req, res, next) => {
 
 // ---- Password reset / accept-invite ----
 //
-// All three routes are rate-limited and gated on `passwordLoginEnabled` —
-// if the org has disabled password login, password recovery would just
-// re-enable the surface they tried to close.
+// All three are rate-limited and gated on the INSTANCE `passwordLoginEnabled`
+// (a pure-SSO deployment turns the whole surface off). `forgot-password`
+// additionally resolves the user's workspace and respects ITS password policy,
+// so an SSO-only org never emits reset links — and `verifyLogin`/the reset flow
+// already no-op for accounts with no password hash.
 
 // "Forgot password" returns 200 unconditionally to defeat email-enumeration.
 // We perform a constant-time argon2 dummy hash on misses so timing doesn't
@@ -300,14 +375,18 @@ authRouter.post(
   validate(ForgotPasswordSchema),
   async (req, res, next) => {
     try {
-      const settings = await getSettings();
-      if (!settings.passwordLoginEnabled) {
+      if (!passwordLoginEnabled) {
         res.status(403).json({ error: 'password_login_disabled' });
         return;
       }
       const { email } = getValidated<typeof ForgotPasswordSchema._type>(req);
       const user = await findByEmail(email);
-      if (user && user.passwordHash) {
+      // Resolve the user's workspace so we honor ITS password policy and use
+      // ITS configured system sender (not the default workspace's). Falls back
+      // to default settings for unknown emails (the else-branch ignores it).
+      const tenantId = user ? await resolveLoginTenantId(user.id) : null;
+      const settings = tenantId ? await withTenant(tenantId, () => getSettings()) : await getSettings();
+      if (user && user.passwordHash && settings.passwordLoginEnabled) {
         // Invalidate any prior unused reset tokens so older email links
         // can't be replayed after a new reset request.
         await invalidateTokensFor(user.id, 'reset');
@@ -343,8 +422,7 @@ authRouter.post(
   validate(ResetPasswordSchema),
   async (req, res, next) => {
     try {
-      const settings = await getSettings();
-      if (!settings.passwordLoginEnabled) {
+      if (!passwordLoginEnabled) {
         res.status(403).json({ error: 'password_login_disabled' });
         return;
       }
@@ -375,8 +453,7 @@ authRouter.post(
   validate(AcceptInviteSchema),
   async (req, res, next) => {
     try {
-      const settings = await getSettings();
-      if (!settings.passwordLoginEnabled) {
+      if (!passwordLoginEnabled) {
         res.status(403).json({ error: 'password_login_disabled' });
         return;
       }

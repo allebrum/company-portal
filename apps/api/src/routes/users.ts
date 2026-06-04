@@ -6,6 +6,7 @@ import { validate, getValidated } from '../middleware/validate.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { listUsers, inviteUser, updateUser, deleteUser, resendInvite } from '../services/users.js';
 import { setUserGroups } from '../services/rbac.js';
+import { isMember } from '../services/tenants.js';
 
 export const usersRouter = Router();
 
@@ -23,7 +24,7 @@ usersRouter.post('/', requirePermission('users.manage'), validate(InviteUserSche
   try {
     const input = getValidated<typeof InviteUserSchema._type>(req);
     const me = req.session.user!;
-    const row = await inviteUser({
+    const { user: row, reused } = await inviteUser({
       name: input.name,
       email: input.email,
       billable: input.billable,
@@ -34,7 +35,9 @@ usersRouter.post('/', requirePermission('users.manage'), validate(InviteUserSche
     if (input.groupIds.length > 0) {
       await setUserGroups(row.id, input.groupIds, me.userId);
     }
-    res.status(201).json(row);
+    // `reused` tells the web whether an existing teammate was added to this
+    // workspace (cross-org) vs a brand-new invite, so it can word the toast.
+    res.status(201).json({ ...row, reused });
   } catch (e) {
     next(e);
   }
@@ -45,7 +48,10 @@ usersRouter.post('/', requirePermission('users.manage'), validate(InviteUserSche
 usersRouter.post('/:id/resend-invite', requirePermission('users.manage'), async (req, res, next) => {
   try {
     const me = req.session.user!;
-    await resendInvite(req.params.id!, me.userId);
+    const id = req.params.id!;
+    // Tenant isolation: only operate on members of the caller's workspace.
+    if (!(await isMember(id, me.tenantId))) throw new HttpError(404, 'user_not_found');
+    await resendInvite(id, me.userId);
     res.json({ ok: true });
   } catch (e) {
     next(e);
@@ -61,6 +67,9 @@ usersRouter.patch('/:id', validate(UpdateUserSchema), async (req, res, next) => 
     const canManage = await userCan(req, 'users.manage');
 
     if (!isSelf && !canManage) throw new HttpError(403, 'forbidden');
+    // Tenant isolation: an admin may only edit users in their own workspace
+    // (the `users` row is a global identity, so this guards cross-tenant edits).
+    if (!isSelf && !(await isMember(id, me.tenantId))) throw new HttpError(404, 'user_not_found');
 
     // Members editing themselves cannot change billable rate or group membership.
     if (isSelf && !canManage) {

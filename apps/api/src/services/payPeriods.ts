@@ -504,6 +504,9 @@ export async function sendPayrollReportToBookkeeper(
   const approverIds = [...new Set(entries.map((e) => e.approvedBy).filter((x): x is string => !!x))];
   const projectIds = [...new Set(entries.map((e) => e.projectId).filter((x): x is string => !!x))];
   const allUserIds = [...new Set([...userIds, ...approverIds])];
+  // `allUserIds` is derived only from this tenant's approved entries (the query
+  // above is `tenantEq`-scoped), so every id is provably a member of the active
+  // workspace — the `inArray` lookup below cannot surface a cross-tenant user.
   const [userRows, projectRows] = await Promise.all([
     allUserIds.length
       ? db.select({ id: users.id, name: users.name, email: users.email, billable: users.billable }).from(users).where(inArray(users.id, allUserIds))

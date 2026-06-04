@@ -16,6 +16,21 @@ export type AuthConfig = {
   brandLogoDataUrl: string | null;
 };
 
+/** Per-account login methods, resolved AFTER the user enters their email
+ *  (two-step login). Because membership/policy is per-workspace, the shared
+ *  login page can't know which methods apply until it has an email — this is
+ *  the response to `POST /auth/methods`. Carries the resolved workspace's
+ *  branding so the page can rebrand to that workspace at step 2. For an unknown
+ *  email the server returns the instance defaults + default branding (so it
+ *  doesn't trivially leak which emails exist). */
+export type AuthMethods = {
+  password: boolean;
+  google: boolean;
+  portalName: string;
+  brandPrimaryColor: string;
+  brandLogoDataUrl: string | null;
+};
+
 export const UpdateAppSettingsSchema = z.object({
   passwordLoginEnabled: z.boolean().optional(),
   googleLoginEnabled: z.boolean().optional(),

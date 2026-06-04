@@ -106,7 +106,7 @@ export function UserFormModal({
         });
         toast.success('User updated');
       } else {
-        await invite.mutateAsync({
+        const res = await invite.mutateAsync({
           name: name.trim(),
           email: email.trim(),
           billable,
@@ -114,9 +114,11 @@ export function UserFormModal({
           sendInvite,
         });
         toast.success(
-          sendInvite
-            ? `Invite emailed to ${email.trim()}`
-            : `${name.trim()} added — they can sign in with Google`,
+          res.reused
+            ? `${res.name} already had an account — added to this workspace`
+            : sendInvite
+              ? `Invite emailed to ${email.trim()}`
+              : `${name.trim()} added — they can sign in with Google`,
         );
       }
       onClose();

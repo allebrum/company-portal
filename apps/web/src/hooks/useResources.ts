@@ -33,6 +33,7 @@ import type {
   UpdateGroupInput,
   Permission,
   AuthConfig,
+  AuthMethods,
   AppSettings,
   UpdateAppSettingsInput,
   SpaceBlock,
@@ -306,7 +307,9 @@ export function useUsers() {
 export function useInviteUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: InviteUserInput) => api.post<UserRow>('/users', input),
+    // `reused: true` means an existing teammate (from another workspace) was
+    // added here rather than a brand-new account being created + emailed.
+    mutationFn: (input: InviteUserInput) => api.post<UserRow & { reused: boolean }>('/users', input),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.users }),
   });
 }
@@ -802,6 +805,11 @@ export function useAuthConfig() {
     queryFn: () => api.get<AuthConfig>('/auth/config'),
     staleTime: 60_000,
   });
+}
+/** Two-step login: resolve which methods THIS email's account supports (and the
+ *  resolved workspace's branding). Called on the login page's "Continue". */
+export function fetchAuthMethods(email: string): Promise<AuthMethods> {
+  return api.post<AuthMethods>('/auth/methods', { email });
 }
 export function useSettings() {
   return useQuery({ queryKey: ['settings'] as const, queryFn: () => api.get<AppSettings>('/settings') });
