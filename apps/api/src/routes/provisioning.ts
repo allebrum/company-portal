@@ -120,7 +120,9 @@ provisioningRouter.post('/handoff', async (req, res, next) => {
       return;
     }
     const { rawToken } = await issueToken({ kind: 'user', userId: ownerId }, 'portal-login', HANDOFF_TTL_MS);
-    res.status(200).json({ handoffUrl: `${env.WEB_ORIGIN}/auth/handoff?token=${encodeURIComponent(rawToken)}` });
+    // Must hit the API service: DO ingress routes /api → api and / → the static
+    // web app, so the handoff URL needs the /api prefix or it 404s on the web app.
+    res.status(200).json({ handoffUrl: `${env.WEB_ORIGIN}/api/auth/handoff?token=${encodeURIComponent(rawToken)}` });
   } catch (e) {
     next(e);
   }

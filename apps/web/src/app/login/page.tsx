@@ -12,12 +12,19 @@ import { useTwoFactorChallenge, verifyTotpStep, verifyPasskeyStep } from '@/hook
 import { ApiError } from '@/lib/api';
 import { API_URL } from '@/lib/env';
 
+// Messages for the `?error=` codes that auth redirects (Google OAuth + the
+// signup auto-login handoff) can land on the login page with.
 const OAUTH_ERRORS: Record<string, string> = {
   bad_state: 'Sign-in expired or was tampered with. Try again.',
   email_unverified: 'Your Google email is not verified.',
   domain_not_allowed: 'Your email domain is not allowed for this workspace.',
   google_unavailable: 'Google sign-in is not available.',
   oauth_failed: 'Google sign-in failed. Try again.',
+  // Signup → portal auto-login handoff fallbacks (the account already exists, so
+  // signing in manually always works).
+  handoff_expired: 'Your sign-in link expired or was already used — sign in below with the email and password you created at signup.',
+  handoff_failed: 'We couldn’t finish automatic sign-in — please sign in below.',
+  no_workspace: 'Your account isn’t attached to a workspace yet. Sign in, or contact support.',
 };
 
 export default function LoginPage() {
