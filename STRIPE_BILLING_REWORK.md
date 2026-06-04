@@ -13,9 +13,14 @@ stores the card and runs the charges; **the portal owns the schedule + amount**:
 1. **Signup** (on the marketing site) collects **email + password**, then a card
    captured without charging — a **SetupIntent** (`usage:'off_session'`),
    confirmed client-side with Stripe Elements.
-2. **30-day trial** tracked in the portal DB (not Stripe).
+2. **30-day trial** tracked in the portal DB (not Stripe). **Trial access
+   requires a card on file** — a `trialing` workspace with no stored payment
+   method is gated (`tenantIsActive`), so the card step is a real gate, not just
+   a convenience. The card is stored by `/billing/complete` and by the
+   `setup_intent.succeeded` webhook.
 3. After the trial, the portal charges **off-session** every **30 days** for
-   `MONTHLY_PRICE_CENTS` via its daily cron (`services/billingJob.ts`).
+   `MONTHLY_PRICE_CENTS` via its daily cron (`services/billingJob.ts`); the cron
+   also sweeps never-completed (no-card) trials to `canceled` after 48h.
 4. Stripe webhooks reconcile outcomes.
 
 ## Where it lives — DECISION (current)
@@ -48,40 +53,49 @@ keyed by; `billing_exempt` (the internal/self-host workspace) bypasses gating.
 
 - `company-portal-saas` (marketing BFF, no DB / no Stripe key):
   - `src/server.js` — `GET /api/config`, `POST /api/signup/start`,
-    `POST /api/signup/complete`, `GET /api/subscriptions/:ref`; each forwards to
-    the portal with the `X-Signup-Key` shared secret + an in-memory signup
-    rate-limit. Serves `public/signup.html` + `public/hoppa/signup.js` (two-step
-    Stripe Elements `confirmSetup`, no charge).
+    `POST /api/signup/complete`; each forwards to the portal with the
+    `X-Signup-Key` shared secret, an in-memory signup rate-limit, and the real
+    visitor IP (`x-client-ip`) + a `x-request-id` for tracing. Serves
+    `public/signup.html` + `public/hoppa/signup.js` (two-step Stripe Elements
+    `confirmSetup`, no charge).
 - `company-portal` (portal billing engine), `routes/billing.ts` (mounted at
-  `/billing`, gate-exempt; signup endpoints require `X-Signup-Key` when set):
+  `/billing`, gate-exempt; signup endpoints require `X-Signup-Key` when set, and
+  rate-limit on the forwarded `x-client-ip`):
   - `GET  /billing/config` (public) — publishable key, price, trial days.
-  - `POST /billing/signup` — Stripe customer + `provisionTenant` + `startTrial` +
-    SetupIntent + **set the owner's password (argon2, status=active)**; idempotent
-    on retry (reuse an owned billing tenant). Returns
-    `{ clientSecret, publishableKey, signupRef, trialEndsAt }`. **No handoff yet.**
-  - `POST /billing/complete` — retrieve the SetupIntent, require `succeeded`
-    ("validate payment intent"), store the card, mint a single-use `'portal-login'`
-    token → `{ handoffUrl }`.
-  - `GET  /billing/status-by-ref/:ref` — the BFF's "check the db / validate
-    subscription" read.
+  - `POST /billing/signup` — `provisionBillingSignup` (advisory-locked, race-free:
+    one tenant + one Stripe customer per email; retry resumes; a real prior account
+    → **409 `account_exists`**) + sets the owner's password (argon2, status=active)
+    + SetupIntent. Returns `{ clientSecret, publishableKey, signupRef, trialEndsAt }`
+    where `signupRef` is an **opaque HMAC-signed** ref (not the raw tenant id).
+    **No handoff yet.**
+  - `POST /billing/complete` — verify the signed `signupRef`, retrieve the
+    **SetupIntent**, require `succeeded` + customer-match, store the card, mint a
+    single-use `'portal-login'` token → `{ handoffUrl }`.
   - `POST /billing/stripe/webhook` (public, `req.rawBody` + `STRIPE_WEBHOOK_SECRET`)
     — `setup_intent.succeeded` (store+default card), `payment_intent.succeeded`
     (markPaid), `payment_intent.payment_failed` (past_due backstop).
-  - `GET /billing/status` + `POST /billing/update-card` + `POST /billing/retry`
-    (session) — the in-app fix-a-failing-card flow.
-- `routes/auth.ts` → `GET /auth/handoff` — consumes the single-use token, runs the
-  2FA gate, establishes a **first-party** portal session → `/dashboard`.
+  - `GET /billing/status` + `POST /billing/update-card` + `POST /billing/confirm-setup`
+    (store card, **no charge** — for adding a card mid-trial) + `POST /billing/retry`
+    (charge to clear past_due) — the in-app fix-a-card flow (session-gated).
+- `routes/auth.ts` → `GET /auth/handoff` — consumes the single-use token (sets
+  `Referrer-Policy: no-referrer`), runs the 2FA gate, establishes a **first-party**
+  portal session → `/dashboard`.
 - `auth/tokens.ts` → `'portal-login'` kind + `HANDOFF_TTL_MS` (10 min).
 - `services/billing.ts` — Stripe client + customer/SetupIntent/charge/webhook +
-  `getSetupIntent` (server-side validation) + tenant state mutations
-  (`startTrial`/`storePaymentMethod`/`markPaid`(idempotent)/`markPastDue`/`markCanceled`).
-- `services/tenants.ts` → `findOwnedBillingTenant` (retry dedupe) + `getOwnerUserId`.
+  `getSetupIntent` (server-side validation) + `signSignupRef`/`verifySignupRef`
+  + tenant state mutations (`storePaymentMethod`/`markPaid`(idempotent)/
+  `markPastDue`/`markCanceled`).
+- `services/tenants.ts` → `provisionBillingSignup` (advisory-lock transaction;
+  sets trial atomically) + `getOwnerUserId`.
 - `services/subscriptions.ts` → `tenantIsActive(tenant)` reads **local**
-  `tenant.billingStatus`: exempt + self-host + active/trialing pass;
-  **past_due/canceled blocked immediately**. `requireActiveSubscription` reads this.
+  `tenant.billingStatus`: exempt + self-host + `active` pass; `trialing` passes
+  **only with a stored card**; **past_due/canceled blocked**.
+  `requireActiveSubscription` reads this.
 - `services/billingJob.ts` + in-process `node-cron` in `index.ts` (daily 02:00,
-  gated on `billingConfigured`): off-session recurring charges.
-- The portal ships **no `/signup` web page** (it lives on the marketing site).
+  gated on `billingConfigured`): off-session recurring charges + abandoned-trial
+  sweep.
+- The portal ships only a thin `/signup` **redirect** to the marketing signup
+  (`NEXT_PUBLIC_MARKETING_SIGNUP_URL`, fallback `/login`).
 
 ## Env
 **Portal** (`apps/api`, all optional — dormant when `STRIPE_SECRET_KEY` unset):
@@ -98,20 +112,28 @@ keyed by; `billing_exempt` (the internal/self-host workspace) bypasses gating.
    `setup_intent.succeeded`, `payment_intent.succeeded`,
    `payment_intent.payment_failed`; copy its signing secret → `STRIPE_WEBHOOK_SECRET`.
 2. Pick a `SIGNUP_BFF_SECRET`; set the Stripe env + this secret as SECRETs on the
-   `allebrum-portal` DO app. Merge `stripe-billing` → `main` (auto-deploys; runs 0021).
+   `allebrum-portal` DO app; also set `NEXT_PUBLIC_MARKETING_SIGNUP_URL` (web).
+   Merge `stripe-billing` → `main` (auto-deploys; runs 0021).
 3. Convert the `hoppa-marketing` DO app from a static site to the **service** spec
    (`.do/app.yaml`), set `PORTAL_API_URL` + the same `SIGNUP_BFF_SECRET`, deploy.
 4. Test at the marketing `/signup`: `4242 4242 4242 4242` (success →
-   trial → auto-login into `/dashboard`), `4000 0025 0000 3155` (SCA),
-   `4000 0000 0000 0002` (decline). Force the daily job / `/billing/retry`.
+   trial+card → auto-login into `/dashboard`), `4000 0025 0000 3155` (SCA),
+   `4000 0000 0000 0002` (decline). Abandon the card step → log in → 402
+   add-card (no charge) → access. Force the daily job / `/billing/retry`.
 5. Flip Stripe to live + the live webhook secret once verified.
 
-## Deferred / known limitations
-- In-process cron + the BFF rate-limiter assume `instance_count:1`.
-- Partial-signup / existing-email-collision edge cases: the webhook+signup never
-  overwrite an existing active user's password; `provisionTenant` is deduped on
-  retry by owned `billing_external_id`. A teammate buying a new workspace logs in
-  with their existing credential. (See the plan's Risks.)
+## Deferred / known limitations (recommended before public launch)
+- **Bot protection:** `/api/signup/start` is public and mints a Stripe customer;
+  add env-gated Cloudflare Turnstile on the form + BFF verify (extension point in
+  `/api/signup/start`).
+- **Email verification:** no proof of email ownership today (trial-first funnel).
+  Add verify-then-activate or a post-signup nudge.
+- **Tighten helmet CSP** on the BFF to a Stripe allowlist (currently disabled —
+  non-breaking but looser).
+- In-process cron + the BFF rate-limiter assume `instance_count:1`; scaling the
+  BFF needs a Redis-backed limiter (cron stays on the portal).
+- Existing-email collision: a teammate buying a new workspace gets `409
+  account_exists` and signs in with their existing credential; we never overwrite it.
 - No seat metering by default (flat price); `tenant.seatLimit` still enforced if set.
 - The HMAC `provisioning` webhook + `HOPPA_MARKETING_CONTRACT.md` + the remote
   `MARKETING_API_*` client are vestigial (kept, dormant); remove in a later cleanup.

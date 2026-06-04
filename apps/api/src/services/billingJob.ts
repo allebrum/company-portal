@@ -1,4 +1,4 @@
-import { and, eq, lte, isNotNull, inArray } from 'drizzle-orm';
+import { and, eq, lt, lte, isNull, isNotNull, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { tenants, type Tenant } from '../db/schema.js';
 import { env, billingConfigured } from '../env.js';
@@ -79,6 +79,37 @@ export async function chargeTenantNow(tenantId: string): Promise<ChargeResult> {
   return chargeTenant(t);
 }
 
+/**
+ * Cancel never-completed signups: workspaces still `trialing` with no card on
+ * file after 48h (the user abandoned the card step). With card-required gating
+ * these are already access-blocked and never usable — this just stops orphan
+ * trialing-no-card tenants (and their Stripe customers) from accumulating.
+ * Conservative: marks them `canceled` (no hard delete).
+ */
+export async function sweepAbandonedTrials(): Promise<number> {
+  if (!billingConfigured) return 0;
+  const cutoff = new Date(Date.now() - 48 * 3_600_000).toISOString();
+  const abandoned = await db
+    .select({ id: tenants.id })
+    .from(tenants)
+    .where(
+      and(
+        eq(tenants.billingStatus, 'trialing'),
+        isNull(tenants.stripePaymentMethodId),
+        eq(tenants.billingExempt, false),
+        lt(tenants.createdAt, cutoff),
+      ),
+    );
+  for (const t of abandoned) {
+    await markCanceled(t.id, 'trial_abandoned_no_card');
+  }
+  if (abandoned.length > 0) {
+    // eslint-disable-next-line no-console
+    console.log(`[billing] swept ${abandoned.length} abandoned (no-card) trial(s) → canceled`);
+  }
+  return abandoned.length;
+}
+
 export async function runDailyBilling(): Promise<{
   paid: number;
   pastDue: number;
@@ -87,6 +118,9 @@ export async function runDailyBilling(): Promise<{
 }> {
   const tally = { paid: 0, pastDue: 0, canceled: 0, skipped: 0 };
   if (!billingConfigured) return tally;
+
+  // Clear out abandoned no-card trials before the charge pass.
+  await sweepAbandonedTrials();
 
   const due = await db
     .select()

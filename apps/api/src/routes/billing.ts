@@ -2,31 +2,22 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import argon2 from 'argon2';
-import { eq } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { env, billingConfigured, billingWebhookConfigured } from '../env.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { validate, getValidated } from '../middleware/validate.js';
-import { db } from '../db/client.js';
-import { users } from '../db/schema.js';
-import {
-  getTenant,
-  provisionTenant,
-  findOwnedBillingTenant,
-  getOwnerUserId,
-} from '../services/tenants.js';
-import { findByEmail, getUser } from '../services/users.js';
+import { getTenant, getOwnerUserId, provisionBillingSignup } from '../services/tenants.js';
 import {
   createStripeCustomer,
   createSetupIntent,
   getSetupIntent,
-  startTrial,
   storePaymentMethod,
   markPaid,
   markPastDue,
   constructWebhookEvent,
-  nowIso,
+  signSignupRef,
+  verifySignupRef,
 } from '../services/billing.js';
 import { chargeTenantNow } from '../services/billingJob.js';
 import { issueToken, HANDOFF_TTL_MS } from '../auth/tokens.js';
@@ -99,7 +90,7 @@ const SignupSchema = z.object({
 billingRouter.post(
   '/signup',
   requireSignupKey,
-  rateLimit({ key: 'signup', max: 10, windowSec: 60 }),
+  rateLimit({ key: 'signup', max: 10, windowSec: 60, clientIpHeader: 'x-client-ip' }),
   validate(SignupSchema),
   async (req, res, next) => {
     try {
@@ -111,61 +102,33 @@ billingRouter.post(
       const email = input.email.trim().toLowerCase();
       const ownerName = input.ownerName?.trim() || email;
 
-      // Idempotent on retry: if this email already OWNS a billing workspace
-      // (double-submit), reuse that tenant + Stripe customer instead of making
-      // duplicates; just refresh the SetupIntent below.
-      const existingUser = await findByEmail(email);
-      const reuse = existingUser ? await findOwnedBillingTenant(existingUser.id) : undefined;
-
-      let tenantId: string;
-      let ownerUserId: string;
-      let customerId: string;
-      if (reuse?.billingExternalId) {
-        tenantId = reuse.id;
-        ownerUserId = existingUser!.id;
-        customerId = reuse.billingExternalId;
-      } else {
-        // 1. Stripe customer (stores the card; no charge).
-        customerId = await createStripeCustomer({
-          email,
-          name: ownerName,
-          workspaceName: input.workspaceName,
-        });
-        // 2. Provision the workspace + owner (global identity by email).
-        const prov = await provisionTenant({
-          name: input.workspaceName,
-          slug: slugify(input.workspaceName),
-          ownerEmail: email,
-          ownerName,
-          billingExternalId: customerId,
-        });
-        tenantId = prov.tenantId;
-        ownerUserId = prov.ownerUserId;
-        // 3. Start the self-owned trial (no charge until it ends).
-        await startTrial(tenantId);
+      // Race-free provisioning: a per-email advisory lock makes a duplicate
+      // tenant/customer impossible; a retry reuses the in-progress one; a real
+      // prior account returns `account_exists` so the UI says "sign in".
+      const passwordHash = await argon2.hash(input.password);
+      const result = await provisionBillingSignup({
+        email,
+        ownerName,
+        workspaceName: input.workspaceName,
+        slug: slugify(input.workspaceName),
+        passwordHash,
+        createCustomer: () =>
+          createStripeCustomer({ email, name: ownerName, workspaceName: input.workspaceName }),
+      });
+      if (result.kind === 'account_exists') {
+        res.status(409).json({ error: 'account_exists' });
+        return;
       }
 
-      // 4. Set the owner's password (the portal is the login authority). Only
-      //    for a brand-new or not-yet-credentialed owner — never overwrite an
-      //    existing active user's password (collision guard: a teammate buying a
-      //    new workspace keeps their existing credential and logs into it).
-      const owner = await getUser(ownerUserId);
-      if (owner && (!owner.passwordHash || owner.status !== 'active')) {
-        const passwordHash = await argon2.hash(input.password);
-        await db
-          .update(users)
-          .set({ passwordHash, status: 'active', updatedAt: nowIso() })
-          .where(eq(users.id, ownerUserId));
-      }
-
-      // 5. SetupIntent client_secret for the frontend to confirm the card.
-      const clientSecret = await createSetupIntent(customerId);
-      const t = await getTenant(tenantId);
+      // SetupIntent client_secret for the frontend to confirm the card (no
+      // charge). Access stays gated until the card is on file.
+      const clientSecret = await createSetupIntent(result.customerId);
+      const t = await getTenant(result.tenantId);
 
       res.status(201).json({
         clientSecret,
         publishableKey: env.STRIPE_PUBLISHABLE_KEY ?? null,
-        signupRef: tenantId,
+        signupRef: signSignupRef(result.tenantId),
         trialEndsAt: t?.trialEndsAt ?? null,
       });
     } catch (e) {
@@ -186,7 +149,7 @@ const CompleteSchema = z.object({
 billingRouter.post(
   '/complete',
   requireSignupKey,
-  rateLimit({ key: 'signup-complete', max: 20, windowSec: 60 }),
+  rateLimit({ key: 'signup-complete', max: 20, windowSec: 60, clientIpHeader: 'x-client-ip' }),
   validate(CompleteSchema),
   async (req, res, next) => {
     try {
@@ -195,7 +158,12 @@ billingRouter.post(
         return;
       }
       const { signupRef, setupIntentId } = getValidated<typeof CompleteSchema._type>(req);
-      const tenant = await getTenant(signupRef);
+      const tenantId = verifySignupRef(signupRef);
+      if (!tenantId) {
+        res.status(401).json({ error: 'invalid_ref' });
+        return;
+      }
+      const tenant = await getTenant(tenantId);
       if (!tenant?.billingExternalId) {
         res.status(404).json({ error: 'unknown_signup' });
         return;
@@ -228,24 +196,6 @@ billingRouter.post(
     }
   },
 );
-
-// ---- BFF read: subscription status by signup ref (for the marketing site) ----
-billingRouter.get('/status-by-ref/:ref', requireSignupKey, async (req, res, next) => {
-  try {
-    const tenant = await getTenant(req.params.ref);
-    if (!tenant) {
-      res.status(404).json({ error: 'not_found' });
-      return;
-    }
-    res.json({
-      status: tenant.billingStatus ?? null,
-      trialEndsAt: tenant.trialEndsAt ?? null,
-      nextBillAt: tenant.nextBillAt ?? null,
-    });
-  } catch (e) {
-    next(e);
-  }
-});
 
 // ---- Public: Stripe webhook (source of truth) --------------------------------
 billingRouter.post('/stripe/webhook', async (req, res) => {
@@ -336,6 +286,40 @@ billingRouter.post('/update-card', requireAuth, async (req, res, next) => {
     }
     const clientSecret = await createSetupIntent(t.billingExternalId);
     res.json({ clientSecret, publishableKey: env.STRIPE_PUBLISHABLE_KEY ?? null });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Store a just-confirmed card WITHOUT charging — used by the in-app add-card
+// flow during a trial (a trialing workspace needs a card on file to pass the
+// gate, but must not be billed until the trial ends). past_due reactivation
+// additionally calls /retry afterwards.
+const ConfirmSetupSchema = z.object({ setupIntentId: z.string().min(1) });
+billingRouter.post('/confirm-setup', requireAuth, validate(ConfirmSetupSchema), async (req, res, next) => {
+  try {
+    if (!billingConfigured) {
+      res.status(503).json({ error: 'billing_not_configured' });
+      return;
+    }
+    const me = req.session.user!;
+    const t = await getTenant(me.tenantId);
+    if (!t?.billingExternalId) {
+      res.status(400).json({ error: 'no_stripe_customer' });
+      return;
+    }
+    const { setupIntentId } = getValidated<typeof ConfirmSetupSchema._type>(req);
+    const si = await getSetupIntent(setupIntentId);
+    if (si.status !== 'succeeded') {
+      res.status(400).json({ error: 'card_not_confirmed' });
+      return;
+    }
+    if (si.customerId && si.customerId !== t.billingExternalId) {
+      res.status(400).json({ error: 'customer_mismatch' });
+      return;
+    }
+    if (si.paymentMethodId) await storePaymentMethod(t.billingExternalId, si.paymentMethodId);
+    res.json({ ok: true });
   } catch (e) {
     next(e);
   }

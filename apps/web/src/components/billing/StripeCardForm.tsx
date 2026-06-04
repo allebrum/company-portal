@@ -23,7 +23,7 @@ function InnerForm({
 }: {
   submitLabel: string;
   returnUrl: string;
-  onComplete: () => void | Promise<void>;
+  onComplete: (setupIntentId?: string) => void | Promise<void>;
 }) {
   const stripe = useStripe();
   const elements = useElements();
@@ -37,7 +37,7 @@ function InnerForm({
     setError(null);
     // Save the card off-session (SetupIntent). redirect:'if_required' keeps the
     // common card flow inline; only redirects to return_url if 3-D Secure needs it.
-    const { error: err } = await stripe.confirmSetup({
+    const { error: err, setupIntent } = await stripe.confirmSetup({
       elements,
       confirmParams: { return_url: returnUrl },
       redirect: 'if_required',
@@ -47,7 +47,7 @@ function InnerForm({
       setSubmitting(false);
       return;
     }
-    await onComplete();
+    await onComplete(setupIntent?.id);
   };
 
   return (
@@ -76,7 +76,7 @@ export function StripeCardForm({
   clientSecret: string;
   submitLabel: string;
   returnUrl: string;
-  onComplete: () => void | Promise<void>;
+  onComplete: (setupIntentId?: string) => void | Promise<void>;
 }) {
   return (
     <Elements

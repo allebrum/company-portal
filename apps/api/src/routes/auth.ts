@@ -236,6 +236,10 @@ authRouter.get('/google/callback', async (req, res, next) => {
 // lands in their new workspace without a second login. No `requireAuth` (this
 // IS the login), and it lives under /auth so the subscription gate exempts it.
 authRouter.get('/handoff', async (req, res, next) => {
+  // The single-use token rides in the query string; keep it out of the Referer
+  // of the destination page (history/access logs still hold it briefly, but
+  // single-use + 10-min TTL close the replay window).
+  res.setHeader('Referrer-Policy', 'no-referrer');
   const fail = (reason: string) =>
     res.redirect(`${env.WEB_ORIGIN}/login?error=${encodeURIComponent(reason)}`);
   try {

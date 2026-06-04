@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, and, asc, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
   tenants,
@@ -13,6 +13,15 @@ import {
   type Tenant,
 } from '../db/schema.js';
 import { SYSTEM_GROUPS, SYSTEM_GROUP_PERMISSIONS } from '@allebrum/shared';
+import { env } from '../env.js';
+
+/**
+ * A drizzle executor — the base `db` or a transaction handle. Lets the
+ * provisioning helpers run inside `provisionBillingSignup`'s advisory-locked
+ * transaction so a concurrent same-email signup can't create a duplicate
+ * tenant/customer.
+ */
+type Executor = Pick<typeof db, 'select' | 'insert' | 'update' | 'delete' | 'execute'>;
 
 /**
  * Hoppa multi-tenancy — tenant/workspace lookups.
@@ -67,8 +76,8 @@ export async function resolveLoginTenantId(userId: string): Promise<string | nul
   return list[0]!.id;
 }
 
-export async function getTenant(id: string): Promise<Tenant | undefined> {
-  const [row] = await db.select().from(tenants).where(eq(tenants.id, id)).limit(1);
+export async function getTenant(id: string, ex: Executor = db): Promise<Tenant | undefined> {
+  const [row] = await ex.select().from(tenants).where(eq(tenants.id, id)).limit(1);
   return row;
 }
 
@@ -93,15 +102,15 @@ export async function getOwnerUserId(tenantId: string): Promise<string | null> {
  * already-provisioned tenant + customer instead of creating duplicates. Returns
  * the oldest such tenant, or undefined if the user owns no billing workspace.
  */
-export async function findOwnedBillingTenant(userId: string): Promise<Tenant | undefined> {
-  const owned = await db
+export async function findOwnedBillingTenant(userId: string, ex: Executor = db): Promise<Tenant | undefined> {
+  const owned = await ex
     .select({ tenantId: tenantMembers.tenantId })
     .from(tenantMembers)
     .innerJoin(tenants, eq(tenants.id, tenantMembers.tenantId))
     .where(and(eq(tenantMembers.userId, userId), eq(tenantMembers.isOwner, true)))
     .orderBy(asc(tenants.createdAt));
   for (const o of owned) {
-    const t = await getTenant(o.tenantId);
+    const t = await getTenant(o.tenantId, ex);
     if (t?.billingExternalId) return t;
   }
   return undefined;
@@ -112,8 +121,13 @@ export async function findOwnedBillingTenant(userId: string): Promise<Tenant | u
  * the break-glass admin into the default workspace, and later by invite
  * acceptance / provisioning.
  */
-export async function ensureMembership(tenantId: string, userId: string, isOwner = false): Promise<void> {
-  await db
+export async function ensureMembership(
+  tenantId: string,
+  userId: string,
+  isOwner = false,
+  ex: Executor = db,
+): Promise<void> {
+  await ex
     .insert(tenantMembers)
     .values({ tenantId, userId, isOwner })
     .onConflictDoNothing();
@@ -129,10 +143,10 @@ export async function ensureMembership(tenantId: string, userId: string, isOwner
  * specific tenant (db/init seeds the DEFAULT workspace; this seeds any new
  * one provisioned from the marketing site in Phase 3).
  */
-export async function seedTenantDefaults(tenantId: string): Promise<Record<string, string>> {
+export async function seedTenantDefaults(tenantId: string, ex: Executor = db): Promise<Record<string, string>> {
   const groupIdByName: Record<string, string> = {};
   for (const gname of SYSTEM_GROUPS) {
-    const existing = await db
+    const existing = await ex
       .select({ id: groups.id })
       .from(groups)
       .where(and(eq(groups.tenantId, tenantId), eq(groups.name, gname)))
@@ -140,7 +154,7 @@ export async function seedTenantDefaults(tenantId: string): Promise<Record<strin
     let gid = existing[0]?.id;
     if (!gid) {
       gid = randomUUID();
-      await db.insert(groups).values({
+      await ex.insert(groups).values({
         id: gid,
         tenantId,
         name: gname,
@@ -152,15 +166,15 @@ export async function seedTenantDefaults(tenantId: string): Promise<Record<strin
     groupIdByName[gname] = gid;
     const perms = SYSTEM_GROUP_PERMISSIONS[gname];
     if (perms.length > 0) {
-      await db
+      await ex
         .insert(groupPermissions)
         .values(perms.map((perm) => ({ groupId: gid!, permissionKey: perm, tenantId })))
         .onConflictDoNothing();
     }
   }
 
-  await db.insert(appSettings).values({ tenantId }).onConflictDoNothing();
-  await db.insert(payConfig).values({ tenantId }).onConflictDoNothing();
+  await ex.insert(appSettings).values({ tenantId }).onConflictDoNothing();
+  await ex.insert(payConfig).values({ tenantId }).onConflictDoNothing();
   return groupIdByName;
 }
 
@@ -171,17 +185,20 @@ export async function seedTenantDefaults(tenantId: string): Promise<Record<strin
  * tenant's Owner group + tenant_members. Returns the new tenant id + the
  * (possibly newly-created) owner user id.
  */
-export async function provisionTenant(args: {
-  name: string;
-  slug: string;
-  ownerEmail: string;
-  ownerName: string;
-  billingExternalId?: string | null;
-  plan?: string | null;
-  seatLimit?: number | null;
-}): Promise<{ tenantId: string; ownerUserId: string; created: boolean }> {
+export async function provisionTenant(
+  args: {
+    name: string;
+    slug: string;
+    ownerEmail: string;
+    ownerName: string;
+    billingExternalId?: string | null;
+    plan?: string | null;
+    seatLimit?: number | null;
+  },
+  ex: Executor = db,
+): Promise<{ tenantId: string; ownerUserId: string; created: boolean }> {
   const email = args.ownerEmail.trim().toLowerCase();
-  const [tenant] = await db
+  const [tenant] = await ex
     .insert(tenants)
     .values({
       name: args.name,
@@ -194,10 +211,10 @@ export async function provisionTenant(args: {
     .returning({ id: tenants.id });
   const tenantId = tenant!.id;
 
-  const groupIds = await seedTenantDefaults(tenantId);
+  const groupIds = await seedTenantDefaults(tenantId, ex);
 
   // Owner identity is global — reuse if the email already exists.
-  const existing = await db
+  const existing = await ex
     .select({ id: users.id })
     .from(users)
     .where(eq(users.email, email))
@@ -207,7 +224,7 @@ export async function provisionTenant(args: {
   if (existing[0]) {
     ownerUserId = existing[0].id;
   } else {
-    const [u] = await db
+    const [u] = await ex
       .insert(users)
       .values({
         name: args.ownerName || email,
@@ -221,11 +238,111 @@ export async function provisionTenant(args: {
     created = true;
   }
 
-  await db
+  await ex
     .insert(userGroups)
     .values({ userId: ownerUserId, groupId: groupIds.Owner!, tenantId })
     .onConflictDoNothing();
-  await ensureMembership(tenantId, ownerUserId, true);
+  await ensureMembership(tenantId, ownerUserId, true, ex);
 
   return { tenantId, ownerUserId, created };
+}
+
+/**
+ * Race-free billing signup provisioning. Wraps the whole find-or-create in a
+ * transaction guarded by a per-email Postgres advisory lock, so two concurrent
+ * `/billing/signup` calls for the same email can NEVER create duplicate tenants
+ * or Stripe customers — the loser serializes behind the winner and resumes.
+ *
+ * Returns:
+ *  - `created`/`resumed`: the workspace to attach the SetupIntent to.
+ *  - `account_exists`: the email already belongs to a real (credentialed,
+ *    active) account that doesn't own an in-progress billing workspace — the
+ *    caller should tell them to sign in instead of silently attaching a new one.
+ *
+ * The single Stripe customer is created INSIDE the lock (via `createCustomer`)
+ * only on the create path, so exactly one customer exists per signup. The
+ * owner's password is set here too (on a brand-new / not-yet-credentialed owner)
+ * so it's atomic with provisioning; an existing active user's password is never
+ * overwritten.
+ */
+export type BillingSignupResult =
+  | { kind: 'created' | 'resumed'; tenantId: string; ownerUserId: string; customerId: string }
+  | { kind: 'account_exists' };
+
+export async function provisionBillingSignup(args: {
+  email: string;
+  ownerName: string;
+  workspaceName: string;
+  slug: string;
+  /** Precomputed argon2 hash — set only on a brand-new / not-yet-credentialed owner. */
+  passwordHash: string;
+  /** Creates the Stripe customer; called once, inside the lock, on the create path. */
+  createCustomer: () => Promise<string>;
+}): Promise<BillingSignupResult> {
+  const email = args.email.trim().toLowerCase();
+  return db.transaction(async (tx) => {
+    // Serialize all signups for this email (xact-scoped; released on commit).
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'signup:' + email}))`);
+
+    const [existingUser] = await tx
+      .select()
+      .from(users)
+      .where(sql`lower(${users.email}) = ${email}`)
+      .limit(1);
+
+    if (existingUser) {
+      // Retry / resume: reuse an already-owned billing workspace + its customer.
+      const owned = await findOwnedBillingTenant(existingUser.id, tx);
+      if (owned?.billingExternalId) {
+        return { kind: 'resumed', tenantId: owned.id, ownerUserId: existingUser.id, customerId: owned.billingExternalId };
+      }
+      // A real prior account → don't silently attach a new paid workspace.
+      if (existingUser.passwordHash && existingUser.status === 'active') {
+        return { kind: 'account_exists' };
+      }
+      // else (invited / passwordless, no billing) → fall through and provision.
+    }
+
+    // New signup: create exactly one Stripe customer, then the workspace.
+    const customerId = await args.createCustomer();
+    const prov = await provisionTenant(
+      {
+        name: args.workspaceName,
+        slug: args.slug,
+        ownerEmail: email,
+        ownerName: args.ownerName,
+        billingExternalId: customerId,
+      },
+      tx,
+    );
+
+    // Set the owner's password (portal is the login authority) on a brand-new /
+    // not-yet-credentialed owner only — never overwrite an existing one.
+    const [owner] = await tx.select().from(users).where(eq(users.id, prov.ownerUserId)).limit(1);
+    if (owner && (!owner.passwordHash || owner.status !== 'active')) {
+      await tx
+        .update(users)
+        .set({ passwordHash: args.passwordHash, status: 'active', updatedAt: new Date().toISOString() })
+        .where(eq(users.id, prov.ownerUserId));
+    }
+
+    // Start the self-owned trial atomically with provisioning so the workspace
+    // is never left at billing_status=null (which the gate would treat as
+    // "allow"). No charge until the trial ends; access still needs a card (the
+    // gate requires a stored payment method while trialing).
+    const trialEndsAt = new Date(Date.now() + env.TRIAL_DAYS * 86_400_000).toISOString();
+    await tx
+      .update(tenants)
+      .set({
+        billingStatus: 'trialing',
+        trialEndsAt,
+        nextBillAt: trialEndsAt,
+        failedAttempts: 0,
+        lastPaymentError: null,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(tenants.id, prov.tenantId));
+
+    return { kind: 'created', tenantId: prov.tenantId, ownerUserId: prov.ownerUserId, customerId };
+  });
 }

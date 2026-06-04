@@ -22,6 +22,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // redirect-to-login + render-without-shell path treats all of them the same.
   const PUBLIC_ROUTES = new Set([
     '/login',
+    '/signup', // thin redirect to the marketing signup (renders without auth)
     '/forgot-password',
     '/reset-password',
     '/accept-invite',
@@ -202,13 +203,23 @@ function SubscriptionRequired() {
     }
   };
 
-  // Card saved → charge immediately so access is restored without waiting for
-  // the nightly job; then reload to re-run the subscription gate.
-  const afterCardSaved = async () => {
+  // Card saved → store it (no charge), then reload to re-run the gate. A trialing
+  // workspace just needs a card on file to pass the gate (don't bill mid-trial);
+  // a past_due/canceled one additionally charges now so access is restored
+  // without waiting for the nightly job.
+  const afterCardSaved = async (setupIntentId?: string) => {
     try {
-      await api.post('/billing/retry', {});
+      if (setupIntentId) await api.post('/billing/confirm-setup', { setupIntentId });
+      const st = await api.get<{ billingStatus: string | null }>('/billing/status');
+      if (st.billingStatus === 'past_due' || st.billingStatus === 'canceled') {
+        try {
+          await api.post('/billing/retry', {});
+        } catch {
+          /* the daily job will retry */
+        }
+      }
     } catch {
-      /* the daily job will retry */
+      /* the webhook stores the card + the daily job reconciles */
     }
     window.location.reload();
   };

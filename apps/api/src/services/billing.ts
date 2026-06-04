@@ -1,4 +1,5 @@
 import Stripe from 'stripe';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { env, billingConfigured } from '../env.js';
 import { db } from '../db/client.js';
@@ -206,6 +207,41 @@ export async function markCanceled(tenantId: string, reason: string): Promise<vo
       updatedAt: nowIso(),
     })
     .where(eq(tenants.id, tenantId));
+}
+
+// ---- Signed signup ref -------------------------------------------------------
+// The browser gets an opaque, HMAC-signed, short-lived reference instead of the
+// raw tenant id (so the tenant id isn't leaked / enumerable, and /complete can't
+// be driven with a forged tenant id). Secret = SESSION_SECRET (always set).
+
+const SIGNUP_REF_TTL_MS = 30 * 60 * 1000; // 30 min — enough to finish the card step
+
+/** Mint an opaque `tenantId.expiry` ref, HMAC-signed and base64url-encoded. */
+export function signSignupRef(tenantId: string): string {
+  const payload = `${tenantId}.${Date.now() + SIGNUP_REF_TTL_MS}`;
+  const sig = createHmac('sha256', env.SESSION_SECRET).update(payload).digest('base64url');
+  return `${Buffer.from(payload).toString('base64url')}.${sig}`;
+}
+
+/** Verify a signup ref → tenant id, or null if tampered / expired / malformed. */
+export function verifySignupRef(ref: string): string | null {
+  const i = ref.lastIndexOf('.');
+  if (i <= 0) return null;
+  let payload: string;
+  try {
+    payload = Buffer.from(ref.slice(0, i), 'base64url').toString('utf8');
+  } catch {
+    return null;
+  }
+  const expected = createHmac('sha256', env.SESSION_SECRET).update(payload).digest('base64url');
+  const a = Buffer.from(ref.slice(i + 1));
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  const dot = payload.lastIndexOf('.');
+  if (dot <= 0) return null;
+  const exp = Number(payload.slice(dot + 1));
+  if (!Number.isFinite(exp) || Date.now() > exp) return null;
+  return payload.slice(0, dot);
 }
 
 export { nowIso, addDays };

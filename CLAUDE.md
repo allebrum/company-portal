@@ -56,9 +56,10 @@ never gated. `hoppa` is kept as a frozen safety-net / staging branch
   (`services/subscriptions.ts`) + `requireActiveSubscription`. **Signup runs on
   the marketing site** (`company-portal-saas`), a stateless BFF that proxies to
   the portal's `/billing` endpoints (shared `SIGNUP_BFF_SECRET` → `X-Signup-Key`)
-  and ends in a single-use `/auth/handoff` auto-login. Dormant unless
-  `STRIPE_SECRET_KEY` is set; `billing_exempt` tenants always pass. See
-  `STRIPE_BILLING_REWORK.md`.
+  and ends in a single-use `/auth/handoff` auto-login. **Trial access requires a
+  card on file** (`tenantIsActive` gates `trialing` on a stored payment method).
+  Dormant unless `STRIPE_SECRET_KEY` is set; `billing_exempt` tenants always pass.
+  See `STRIPE_BILLING_REWORK.md`.
 
 ## Reference docs
 - `STRIPE_BILLING_REWORK.md` — **BUILT** (current billing design): portal owns

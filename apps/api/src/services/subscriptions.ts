@@ -15,6 +15,12 @@ export function tenantIsActive(tenant: Tenant | undefined): boolean {
   if (tenant.billingExempt) return true; // grandfathered internal workspace
   const s = tenant.billingStatus;
   if (s == null) return true; // no billing record yet → don't lock out
+  if (s === 'active') return true;
+  // Trial access REQUIRES a saved card: a trialing workspace with no payment
+  // method on file is blocked until the SetupIntent succeeds (set at
+  // /billing/complete and by the setup_intent.succeeded webhook). This makes
+  // the card a real gate, not just a convenience step.
+  if (s === 'trialing') return !!tenant.stripePaymentMethodId;
   // past_due / canceled → blocked (block-immediately policy).
-  return s === 'active' || s === 'trialing';
+  return false;
 }
