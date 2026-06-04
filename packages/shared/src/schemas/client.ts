@@ -2,6 +2,36 @@ import { z } from 'zod';
 import { CLIENT_KINDS } from '../enums';
 import { SpaceBlockSchema, SpaceFileSchema } from './space';
 
+export const StructuredContactSchema = z.object({
+  id: z.string().min(1).max(80),
+  name: z.string().trim().min(1).max(200),
+  email: z.string().trim().email().max(320).optional(),
+  phone: z.string().trim().max(60).optional(),
+  role: z.string().trim().max(120).optional(),
+  canMarket: z.boolean().default(false),
+  isPoc: z.boolean().default(false),
+});
+export type StructuredContact = z.infer<typeof StructuredContactSchema>;
+
+export const StructuredAddressSchema = z.object({
+  id: z.string().min(1).max(80),
+  type: z.string().trim().min(1).max(80),
+  label: z.string().trim().max(120).optional(),
+  line1: z.string().trim().max(200).optional(),
+  line2: z.string().trim().max(200).optional(),
+  city: z.string().trim().max(120).optional(),
+  state: z.string().trim().max(120).optional(),
+  postalCode: z.string().trim().max(40).optional(),
+  country: z.string().trim().max(120).optional(),
+});
+export type StructuredAddress = z.infer<typeof StructuredAddressSchema>;
+
+export const ClientOverviewSchema = z.object({
+  contacts: z.array(StructuredContactSchema).max(200).default([]),
+  addresses: z.array(StructuredAddressSchema).max(200).default([]),
+});
+export type ClientOverview = z.infer<typeof ClientOverviewSchema>;
+
 export const CreateClientSchema = z.object({
   name: z.string().min(1).max(160),
   kind: z.enum(CLIENT_KINDS).default('agency'),
@@ -33,6 +63,8 @@ export const UpdateClientSchema = z.object({
   // list when a block is added/removed/converted.
   spaceBlocks: z.array(SpaceBlockSchema).max(2000).optional(),
   spaceFiles: z.array(SpaceFileSchema).max(500).optional(),
+  // Structured intake + marketing-ready client metadata.
+  clientOverview: ClientOverviewSchema.optional(),
   // F23 portal config — null clears the slug. Optional so other PATCHes
   // don't have to roundtrip the field.
   portalSlug: portalSlugSchema.nullable().optional(),

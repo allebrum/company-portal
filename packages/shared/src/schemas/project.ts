@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import { STATUS_TONES } from '../enums';
+import { PROJECT_OPPORTUNITY_STATUSES, STATUS_TONES } from '../enums';
 import { SpaceBlockSchema, SpaceFileSchema } from './space';
+import { StructuredAddressSchema, StructuredContactSchema } from './client';
 
 // One column in a project's custom status workflow.
 export const ProjectStatusSchema = z.object({
@@ -10,12 +11,27 @@ export const ProjectStatusSchema = z.object({
 });
 export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
 
+export const ProjectContactSchema = StructuredContactSchema;
+export type ProjectContact = z.infer<typeof ProjectContactSchema>;
+
+export const ProjectAddressSchema = StructuredAddressSchema;
+export type ProjectAddress = z.infer<typeof ProjectAddressSchema>;
+
+export const ProjectOverviewSchema = z.object({
+  contacts: z.array(ProjectContactSchema).max(200).default([]),
+  addresses: z.array(ProjectAddressSchema).max(200).default([]),
+});
+export type ProjectOverview = z.infer<typeof ProjectOverviewSchema>;
+
 export const CreateProjectSchema = z.object({
   clientId: z.string().uuid(),
   name: z.string().min(1).max(200),
   code: z.string().max(40).optional(),
   billable: z.boolean().default(true),
   budgetHrs: z.number().int().nonnegative().max(100000).default(120),
+  opportunityStatus: z.enum(PROJECT_OPPORTUNITY_STATUSES).default('pipeline'),
+  opportunityValue: z.number().int().nonnegative().nullable().optional(),
+  projectOverview: ProjectOverviewSchema.optional(),
   color: z.string().max(20).default('#9333ea'),
   statuses: z.array(ProjectStatusSchema).max(12).nullable().optional(),
 });
@@ -28,6 +44,9 @@ export const UpdateProjectSchema = z.object({
   code: z.string().max(40).optional(),
   billable: z.boolean().optional(),
   budgetHrs: z.number().int().nonnegative().max(100000).optional(),
+  opportunityStatus: z.enum(PROJECT_OPPORTUNITY_STATUSES).optional(),
+  opportunityValue: z.number().int().nonnegative().nullable().optional(),
+  projectOverview: ProjectOverviewSchema.optional(),
   color: z.string().max(20).optional(),
   statuses: z.array(ProjectStatusSchema).max(12).nullable().optional(),
   // See client.ts — same Space-canvas full-replace semantics.

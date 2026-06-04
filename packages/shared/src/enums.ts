@@ -116,5 +116,9 @@ export type Health = (typeof HEALTHS)[number];
 export const MILESTONE_KINDS = ['release', 'review', 'deadline', 'phase'] as const;
 export type MilestoneKind = (typeof MILESTONE_KINDS)[number];
 
+// Sales/opportunity lifecycle for project capture tracking.
+export const PROJECT_OPPORTUNITY_STATUSES = ['pipeline', 'won', 'lost', 'on-hold'] as const;
+export type ProjectOpportunityStatus = (typeof PROJECT_OPPORTUNITY_STATUSES)[number];
+
 export const STATUS_TONES = ['gray', 'purple', 'amber', 'green', 'blue', 'orange', 'red', 'teal', 'pink'] as const;
 export type StatusTone = (typeof STATUS_TONES)[number];

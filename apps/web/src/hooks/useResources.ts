@@ -37,6 +37,8 @@ import type {
   UpdateAppSettingsInput,
   SpaceBlock,
   SpaceFile,
+  ClientOverview,
+  ProjectOverview,
 } from '@allebrum/shared';
 
 // ---- Types (matching API row shapes; permissive to avoid double-maintaining schema) ----
@@ -62,6 +64,7 @@ export type ClientRow = {
   // Always arrays — server defaults to [] on insert; never null.
   spaceBlocks: SpaceBlock[];
   spaceFiles: SpaceFile[];
+  clientOverview: ClientOverview;
   /** F23 client portal — staff-set URL-safe slug. Null = no portal yet. */
   portalSlug: string | null;
   /** ISO timestamp string; null = unpublished (slug exists but lookup 404s). */
@@ -84,6 +87,10 @@ export type ProjectRow = {
   clientId: string;
   name: string;
   code: string;
+  opportunityStatus: 'pipeline' | 'won' | 'lost' | 'on-hold';
+  opportunityValue: number | null;
+  timeSpentMin: number;
+  projectOverview: ProjectOverview;
   billable: boolean;
   budgetHrs: number;
   color: string;

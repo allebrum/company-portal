@@ -37,6 +37,8 @@ export function ProjectFormModal({
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [budgetHrs, setBudgetHrs] = useState(120);
+  const [opportunityStatus, setOpportunityStatus] = useState<'pipeline' | 'won' | 'lost' | 'on-hold'>('pipeline');
+  const [opportunityValueText, setOpportunityValueText] = useState('');
   const [billable, setBillable] = useState(true);
 
   useEffect(() => {
@@ -46,6 +48,8 @@ export function ProjectFormModal({
       setName(project.name);
       setCode(project.code);
       setBudgetHrs(project.budgetHrs);
+      setOpportunityStatus(project.opportunityStatus ?? 'pipeline');
+      setOpportunityValueText(project.opportunityValue == null ? '' : String(project.opportunityValue));
       setBillable(project.billable);
     } else {
       // F25: default-client pre-fill on create when caller supplies one
@@ -54,6 +58,8 @@ export function ProjectFormModal({
       setName('');
       setCode('');
       setBudgetHrs(120);
+      setOpportunityStatus('pipeline');
+      setOpportunityValueText('');
       setBillable(true);
     }
   }, [open, project, defaultClientId]);
@@ -63,15 +69,34 @@ export function ProjectFormModal({
       toast.error('Client and name are required');
       return;
     }
+    const trimmedValue = opportunityValueText.trim();
+    let opportunityValue: number | null = null;
+    if (trimmedValue !== '') {
+      const parsed = Number(trimmedValue);
+      if (!Number.isInteger(parsed) || parsed < 0) {
+        toast.error('Opportunity value must be a non-negative whole number');
+        return;
+      }
+      opportunityValue = parsed;
+    }
     try {
       if (isEdit && project) {
         await update.mutateAsync({
           id: project.id,
-          patch: { clientId, name: name.trim(), code, budgetHrs, billable },
+          patch: { clientId, name: name.trim(), code, budgetHrs, billable, opportunityStatus, opportunityValue },
         });
         toast.success('Project updated');
       } else {
-        const row = await create.mutateAsync({ clientId, name: name.trim(), code, budgetHrs, billable, color: '#9333ea' });
+        const row = await create.mutateAsync({
+          clientId,
+          name: name.trim(),
+          code,
+          budgetHrs,
+          billable,
+          opportunityStatus,
+          opportunityValue,
+          color: '#9333ea',
+        });
         toast.success('Project created');
         onCreated?.(row);
       }
@@ -109,6 +134,26 @@ export function ProjectFormModal({
         <div className="grid grid-cols-2 gap-3">
           <Field label="Code"><Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. CDT-GG" /></Field>
           <Field label="Budget (hrs)"><Input type="number" value={budgetHrs} onChange={(e) => setBudgetHrs(Number(e.target.value) || 0)} /></Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Project status">
+            <Select value={opportunityStatus} onChange={(e) => setOpportunityStatus(e.target.value as 'pipeline' | 'won' | 'lost' | 'on-hold')}>
+              <option value="pipeline">Pipeline</option>
+              <option value="won">Won</option>
+              <option value="lost">Lost</option>
+              <option value="on-hold">On hold</option>
+            </Select>
+          </Field>
+          <Field label="Opportunity value">
+            <Input
+              type="number"
+              min={0}
+              step={1}
+              value={opportunityValueText}
+              onChange={(e) => setOpportunityValueText(e.target.value)}
+              placeholder="e.g. 25000"
+            />
+          </Field>
         </div>
         <Checkbox label="Billable" checked={billable} onChange={setBillable} />
       </div>

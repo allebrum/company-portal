@@ -53,6 +53,7 @@ export async function updateClient(
   if (patch.name !== undefined) upd.name = patch.name;
   if (patch.kind !== undefined) upd.kind = patch.kind;
   if (patch.color !== undefined) upd.color = patch.color;
+  if (patch.clientOverview !== undefined) upd.clientOverview = patch.clientOverview;
   if (patch.spaceBlocks !== undefined) upd.spaceBlocks = patch.spaceBlocks;
   if (patch.spaceFiles !== undefined) upd.spaceFiles = patch.spaceFiles;
   // F23 client portal config — slug uniqueness is enforced by the

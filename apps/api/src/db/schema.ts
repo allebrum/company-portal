@@ -294,6 +294,9 @@ export const clients = pgTable('clients', {
   // client creation when Drive is connected; null otherwise). Sub-folders
   // for the client's projects are created inside this folder.
   driveFolderId: text('drive_folder_id'),
+  // Structured intake + marketing metadata for this client.
+  // Shape: { contacts: [...], addresses: [...] }
+  clientOverview: jsonb('client_overview').notNull().default(sql`'{}'::jsonb`),
   // Client/Project Spaces — per-scope Notes canvas + Files list. Both
   // full-replace on update. Same convention as goals.checklist /
   // projects.statuses (small array, fold into parent, no diffing).
@@ -339,6 +342,10 @@ export const projects = pgTable('projects', {
   clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'restrict' }),
   name: text('name').notNull(),
   code: text('code').notNull().default(''),
+  // Opportunity pipeline state used for sales capture tracking.
+  opportunityStatus: text('opportunity_status').notNull().default('pipeline'),
+  // Value in whole currency units (e.g. USD dollars); null when unknown.
+  opportunityValue: integer('opportunity_value'),
   billable: boolean('billable').notNull().default(true),
   budgetHrs: integer('budget_hrs').notNull().default(120),
   color: text('color').notNull().default('#9333ea'),
@@ -349,6 +356,9 @@ export const projects = pgTable('projects', {
   // Custom status workflow: array of { id, label, tone }. Null = use the
   // default backlog/in-progress/review/done workflow.
   statuses: jsonb('statuses'),
+  // Structured capture data for opportunity intake and marketing handoff.
+  // Shape: { contacts: [...], addresses: { mailing?, billing? } }
+  projectOverview: jsonb('project_overview').notNull().default(sql`'{}'::jsonb`),
   // See clients.spaceBlocks / spaceFiles — same per-scope canvas storage.
   spaceBlocks: jsonb('space_blocks').notNull().default(sql`'[]'::jsonb`),
   spaceFiles: jsonb('space_files').notNull().default(sql`'[]'::jsonb`),

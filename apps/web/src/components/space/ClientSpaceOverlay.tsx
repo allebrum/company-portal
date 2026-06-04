@@ -36,6 +36,8 @@ import { Input } from '@/components/ui/Field';
 import { NotesTab } from './NotesTab';
 import { EmbedDialog, type EmbedDialogValue } from './pickers/EmbedDialog';
 import { PortalTab } from './PortalTab';
+import { ProjectOverviewTab } from './ProjectOverviewTab';
+import { ClientOverviewTab } from './ClientOverviewTab';
 import { ItemComposer } from '@/components/features/ItemComposer';
 import { ProjectFormModal } from '@/components/features/ProjectFormModal';
 import { ClientFormModal } from '@/components/features/ClientFormModal';
@@ -64,9 +66,9 @@ function useSpaceModals(): SpaceModals {
 // Narrowed scope (the overlay never opens for 'all').
 type OpenScope = Exclude<Scope, { kind: 'all' }>;
 
-type TabKey = 'notes' | 'goals' | 'todos' | 'files' | 'portal';
+type TabKey = 'overview' | 'notes' | 'goals' | 'todos' | 'files' | 'portal';
 const SPACE_TAB_PARAM = 'spaceTab';
-const TAB_KEYS: ReadonlyArray<TabKey> = ['notes', 'goals', 'todos', 'files', 'portal'];
+const TAB_KEYS: ReadonlyArray<TabKey> = ['overview', 'notes', 'goals', 'todos', 'files', 'portal'];
 
 function readTabFromUrl(): TabKey | null {
   const raw = new URL(window.location.href).searchParams.get(SPACE_TAB_PARAM);
@@ -145,11 +147,16 @@ export function ClientSpaceOverlay() {
       // F25 — child modals (ItemComposer / Project / Client form) own their
       // own ESC-to-close. Don't also tear down the whole space underneath them.
       if (anyChildModalOpen) return;
+      // In project scope, ESC steps back to the parent client first.
+      if (openScope.kind === 'project' && data.clientId) {
+        openSpace({ kind: 'client', id: data.clientId });
+        return;
+      }
       closeSpace();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [openScope, closeSpace, anyChildModalOpen]);
+  }, [openScope, data.clientId, closeSpace, openSpace, anyChildModalOpen]);
 
   if (!openScope || openScope.kind === 'all' || !mounted) return null;
   const narrowed: OpenScope = openScope;
@@ -198,6 +205,12 @@ export function ClientSpaceOverlay() {
             )}
             {tab === 'portal' && narrowed.kind === 'client' && data.client && (
               <PortalTab client={data.client} />
+            )}
+            {tab === 'overview' && narrowed.kind === 'project' && data.project && (
+              <ProjectOverviewTab project={data.project} />
+            )}
+            {tab === 'overview' && narrowed.kind === 'client' && data.client && (
+              <ClientOverviewTab client={data.client} />
             )}
           </div>
         </div>
@@ -260,6 +273,13 @@ function SpaceHeader({
   const { client, project } = data;
   const title = scope.kind === 'project' ? project?.name ?? 'Project' : client?.name ?? 'Client';
   const initials = (client?.name ?? '?').slice(0, 2).toUpperCase();
+  const onEscAction = () => {
+    if (scope.kind === 'project' && client) {
+      openSpace({ kind: 'client', id: client.id });
+      return;
+    }
+    onClose();
+  };
   return (
     <header className="px-6 py-4 border-b border-gray-100 flex items-center gap-4">
       <div
@@ -299,11 +319,11 @@ function SpaceHeader({
       )}
       <button
         type="button"
-        onClick={onClose}
+        onClick={onEscAction}
         className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-gray-500 hover:text-gray-900 px-2 py-1.5 rounded-lg hover:bg-gray-100"
-        title="Close space (ESC)"
+        title={scope.kind === 'project' ? 'Back to client (ESC)' : 'Close space (ESC)'}
       >
-        ESC Close
+        {scope.kind === 'project' ? 'ESC Back' : 'ESC Close'}
       </button>
       <button
         type="button"
@@ -435,6 +455,7 @@ function SpaceTabs({
   const scopedGoals = goals.filter((g) => goalInScope(g, data));
   const scopedOpenTodos = todos.filter((t) => todoInScope(t, data) && t.status === 'open');
   const filesCount = data.spaceFiles.length;
+  const showOverviewTab = !!data.client || !!data.project;
   // Portal tab only at client scope, and only for staff with the F23
   // `portal.manage` permission. Projects don't have their own portal.
   const showPortalTab = !!data.client && !data.project && can('portal.manage');
@@ -464,6 +485,7 @@ function SpaceTabs({
       <Tab k="todos" label="To-dos" icon={CheckSquare} count={scopedOpenTodos.length} />
       <Tab k="files" label="Files" icon={Upload} count={filesCount} />
       {showPortalTab && <Tab k="portal" label="Portal" icon={Globe} />}
+      {showOverviewTab && <Tab k="overview" label="Overview" icon={Layers} />}
       <div className="ml-auto text-[11px] text-gray-400 italic">
         Auto-linked to <span className="font-semibold text-gray-600">{data.client?.name ?? '—'}</span>
       </div>

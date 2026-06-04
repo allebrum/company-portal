@@ -25,6 +25,25 @@ import { useSpace } from '@/contexts/SpaceContext';
 import type { Scope } from '@/lib/roadmap';
 import { fmtMins, startOfWeek } from '@/lib/formatters';
 
+const OPPORTUNITY_STATUS_LABEL: Record<'pipeline' | 'won' | 'lost' | 'on-hold', string> = {
+  pipeline: 'Pipeline',
+  won: 'Won',
+  lost: 'Lost',
+  'on-hold': 'On hold',
+};
+
+const OPPORTUNITY_STATUS_CLASS: Record<'pipeline' | 'won' | 'lost' | 'on-hold', string> = {
+  pipeline: 'bg-blue-50 text-blue-700',
+  won: 'bg-emerald-50 text-emerald-700',
+  lost: 'bg-rose-50 text-rose-700',
+  'on-hold': 'bg-amber-50 text-amber-700',
+};
+
+function fmtOpportunityValue(value: number | null | undefined): string {
+  if (value == null) return '—';
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
+}
+
 /**
  * Top-level **Clients** directory — the canonical entry point into
  * Client/Project Spaces. Replaces the older idea of a sidebar
@@ -554,6 +573,13 @@ function ProjectRow({
       <div className="flex-1 min-w-0">
         <div className="text-[13px] font-semibold text-gray-900 group-hover:text-brand-700 transition-colors truncate">
           {project.name}
+        </div>
+        <div className="mt-1 flex items-center gap-2 text-[10px]">
+          <span className={`rounded-full px-1.5 py-0.5 font-semibold ${OPPORTUNITY_STATUS_CLASS[project.opportunityStatus]}`}>
+            {OPPORTUNITY_STATUS_LABEL[project.opportunityStatus]}
+          </span>
+          <span className="text-gray-500 font-medium">Opp: {fmtOpportunityValue(project.opportunityValue)}</span>
+          <span className="text-gray-400">Effort: {fmtMins(project.timeSpentMin)}</span>
         </div>
         <div className="mt-1 h-1 bg-gray-100 rounded-full overflow-hidden">
           <div
