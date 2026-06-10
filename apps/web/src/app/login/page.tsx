@@ -7,6 +7,7 @@ import type { AuthMethods } from '@allebrum/shared';
 import { Button } from '@/components/ui/Button';
 import { Field, Input } from '@/components/ui/Field';
 import { Card } from '@/components/ui/Card';
+import { HoppaMark } from '@/components/ui/HoppaMark';
 import { useAuth } from '@/hooks/useAuth';
 import { useAuthConfig, fetchAuthMethods } from '@/hooks/useResources';
 import { useTwoFactorChallenge, verifyTotpStep, verifyPasskeyStep } from '@/hooks/use2fa';
@@ -152,7 +153,7 @@ export default function LoginPage() {
   // Branding: default (instance) on the email step; the resolved workspace's
   // brand once we know which account is signing in.
   const brand = stage === 'method' && methods ? methods : cfg;
-  const portalName = brand?.portalName ?? 'Allebrum';
+  const portalName = brand?.portalName ?? 'Hoppa';
   const brandColor = brand?.brandPrimaryColor ?? '#9333ea';
   const logoDataUrl = brand?.brandLogoDataUrl ?? null;
 
@@ -174,8 +175,10 @@ export default function LoginPage() {
             {logoDataUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={logoDataUrl} alt={`${portalName} logo`} className="w-full h-full object-contain" />
+            ) : portalName === 'Hoppa' ? (
+              <HoppaMark className="w-7 h-7" />
             ) : (
-              portalName.charAt(0).toUpperCase() || 'A'
+              portalName.charAt(0).toUpperCase() || 'H'
             )}
           </div>
           <h1 className="mt-3 text-xl font-bold text-gray-900">{portalName} Portal</h1>

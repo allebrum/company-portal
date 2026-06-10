@@ -4,8 +4,8 @@ import { AuthGate } from '@/components/shell/AuthGate';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Allebrum Company Portal',
-  description: 'Internal portal for Allebrum, LLC.',
+  title: 'Hoppa',
+  description: 'Hoppa — the calm workspace for client work.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
