@@ -24,7 +24,7 @@ export function PortalHeader({
 }) {
   const { data: cfg } = useAuthConfig();
   const logout = useLogoutPortal();
-  const workspaceName = cfg?.portalName ?? 'Allebrum';
+  const workspaceName = cfg?.portalName ?? 'Hoppa';
   const brandColor = cfg?.brandPrimaryColor ?? '#9333ea';
   const logo = cfg?.brandLogoDataUrl;
   const q = `?slug=${encodeURIComponent(slug)}`;

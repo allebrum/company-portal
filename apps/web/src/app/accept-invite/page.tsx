@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/Button';
 import { Field, Input } from '@/components/ui/Field';
 import { Card } from '@/components/ui/Card';
+import { HoppaMark } from '@/components/ui/HoppaMark';
 import { api, ApiError } from '@/lib/api';
 
 export default function AcceptInvitePage() {
@@ -54,10 +55,10 @@ export default function AcceptInvitePage() {
     <div className="min-h-screen grid place-items-center bg-gradient-to-br from-brand-900 via-brand-800 to-brand-700 p-6">
       <Card className="w-full max-w-sm p-6 space-y-5">
         <div className="text-center">
-          <div className="mx-auto w-12 h-12 rounded-2xl bg-gradient-to-br from-brand-600 to-brand-700 flex items-center justify-center text-white text-xl font-bold shadow-md">
-            A
+          <div className="mx-auto w-12 h-12 rounded-2xl bg-gradient-to-br from-brand-600 to-brand-700 flex items-center justify-center text-white shadow-md">
+            <HoppaMark className="w-7 h-7" />
           </div>
-          <h1 className="mt-3 text-xl font-bold text-gray-900">Welcome to Allebrum</h1>
+          <h1 className="mt-3 text-xl font-bold text-gray-900">Welcome to Hoppa</h1>
           <p className="text-sm text-gray-500">Set a password to finish signing in. You can also use Google sign-in afterwards.</p>
         </div>
 

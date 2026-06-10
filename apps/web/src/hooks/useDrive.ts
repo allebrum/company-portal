@@ -27,7 +27,16 @@ export type DriveListing = {
   entries: DriveEntry[];
 };
 
-export const driveConnectUrl = `${API_URL}/api/integrations/drive/connect`;
+/**
+ * Build the consent-redirect URL for connecting Google Drive. `returnTo` is an
+ * optional same-origin path the server bounces the browser back to after
+ * consent (with a `?drive=connected` flag) — used by the integration gate and
+ * onboarding flow so the user lands back where they were.
+ */
+export const driveConnectUrl = (returnTo?: string): string => {
+  const base = `${API_URL}/api/integrations/drive/connect`;
+  return returnTo ? `${base}?return_to=${encodeURIComponent(returnTo)}` : base;
+};
 export const driveDownloadUrl = (id: string) => `${API_URL}/api/integrations/drive/file/${id}/download`;
 
 export function useDriveStatus() {

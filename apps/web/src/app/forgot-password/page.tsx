@@ -50,7 +50,7 @@ export default function ForgotPasswordPage() {
         {done ? (
           <div className="space-y-4">
             <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
-              If <span className="font-semibold">{email}</span> belongs to an Allebrum account, a reset link is on its way. It expires in 1 hour.
+              If <span className="font-semibold">{email}</span> belongs to a Hoppa account, a reset link is on its way. It expires in 1 hour.
             </div>
             <a href="/login" className="block">
               <Button type="button" variant="primary" size="lg" className="w-full">

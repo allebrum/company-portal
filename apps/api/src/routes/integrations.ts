@@ -132,7 +132,13 @@ integrationsRouter.get('/drive/connect', driveAccess, async (req, res, next) => 
       return;
     }
     const state = randomBytes(16).toString('hex');
-    req.session.oauthState = state;
+    // Same-origin path-only return (no scheme / no `//host`) so the gate can
+    // bounce the user back to where they triggered the connect.
+    const rawReturnTo = typeof req.query.return_to === 'string' ? req.query.return_to : undefined;
+    const returnTo = rawReturnTo && rawReturnTo.startsWith('/') && !rawReturnTo.startsWith('//')
+      ? rawReturnTo
+      : undefined;
+    req.session.driveOauthState = { state, returnTo };
     req.session.save((err) => {
       if (err) return next(err);
       res.redirect(buildDriveConsentUrl(state));
@@ -143,22 +149,30 @@ integrationsRouter.get('/drive/connect', driveAccess, async (req, res, next) => 
 });
 
 integrationsRouter.get('/drive/callback', async (req, res, next) => {
-  const back = (q: string) => res.redirect(`${env.WEB_ORIGIN}/media?drive=${q}`);
+  // Return to where the user was (defaults to /media), with `?drive=...`
+  // appended — preserving any existing query string on returnTo.
+  const back = (q: string, returnTo?: string) => {
+    const base = `${env.WEB_ORIGIN}${returnTo ?? '/media'}`;
+    const sep = base.includes('?') ? '&' : '?';
+    res.redirect(`${base}${sep}drive=${encodeURIComponent(q)}`);
+  };
   try {
     const me = req.session.user;
-    if (!me) return back('error');
+    const stored = req.session.driveOauthState;
+    const returnTo = stored?.returnTo;
+    if (!me) return back('error', returnTo);
     const code = typeof req.query.code === 'string' ? req.query.code : '';
     const state = typeof req.query.state === 'string' ? req.query.state : '';
-    if (!code || !state || state !== req.session.oauthState) return back('bad_state');
-    delete req.session.oauthState;
+    if (!code || !state || !stored || state !== stored.state) return back('bad_state', returnTo);
+    delete req.session.driveOauthState;
     const tokens = await exchangeDriveCode(code);
     await saveDriveToken(me.userId, tokens);
     await ensureSharedFolder();
     // Keep Integrations tab consistent with the token-backed Drive status.
     await connect('drive', { account: 'connected' }, me.userId);
-    return back('connected');
+    return back('connected', returnTo);
   } catch {
-    return back('error');
+    return back('error', req.session.driveOauthState?.returnTo);
   }
 });
 

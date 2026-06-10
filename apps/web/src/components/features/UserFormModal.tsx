@@ -14,8 +14,7 @@ import {
   useSetUserGroups,
   type UserRow,
 } from '@/hooks/useResources';
-import { useGmailStatus } from '@/hooks/useGmail';
-import { ConnectGmailModal } from '@/components/features/ConnectGmailModal';
+import { useIntegrationGate } from '@/components/shell/IntegrationGate';
 import { api } from '@/lib/api';
 
 export function UserFormModal({
@@ -48,11 +47,10 @@ export function UserFormModal({
   const [sendInvite, setSendInvite] = useState(true);
   const [resending, setResending] = useState(false);
 
-  // Gmail-connection gate: if `sendInvite` is on but the current admin
-  // hasn't connected their Gmail yet, open the JIT connect modal before
-  // touching the API. Status is loaded once for the whole modal lifetime.
-  const { data: gmailStatus } = useGmailStatus();
-  const [showGmailModal, setShowGmailModal] = useState(false);
+  // Invites/resends email from the current admin's Gmail. The integration gate
+  // pops a connect modal (and offers Connect or Skip-email) when Gmail isn't
+  // wired up yet, then the action continues from where it left off.
+  const gate = useIntegrationGate();
 
   useEffect(() => {
     if (!open) return;
@@ -81,19 +79,37 @@ export function UserFormModal({
   const toggleGroup = (id: string) =>
     setGroupIds((prev) => (prev.includes(id) ? prev.filter((g) => g !== id) : [...prev, id]));
 
+  // Fire the invite mutation. `withEmail` decides whether the server emails the
+  // invite link (gated on Gmail) or just creates the account (Google sign-in).
+  const submitInvite = async (withEmail: boolean) => {
+    try {
+      const res = await invite.mutateAsync({
+        name: name.trim(),
+        email: email.trim(),
+        billable,
+        groupIds,
+        sendInvite: withEmail,
+      });
+      toast.success(
+        res.reused
+          ? `${res.name} already had an account — added to this workspace`
+          : withEmail
+            ? `Invite emailed to ${email.trim()}`
+            : `${name.trim()} added — they can sign in with Google`,
+      );
+      onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Save failed');
+    }
+  };
+
   const onSave = async () => {
     if (!name.trim() || !email.trim()) {
       toast.error('Name and email are required');
       return;
     }
-    // Block the create+send-invite path when the current admin hasn't
-    // connected Gmail. The JIT modal then offers Connect or Skip-email.
-    if (!isEdit && sendInvite && gmailStatus && !gmailStatus.connected) {
-      setShowGmailModal(true);
-      return;
-    }
-    try {
-      if (isEdit && user) {
+    if (isEdit && user) {
+      try {
         await update.mutateAsync({
           id: user.id,
           patch: {
@@ -105,50 +121,51 @@ export function UserFormModal({
           },
         });
         toast.success('User updated');
-      } else {
-        const res = await invite.mutateAsync({
-          name: name.trim(),
-          email: email.trim(),
-          billable,
-          groupIds,
-          sendInvite,
-        });
-        toast.success(
-          res.reused
-            ? `${res.name} already had an account — added to this workspace`
-            : sendInvite
-              ? `Invite emailed to ${email.trim()}`
-              : `${name.trim()} added — they can sign in with Google`,
-        );
+        onClose();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Save failed');
       }
-      onClose();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Save failed');
+      return;
+    }
+    // New invite. When it should email, ensure the admin's Gmail is connected
+    // first — the gate drives the connect and lets them continue (or skip).
+    if (sendInvite) {
+      gate.requireIntegration({
+        integration: 'gmail',
+        action: () => void submitInvite(true),
+        reason:
+          'Invites are emailed from your own Gmail so the new teammate sees a real person, not a no-reply.',
+        onSkip: () => {
+          setSendInvite(false);
+          void submitInvite(false);
+        },
+        skipLabel: 'Skip email',
+      });
+    } else {
+      void submitInvite(false);
     }
   };
 
-  const onResendInvite = async () => {
+  const onResendInvite = () => {
     if (!user) return;
     // Same gate for Resend — needs the clicker's Gmail to send.
-    if (gmailStatus && !gmailStatus.connected) {
-      setShowGmailModal(true);
-      return;
-    }
-    setResending(true);
-    try {
-      await api.post(`/users/${user.id}/resend-invite`);
-      toast.success(`Invite re-sent to ${user.email}`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Resend failed');
-    } finally {
-      setResending(false);
-    }
+    gate.requireIntegration({
+      integration: 'gmail',
+      reason: 'The invite email is sent from your own Gmail.',
+      action: () => {
+        setResending(true);
+        void api
+          .post(`/users/${user.id}/resend-invite`)
+          .then(() => toast.success(`Invite re-sent to ${user.email}`))
+          .catch((e) => toast.error(e instanceof Error ? e.message : 'Resend failed'))
+          .finally(() => setResending(false));
+      },
+    });
   };
 
   const busy = invite.isPending || update.isPending || setUserGroups.isPending;
 
   return (
-    <>
     <Modal
       open={open}
       onClose={onClose}
@@ -225,11 +242,5 @@ export function UserFormModal({
         )}
       </div>
     </Modal>
-    <ConnectGmailModal
-      open={showGmailModal}
-      onClose={() => setShowGmailModal(false)}
-      onSkipEmail={() => setSendInvite(false)}
-    />
-    </>
   );
 }

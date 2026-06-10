@@ -889,7 +889,7 @@ function BrandingTab() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               onBlur={saveName}
-              placeholder="Allebrum"
+              placeholder="Hoppa"
               maxLength={60}
               className="max-w-sm"
             />
@@ -1401,7 +1401,7 @@ function IntegrationsTab() {
                     </Button>
                   ) : (
                     isDrive ? (
-                      <Button variant="primary" size="sm" onClick={() => window.location.assign(driveConnectUrl)}>
+                      <Button variant="primary" size="sm" onClick={() => window.location.assign(driveConnectUrl())}>
                         Connect
                       </Button>
                     ) : (
