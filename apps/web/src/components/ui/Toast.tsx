@@ -4,11 +4,17 @@ import { createContext, useCallback, useContext, useMemo, useRef, useState } fro
 import { CheckCircle2, XCircle, X } from 'lucide-react';
 
 type ToastKind = 'success' | 'error';
-type ToastItem = { id: number; kind: ToastKind; message: string };
+type ToastOptions = {
+  /** Inline action button (e.g. "Undo"). The toast dismisses after it runs. */
+  action?: { label: string; onClick: () => void };
+  /** Override the 3.5s auto-dismiss — e.g. 5000 for undo-able actions. */
+  durationMs?: number;
+};
+type ToastItem = { id: number; kind: ToastKind; message: string; action?: ToastOptions['action'] };
 
 type ToastApi = {
-  success: (message: string) => void;
-  error: (message: string) => void;
+  success: (message: string, opts?: ToastOptions) => void;
+  error: (message: string, opts?: ToastOptions) => void;
 };
 
 const ToastContext = createContext<ToastApi | null>(null);
@@ -22,10 +28,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const push = useCallback(
-    (kind: ToastKind, message: string) => {
+    (kind: ToastKind, message: string, opts?: ToastOptions) => {
       const id = ++idRef.current;
-      setToasts((prev) => [...prev, { id, kind, message }]);
-      window.setTimeout(() => remove(id), 3500);
+      setToasts((prev) => [...prev, { id, kind, message, action: opts?.action }]);
+      window.setTimeout(() => remove(id), opts?.durationMs ?? 3500);
     },
     [remove],
   );
@@ -34,8 +40,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   // effects that depend on the toast API will loop.
   const api = useMemo<ToastApi>(
     () => ({
-      success: (m: string) => push('success', m),
-      error: (m: string) => push('error', m),
+      success: (m: string, opts?: ToastOptions) => push('success', m, opts),
+      error: (m: string, opts?: ToastOptions) => push('error', m, opts),
     }),
     [push],
   );
@@ -59,7 +65,18 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               <XCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
             )}
             <div className="flex-1 leading-snug">{t.message}</div>
-            <button onClick={() => remove(t.id)} className="text-gray-400 hover:text-gray-700 shrink-0">
+            {t.action && (
+              <button
+                onClick={() => {
+                  t.action?.onClick();
+                  remove(t.id);
+                }}
+                className="shrink-0 text-xs font-bold text-brand-700 hover:text-brand-800 px-2 py-1 rounded-md hover:bg-brand-50"
+              >
+                {t.action.label}
+              </button>
+            )}
+            <button onClick={() => remove(t.id)} aria-label="Dismiss" className="text-gray-500 hover:text-gray-700 shrink-0 p-1 -m-1">
               <X className="w-4 h-4" />
             </button>
           </div>
