@@ -142,7 +142,7 @@ export default function MediaPage() {
         <div>
           <div className="eyebrow">Workspace</div>
           <h1 className="text-2xl font-bold text-gray-900">Media manager</h1>
-          <p className="text-sm text-gray-500">The shared Allebrum Portal Drive folder.</p>
+          <p className="text-sm text-gray-500">The shared workspace Drive folder.</p>
         </div>
         {connected && canUseDrive && (
           <Button
@@ -174,7 +174,7 @@ export default function MediaPage() {
         <Card className="p-8 text-center space-y-4">
           <Empty title="Google Drive not connected" description="Connect a Google account to browse and manage the shared portal folder." />
           {canUseDrive ? (
-            <a href={driveConnectUrl} className="inline-block">
+            <a href={driveConnectUrl()} className="inline-block">
               <Button variant="primary" size="lg">
                 <Plug className="w-4 h-4" /> Connect Google Drive
               </Button>

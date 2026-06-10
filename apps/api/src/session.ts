@@ -14,11 +14,14 @@ declare module 'express-session' {
     pending?: { userId: string; tenantId: string };
     // Transient WebAuthn challenge for register/authenticate ceremonies.
     webauthnChallenge?: string;
+    // Google *login* OAuth state (auth.ts). Gmail + Drive connect each use
+    // their own slots below so concurrent flows can't collide.
     oauthState?: string;
-    // Gmail uses its own state slot so a concurrent Drive connect (which
-    // also uses `oauthState`) can't collide. Also carries `returnTo` so
-    // the JIT connect flow can come back to where the user was.
+    // Gmail + Drive connect each carry their own state plus an optional
+    // same-origin `returnTo`, so the JIT / integration-gate connect flow can
+    // bounce the user back to where they were.
     gmailOauthState?: { state: string; returnTo?: string };
+    driveOauthState?: { state: string; returnTo?: string };
     // F23 public client portal — sibling of `user`, never set at the same
     // time. Identifies an external client contact who consumed a magic
     // link. Scoped to one client; cross-client API calls return 403.

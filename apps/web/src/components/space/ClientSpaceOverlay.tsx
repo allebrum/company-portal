@@ -1108,7 +1108,7 @@ function FilesTab({
             </>
           ) : (
             <>
-              <a href={driveConnectUrl} className="text-amber-700 font-semibold hover:underline">
+              <a href={driveConnectUrl()} className="text-amber-700 font-semibold hover:underline">
                 Connect Google Drive
               </a>{' '}
               to upload files. You can still{' '}

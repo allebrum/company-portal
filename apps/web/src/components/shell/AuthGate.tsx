@@ -10,6 +10,8 @@ import { Sidebar } from './Sidebar';
 import { TimerBar } from './TimerBar';
 import { ClientSpaceOverlay } from '@/components/space/ClientSpaceOverlay';
 import { UploadTray } from '@/components/upload/UploadTray';
+import { IntegrationGateProvider } from './IntegrationGate';
+import { OnboardingChecklist } from './OnboardingChecklist';
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
@@ -76,7 +78,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }
 
   return (
-    <>
+    <IntegrationGateProvider>
       <ShellWithBootstrap>{children}</ShellWithBootstrap>
       {/* Client/Project Space overlay — fixed inset-0 portal, only renders
           when context's openScope is non-null. Lives alongside the shell so
@@ -86,7 +88,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
           across Space-overlay open/close and route changes; users can
           drop files, navigate elsewhere, and watch progress complete. */}
       <UploadTray />
-    </>
+      {/* First-run setup checklist — bottom-right, dismissible, auto-checks
+          off as integrations connect / teammates are invited. */}
+      <OnboardingChecklist />
+    </IntegrationGateProvider>
   );
 }
 
