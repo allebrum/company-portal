@@ -176,6 +176,13 @@
       "when": 1780611000000,
       "tag": "0024_bright_wallflower",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1781116018979,
+      "tag": "0025_drive_tenant_scope",
+      "breakpoints": true
     }
   ]
 }
