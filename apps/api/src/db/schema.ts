@@ -160,6 +160,12 @@ export const appSettings = pgTable('app_settings', {
 export const oauthTokens = pgTable('oauth_tokens', {
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   provider: text('provider').notNull(),
+  // Hoppa: the Google Drive connection is per-WORKSPACE — one shared Drive per
+  // tenant, connected once by an admin and used by every member. `tenant_id`
+  // scopes the credential so each workspace resolves only its own Drive (see
+  // services/drive.ts `getStoredToken`). Nullable because Gmail tokens are
+  // per-user sends and stay un-tenant-scoped in this pass.
+  tenantId: tenantRef(),
   scopes: text('scopes').array().notNull().default(sql`'{}'::text[]`),
   accessToken: text('access_token'),
   refreshToken: text('refresh_token'),
@@ -167,6 +173,7 @@ export const oauthTokens = pgTable('oauth_tokens', {
   updatedAt: updTs(),
 }, (t) => ({
   pk: primaryKey({ columns: [t.userId, t.provider] }),
+  tenantIdx: index('oauth_tokens_tenant_idx').on(t.tenantId),
 }));
 
 // ---- 2FA: TOTP, recovery codes, WebAuthn passkeys ----

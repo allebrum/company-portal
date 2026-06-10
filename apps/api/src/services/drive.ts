@@ -8,8 +8,9 @@ import { getSettings } from './settings.js';
 import { env, driveRedirectUrl, driveOAuthConfigured } from '../env.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { tenantEq } from '../tenancy/scope.js';
+import { currentTenantId } from '../tenancy/context.js';
+import { DRIVE_PROVIDER as PROVIDER, driveTokenScope } from './driveTokenScope.js';
 
-const PROVIDER = 'google_drive';
 export const DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive'];
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
 
@@ -31,11 +32,15 @@ export function buildDriveConsentUrl(state: string): string {
   });
 }
 
+// The Drive credential is scoped to the active workspace: a tenant only ever
+// resolves the Google account ITS admin connected. Without the `tenantEq`,
+// every workspace shared whichever Drive was connected last (cross-tenant
+// data exposure — all tenants' folders landed in one Google account).
 async function getStoredToken() {
   const rows = await db
     .select()
     .from(oauthTokens)
-    .where(eq(oauthTokens.provider, PROVIDER))
+    .where(driveTokenScope())
     .orderBy(desc(oauthTokens.updatedAt))
     .limit(1);
   return rows[0];
@@ -61,10 +66,15 @@ export async function saveDriveToken(
   userId: string,
   tokens: { access_token?: string | null; refresh_token?: string | null; expiry_date?: number | null },
 ): Promise<void> {
+  // Stamp the active workspace onto the credential so it's resolvable only
+  // within that tenant. The admin who runs the consent flow owns the row
+  // (PK user+provider); `getStoredToken` reads it back by tenant.
+  const tenantId = currentTenantId();
   await db
     .insert(oauthTokens)
     .values({
       userId,
+      tenantId,
       provider: PROVIDER,
       scopes: DRIVE_SCOPES,
       accessToken: tokens.access_token ?? null,
@@ -74,6 +84,7 @@ export async function saveDriveToken(
     .onConflictDoUpdate({
       target: [oauthTokens.userId, oauthTokens.provider],
       set: {
+        tenantId,
         scopes: DRIVE_SCOPES,
         accessToken: tokens.access_token ?? null,
         // Google omits refresh_token on re-consent sometimes; keep the old one.
@@ -91,7 +102,9 @@ export async function exchangeDriveCode(code: string) {
 }
 
 export async function disconnectDrive(): Promise<void> {
-  await db.delete(oauthTokens).where(eq(oauthTokens.provider, PROVIDER));
+  // Scope to the active workspace so disconnecting one tenant's Drive can't
+  // delete another tenant's credential.
+  await db.delete(oauthTokens).where(and(eq(oauthTokens.provider, PROVIDER), tenantEq(oauthTokens.tenantId)));
 }
 
 async function driveApi(): Promise<drive_v3.Drive> {
