@@ -1,7 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Lock } from 'lucide-react';
+import { qk } from '@/lib/queryKeys';
 import { Card, Pill, Section, Empty } from '@/components/ui';
 import { Button } from '@/components/ui/Button';
 import { Checkbox, Field, Select } from '@/components/ui/Field';
@@ -33,6 +35,37 @@ export default function TodosPage() {
   const { data: goals = [] } = useGoals();
   const toggle = useToggleTodo();
   const remove = useDeleteTodo();
+  const qc = useQueryClient();
+
+  // Undo-able delete: the row leaves the list immediately, but the server
+  // DELETE only fires after the undo window closes. "Undo" cancels the
+  // timer and refetches (the row was never deleted server-side).
+  const pendingDeletes = useRef(new Map<string, number>());
+  const deleteWithUndo = (t: TodoRow) => {
+    qc.setQueryData<TodoRow[]>(qk.todos, (prev) => prev?.filter((x) => x.id !== t.id));
+    const timer = window.setTimeout(() => {
+      pendingDeletes.current.delete(t.id);
+      remove.mutateAsync(t.id).catch((e) => {
+        void qc.invalidateQueries({ queryKey: qk.todos });
+        toast.error(e instanceof Error ? e.message : 'Delete failed');
+      });
+    }, 5000);
+    pendingDeletes.current.set(t.id, timer);
+    toast.success(`Deleted "${t.title}"`, {
+      durationMs: 5000,
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          const h = pendingDeletes.current.get(t.id);
+          if (h !== undefined) {
+            window.clearTimeout(h);
+            pendingDeletes.current.delete(t.id);
+          }
+          void qc.invalidateQueries({ queryKey: qk.todos });
+        },
+      },
+    });
+  };
 
   const [scope, setScope] = useState<'me' | 'all'>('me');
   const [showDone, setShowDone] = useState(false);
@@ -143,16 +176,10 @@ export default function TodosPage() {
                     <TodoTimerButton todo={t} />
                     {canDelete && (
                       <button
-                        onClick={async () => {
-                          try {
-                            await remove.mutateAsync(t.id);
-                            toast.success('To-do deleted');
-                          } catch (e) {
-                            toast.error(e instanceof Error ? e.message : 'Delete failed');
-                          }
-                        }}
-                        className="text-gray-300 hover:text-red-600 transition-colors"
-                        title="Delete"
+                        onClick={() => deleteWithUndo(t)}
+                        className="text-gray-400 hover:text-red-600 transition-colors p-1 -m-1"
+                        title="Delete (undo available for 5s)"
+                        aria-label={`Delete "${t.title}"`}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>

@@ -5,6 +5,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Field, Input, Select } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import {
   useCreateClient,
   useUpdateClient,
@@ -120,7 +121,9 @@ export function ClientFormModal({
       }
     >
       <div className="space-y-4">
-        <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
+        <Field label="Name" required>
+          <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder="Client name" />
+        </Field>
         <Field label="Kind">
           <Select value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
             <option value="gov">Government</option>
@@ -147,15 +150,17 @@ export function ClientFormModal({
 
             <Field
               label="Slug"
-              hint={
+              error={
                 portalSlug && !slugValid
                   ? 'Must be 3-40 chars: lowercase letters, digits, hyphens; start with letter or digit.'
-                  : portalUrl ? portalUrl : 'Used in the public URL.'
+                  : undefined
               }
+              hint={portalUrl ? portalUrl : 'Used in the public URL.'}
             >
               <div className="flex items-center gap-2">
                 <Input
                   value={portalSlug}
+                  invalid={!!portalSlug && !slugValid}
                   onChange={(e) => setPortalSlug(e.target.value.toLowerCase())}
                   placeholder="acme-corp"
                 />
@@ -208,6 +213,7 @@ function ContactsManager({ clientId, hasSlug }: { clientId: string; hasSlug: boo
   const resend = useResendClientInvite();
   const remove = useRemoveClientContact();
   const toast = useToast();
+  const confirmDialog = useConfirm();
   const [showAdd, setShowAdd] = useState(false);
   const [addName, setAddName] = useState('');
   const [addEmail, setAddEmail] = useState('');
@@ -240,7 +246,12 @@ function ContactsManager({ clientId, hasSlug }: { clientId: string; hasSlug: boo
   };
 
   const onRemove = async (contactId: string, email: string) => {
-    if (!confirm(`Remove ${email}? Their sign-in link will stop working immediately.`)) return;
+    const ok = await confirmDialog({
+      title: `Remove ${email}?`,
+      body: 'Their sign-in link will stop working immediately.',
+      confirmLabel: 'Remove contact',
+    });
+    if (!ok) return;
     try {
       await remove.mutateAsync({ clientId, contactId });
       toast.success('Contact removed');

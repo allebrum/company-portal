@@ -40,9 +40,13 @@ export function ProjectFormModal({
   const [opportunityStatus, setOpportunityStatus] = useState<'pipeline' | 'won' | 'lost' | 'on-hold'>('pipeline');
   const [opportunityValueText, setOpportunityValueText] = useState('');
   const [billable, setBillable] = useState(true);
+  // Inline validation: errors render under their fields once a save was
+  // attempted, instead of living only in a transient toast.
+  const [attempted, setAttempted] = useState(false);
 
   useEffect(() => {
     if (!open) return;
+    setAttempted(false);
     if (project) {
       setClientId(project.clientId);
       setName(project.name);
@@ -64,21 +68,15 @@ export function ProjectFormModal({
     }
   }, [open, project, defaultClientId]);
 
+  const trimmedValue = opportunityValueText.trim();
+  const oppValid = trimmedValue === '' || (Number.isInteger(Number(trimmedValue)) && Number(trimmedValue) >= 0);
+
   const onSave = async () => {
-    if (!name.trim() || !clientId) {
-      toast.error('Client and name are required');
+    if (!name.trim() || !clientId || !oppValid) {
+      setAttempted(true);
       return;
     }
-    const trimmedValue = opportunityValueText.trim();
-    let opportunityValue: number | null = null;
-    if (trimmedValue !== '') {
-      const parsed = Number(trimmedValue);
-      if (!Number.isInteger(parsed) || parsed < 0) {
-        toast.error('Opportunity value must be a non-negative whole number');
-        return;
-      }
-      opportunityValue = parsed;
-    }
+    const opportunityValue: number | null = trimmedValue === '' ? null : Number(trimmedValue);
     try {
       if (isEdit && project) {
         await update.mutateAsync({
@@ -124,13 +122,21 @@ export function ProjectFormModal({
       }
     >
       <div className="space-y-3">
-        <Field label="Client">
-          <Select value={clientId} onChange={(e) => setClientId(e.target.value)}>
+        <Field label="Client" required error={attempted && !clientId ? 'Pick a client.' : undefined}>
+          <Select value={clientId} invalid={attempted && !clientId} onChange={(e) => setClientId(e.target.value)}>
             <option value="">— Pick a client —</option>
             {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
         </Field>
-        <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
+        <Field label="Name" required error={attempted && !name.trim() ? 'Give the project a name.' : undefined}>
+          <Input
+            value={name}
+            invalid={attempted && !name.trim()}
+            onChange={(e) => setName(e.target.value)}
+            autoFocus
+            placeholder="Project name"
+          />
+        </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Code"><Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. CDT-GG" /></Field>
           <Field label="Budget (hrs)"><Input type="number" value={budgetHrs} onChange={(e) => setBudgetHrs(Number(e.target.value) || 0)} /></Field>
@@ -144,12 +150,16 @@ export function ProjectFormModal({
               <option value="on-hold">On hold</option>
             </Select>
           </Field>
-          <Field label="Opportunity value">
+          <Field
+            label="Opportunity value"
+            error={!oppValid ? 'Whole dollars, no symbols — e.g. 25000.' : undefined}
+          >
             <Input
               type="number"
               min={0}
               step={1}
               value={opportunityValueText}
+              invalid={!oppValid}
               onChange={(e) => setOpportunityValueText(e.target.value)}
               placeholder="e.g. 25000"
             />

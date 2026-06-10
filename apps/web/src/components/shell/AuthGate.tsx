@@ -12,6 +12,9 @@ import { ClientSpaceOverlay } from '@/components/space/ClientSpaceOverlay';
 import { UploadTray } from '@/components/upload/UploadTray';
 import { IntegrationGateProvider } from './IntegrationGate';
 import { OnboardingChecklist } from './OnboardingChecklist';
+import { ShortcutsHelp } from './ShortcutsHelp';
+import { ShellSkeleton } from '@/components/ui/Skeleton';
+import { HoppaMark } from '@/components/ui/HoppaMark';
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
@@ -66,11 +69,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }
 
   if (loading) {
-    return (
-      <div className="min-h-screen grid place-items-center text-gray-400 text-sm">
-        Loading…
-      </div>
-    );
+    return <ShellSkeleton label="Signing you in" />;
   }
 
   if (!me) {
@@ -91,6 +90,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
       {/* First-run setup checklist — bottom-right, dismissible, auto-checks
           off as integrations connect / teammates are invited. */}
       <OnboardingChecklist />
+      {/* Global "?" keyboard-shortcuts reference. */}
+      <ShortcutsHelp />
     </IntegrationGateProvider>
   );
 }
@@ -107,11 +108,7 @@ function ShellWithBootstrap({ children }: { children: ReactNode }) {
   }, [pathname]);
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen grid place-items-center text-gray-400 text-sm">
-        Loading workspace…
-      </div>
-    );
+    return <ShellSkeleton label="Loading workspace" />;
   }
   // Hoppa: a 402 from the subscription gate → show the billing screen instead
   // of the generic error (the workspace's subscription lapsed/canceled).
@@ -164,6 +161,8 @@ function ShellWithBootstrap({ children }: { children: ReactNode }) {
               {cfg?.brandLogoDataUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={cfg.brandLogoDataUrl} alt="" className="w-full h-full object-contain" />
+              ) : (cfg?.portalName ?? 'Hoppa') === 'Hoppa' ? (
+                <HoppaMark className="w-[18px] h-[18px]" />
               ) : (
                 (cfg?.portalName ?? 'Hoppa').charAt(0).toUpperCase()
               )}

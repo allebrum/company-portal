@@ -91,7 +91,7 @@ export function PortalHeader({
           <div className="ml-auto sm:ml-3 flex items-center gap-2">
             <span className="hidden md:flex flex-col items-end leading-tight">
               <span className="text-[12px] font-semibold text-gray-700">{me.contact.name}</span>
-              <span className="text-[10px] text-gray-400">{me.contact.email}</span>
+              <span className="text-[10px] text-gray-500">{me.contact.email}</span>
             </span>
             <button
               type="button"

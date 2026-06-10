@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { useAuth } from '@/hooks/useAuth';
 import {
   useUsers, useClients, useProjects, useGoals, useTodos, useEpics, useGroups,
@@ -72,6 +73,7 @@ export function ItemComposer(props: ItemComposerProps) {
   // an effect dependency so the reset only fires on open / item change.
   const editItemId = props.mode === 'todo' ? (props.todo?.id ?? null) : (props.goal?.id ?? null);
   const toast = useToast();
+  const confirmDialog = useConfirm();
   const { me } = useAuth();
 
   // Shared lookups (one set of hooks for everything in the composer).
@@ -341,7 +343,12 @@ export function ItemComposer(props: ItemComposerProps) {
 
   const onDelete = async () => {
     if (mode !== 'todo' || !props.todo) return;
-    if (!confirm(`Delete "${props.todo.title}"?`)) return;
+    const ok = await confirmDialog({
+      title: `Delete "${props.todo.title}"?`,
+      body: 'The to-do and its checklist are removed. Logged time on it is kept.',
+      confirmLabel: 'Delete to-do',
+    });
+    if (!ok) return;
     try {
       await deleteTodo.mutateAsync(props.todo.id);
       toast.success('To-do deleted');
