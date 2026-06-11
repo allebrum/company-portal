@@ -116,7 +116,8 @@ export function goalAccent(
       return goal.health ? HEALTH_TONE[goal.health]?.color ?? TONE_COLOR.gray! : TONE_COLOR.gray!;
     case 'status':
     default: {
-      const active = statusesForScope({ kind: 'project', id: goal.projectId }, ctx.projects);
+      // Workspace goals (null project) fall back to the default workflow.
+      const active = statusesForScope({ kind: 'project', id: goal.projectId ?? '' }, ctx.projects);
       const bucket = bucketStatus(goal.status, active);
       const tone = active.find((s) => s.id === bucket)?.tone ?? 'gray';
       return toneColor(tone);

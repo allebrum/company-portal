@@ -282,13 +282,16 @@ export function ItemComposer(props: ItemComposerProps) {
           toast.success('To-do created');
         }
       } else {
-        if (!clientId || !projectId) {
-          toast.error('Pick a client and project');
+        // Workspace-level goals: neither client nor project is required.
+        // The only invalid combination is a project without its client
+        // (the picker UI couples them, but guard anyway).
+        if (projectId && !clientId) {
+          toast.error('Pick the client this project belongs to');
           return;
         }
         const payload = {
-          clientId,
-          projectId,
+          clientId: clientId || null,
+          projectId: projectId || null,
           title: title.trim(),
           description: description.trim() || null,
           status: goalStatus,
