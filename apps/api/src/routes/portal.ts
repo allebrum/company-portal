@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { eq, and, isNotNull, inArray, gte, asc } from 'drizzle-orm';
 import {
   PortalRequestAccessSchema,
@@ -18,6 +19,8 @@ import { rateLimit } from '../middleware/rateLimit.js';
 import { findContactByEmail, resendContactInvite } from '../services/clientContacts.js';
 import { consumeToken, type TokenSubject } from '../auth/tokens.js';
 import { requireClientPortalAuth } from '../middleware/requireClientPortalAuth.js';
+import { withTenant } from '../tenancy/context.js';
+import { appendActivity } from '../services/activity.js';
 
 /**
  * F23 client-portal routes — split into three surface areas:
@@ -227,7 +230,14 @@ type RollupProjectRow = {
   goalCount: number;
   openTodoCount: number;
   avgProgress: number;
+  // S3.1 status line: worst health across the project's active goals
+  // (off-track > at-risk > on-track; null when no active goal carries one)
+  // + the next upcoming milestone.
+  health: 'on-track' | 'at-risk' | 'off-track' | null;
+  nextMilestone: { title: string; date: string } | null;
 };
+
+const HEALTH_RANK: Record<string, number> = { 'on-track': 1, 'at-risk': 2, 'off-track': 3 };
 
 async function buildProjectRollup(clientId: string): Promise<RollupProjectRow[]> {
   const projectRows = await db
@@ -243,17 +253,27 @@ async function buildProjectRollup(clientId: string): Promise<RollupProjectRow[]>
   if (projectRows.length === 0) return [];
 
   const projectIds = projectRows.map((p) => p.id);
-  const goalRows = await db
-    .select({
-      projectId: goals.projectId,
-      progress: goals.progress,
-    })
-    .from(goals)
-    .where(inArray(goals.projectId, projectIds));
-  const todoRows = await db
-    .select({ projectId: todos.projectId, status: todos.status })
-    .from(todos)
-    .where(inArray(todos.projectId, projectIds));
+  const today = new Date().toISOString().slice(0, 10);
+  const [goalRows, todoRows, upcoming] = await Promise.all([
+    db
+      .select({
+        projectId: goals.projectId,
+        progress: goals.progress,
+        status: goals.status,
+        health: goals.health,
+      })
+      .from(goals)
+      .where(inArray(goals.projectId, projectIds)),
+    db
+      .select({ projectId: todos.projectId, status: todos.status })
+      .from(todos)
+      .where(inArray(todos.projectId, projectIds)),
+    db
+      .select({ projectId: milestones.projectId, title: milestones.title, date: milestones.date })
+      .from(milestones)
+      .where(and(inArray(milestones.projectId, projectIds), gte(milestones.date, today)))
+      .orderBy(asc(milestones.date)),
+  ]);
 
   return projectRows.map((p) => {
     const goalsForProject = goalRows.filter((g) => g.projectId === p.id);
@@ -264,6 +284,16 @@ async function buildProjectRollup(clientId: string): Promise<RollupProjectRow[]>
             goalsForProject.reduce((s, g) => s + (g.progress ?? 0), 0) / goalsForProject.length,
           )
         : 0;
+    const worstHealth = goalsForProject
+      .filter((g) => g.status !== 'done' && g.health && g.health !== 'done')
+      .reduce<RollupProjectRow['health']>(
+        (worst, g) =>
+          !worst || (HEALTH_RANK[g.health!] ?? 0) > (HEALTH_RANK[worst] ?? 0)
+            ? (g.health as RollupProjectRow['health'])
+            : worst,
+        null,
+      );
+    const next = upcoming.find((m) => m.projectId === p.id) ?? null;
     return {
       id: p.id,
       name: p.name,
@@ -272,6 +302,8 @@ async function buildProjectRollup(clientId: string): Promise<RollupProjectRow[]>
       goalCount: goalsForProject.length,
       openTodoCount: openTodos,
       avgProgress: avg,
+      health: worstHealth,
+      nextMilestone: next ? { title: next.title, date: next.date } : null,
     };
   });
 }
@@ -326,17 +358,39 @@ portalRouter.get('/overview', requireClientPortalAuth, async (req, res, next) =>
             title: milestones.title,
             date: milestones.date,
             kind: milestones.kind,
+            signedOffAt: milestones.signedOffAt,
+            signedOffByContactId: milestones.signedOffByContactId,
+            signOffComment: milestones.signOffComment,
           })
           .from(milestones)
           .where(and(inArray(milestones.projectId, projectIds), gte(milestones.date, today)))
           .orderBy(asc(milestones.date))
       : [];
 
+    // Resolve signer names for signed milestones (small set, one query).
+    const signerIds = [...new Set(milestoneRows.map((m) => m.signedOffByContactId).filter((v): v is string => !!v))];
+    const signers = signerIds.length
+      ? await db
+          .select({ id: clientContacts.id, name: clientContacts.name })
+          .from(clientContacts)
+          .where(inArray(clientContacts.id, signerIds))
+      : [];
+    const signerName = (id: string | null) => signers.find((s) => s.id === id)?.name ?? null;
+
     res.json({
       client: { id: client.id, name: client.name, color: client.color, slug: client.slug },
       projects: projectRollup,
       inFlightGoals,
-      upcomingMilestones: milestoneRows.slice(0, 6),
+      upcomingMilestones: milestoneRows.slice(0, 6).map((m) => ({
+        id: m.id,
+        projectId: m.projectId,
+        title: m.title,
+        date: m.date,
+        kind: m.kind,
+        signOff: m.signedOffAt
+          ? { at: m.signedOffAt, by: signerName(m.signedOffByContactId), comment: m.signOffComment }
+          : null,
+      })),
       fileCount: Array.isArray(client.spaceFiles) ? client.spaceFiles.length : 0,
     });
   } catch (e) {
@@ -411,3 +465,77 @@ portalRouter.get('/files', requireClientPortalAuth, async (req, res, next) => {
     next(e);
   }
 });
+
+// ---- Client sign-off (S3.2) -------------------------------------------
+//
+// A portal contact approves a milestone once, with an optional comment.
+// The session's clientId is the only authority: the milestone must belong
+// to one of THIS client's projects. Sign-off is first-write-wins (409 on
+// repeat) — staff can clear it internally if it was a mistake.
+
+const SignOffSchema = z.object({ comment: z.string().max(1000).optional() });
+
+portalRouter.post(
+  '/milestones/:id/sign-off',
+  requireClientPortalAuth,
+  validate(SignOffSchema),
+  async (req, res, next) => {
+    try {
+      const sess = req.session.clientPortalSession!;
+      const { comment } = getValidated<z.infer<typeof SignOffSchema>>(req, 'body');
+      const [row] = await db
+        .select({
+          id: milestones.id,
+          title: milestones.title,
+          tenantId: milestones.tenantId,
+          signedOffAt: milestones.signedOffAt,
+          clientId: projects.clientId,
+        })
+        .from(milestones)
+        .innerJoin(projects, eq(projects.id, milestones.projectId))
+        .where(eq(milestones.id, req.params.id!))
+        .limit(1);
+      if (!row || row.clientId !== sess.clientId) {
+        res.status(404).json({ error: 'milestone_not_found' });
+        return;
+      }
+      if (row.signedOffAt) {
+        res.status(409).json({ error: 'already_signed' });
+        return;
+      }
+      const signedAt = new Date().toISOString();
+      await db
+        .update(milestones)
+        .set({ signedOffAt: signedAt, signedOffByContactId: sess.contactId, signOffComment: comment?.trim() || null })
+        .where(eq(milestones.id, row.id));
+
+      // Surface to staff: activity-feed entry. Portal requests carry no
+      // tenant context (no staff session), so bind it explicitly from the
+      // milestone row. whoId null = "an external contact", not a staff user.
+      const [contact] = await db
+        .select({ name: clientContacts.name })
+        .from(clientContacts)
+        .where(eq(clientContacts.id, sess.contactId))
+        .limit(1);
+      // tenantId is nullable in the column type for legacy-backfill reasons;
+      // skip the activity entry in the (never-expected) null case rather
+      // than failing the sign-off itself.
+      if (row.tenantId) {
+        await withTenant(row.tenantId, () =>
+          appendActivity({
+            whoId: null,
+            kind: 'milestone.signoff',
+            target: `${contact?.name ?? 'A client contact'} approved “${row.title}”${comment?.trim() ? ' with a comment' : ''}`,
+          }),
+        );
+      }
+
+      res.json({
+        ok: true,
+        signOff: { at: signedAt, by: contact?.name ?? null, comment: comment?.trim() || null },
+      });
+    } catch (e) {
+      next(e);
+    }
+  },
+);

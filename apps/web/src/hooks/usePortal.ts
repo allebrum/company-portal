@@ -88,6 +88,9 @@ export type PortalProjectRow = {
   goalCount: number;
   openTodoCount: number;
   avgProgress: number;
+  // S3.1 status line: worst goal health + the next upcoming milestone.
+  health: 'on-track' | 'at-risk' | 'off-track' | null;
+  nextMilestone: { title: string; date: string } | null;
 };
 export type PortalGoalRow = {
   id: string;
@@ -103,6 +106,8 @@ export type PortalMilestoneRow = {
   title: string;
   date: string;
   kind: 'release' | 'review' | 'deadline' | 'phase';
+  /** Client sign-off — null until a contact approves the milestone. */
+  signOff: { at: string; by: string | null; comment: string | null } | null;
 };
 export type PortalFileRow = {
   id: string;
@@ -143,5 +148,18 @@ export function usePortalFiles(enabled = true) {
     queryFn: () => api.get<PortalFileRow[]>('/portal/files'),
     enabled,
     retry: false,
+  });
+}
+
+/** S3.2: approve a milestone (optional comment). 409 = already signed. */
+export function useSignOffMilestone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, comment }: { id: string; comment?: string }) =>
+      api.post<{ ok: true; signOff: PortalMilestoneRow['signOff'] }>(
+        `/portal/milestones/${id}/sign-off`,
+        comment?.trim() ? { comment: comment.trim() } : {},
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['portal', 'overview'] }),
   });
 }

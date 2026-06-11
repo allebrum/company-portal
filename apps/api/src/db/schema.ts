@@ -441,6 +441,11 @@ export const milestones = pgTable('milestones', {
   date: date('date').notNull(),
   kind: text('kind').notNull().default('release'),     // release | review | deadline | phase
   color: text('color').notNull().default('#9333ea'),
+  // Client sign-off (0027): a portal contact can approve a milestone once,
+  // with an optional comment. All nullable — unsigned milestones are the norm.
+  signedOffAt: timestamp('signed_off_at', { withTimezone: true, mode: 'string' }),
+  signedOffByContactId: uuid('signed_off_by_contact_id').references(() => clientContacts.id, { onDelete: 'set null' }),
+  signOffComment: text('sign_off_comment'),
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({

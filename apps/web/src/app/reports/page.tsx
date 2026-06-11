@@ -1,16 +1,22 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Card, Section, Tile } from '@/components/ui';
-import { Field, Select } from '@/components/ui/Field';
+import { Download } from 'lucide-react';
+import { Button, Card, Section, Tile } from '@/components/ui';
+import { Field, Input, Select } from '@/components/ui/Field';
+import { BurnLineChart } from '@/components/reports/BurnLineChart';
+import { UtilizationBars } from '@/components/reports/UtilizationBars';
 import { useEntries, useUsers, useProjects, useClients } from '@/hooks/useResources';
-import { fmtMins, fmtMoney } from '@/lib/formatters';
+import { toCsv, downloadCsv } from '@/lib/csv';
+import { fmtMins, fmtMoney, isoDate, parseLocalDate } from '@/lib/formatters';
+import { startOfDay } from '@/lib/roadmap';
 
 const RANGES = {
   '7d': 7,
   '30d': 30,
   '90d': 90,
 };
+type RangeKey = keyof typeof RANGES | 'custom';
 
 export default function ReportsPage() {
   const { data: entries = [] } = useEntries();
@@ -18,15 +24,50 @@ export default function ReportsPage() {
   const { data: projects = [] } = useProjects();
   const { data: clients = [] } = useClients();
 
-  const [range, setRange] = useState<keyof typeof RANGES>('30d');
+  const [range, setRange] = useState<RangeKey>('30d');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [projectFilter, setProjectFilter] = useState('all');
+  const [personFilter, setPersonFilter] = useState('all');
 
-  const cutoff = useMemo(() => {
+  // [fromIso, toIso) bounds on entry start times, plus local-day bounds for
+  // the burn chart's X axis. Presets keep the original rolling cutoff (now
+  // minus N days, no upper bound); custom is two inclusive local dates.
+  const period = useMemo((): { fromIso: string; toIso: string | null; fromDay: Date; toDay: Date } => {
+    if (range === 'custom') {
+      let fromDay = parseLocalDate(customFrom || null);
+      let toDay = parseLocalDate(customTo || null);
+      fromDay = fromDay ?? toDay ?? startOfDay(new Date());
+      toDay = toDay ?? startOfDay(new Date());
+      if (fromDay > toDay) [fromDay, toDay] = [toDay, fromDay];
+      const toEx = new Date(toDay);
+      toEx.setDate(toEx.getDate() + 1); // exclusive upper bound = inclusive "to" date
+      return { fromIso: fromDay.toISOString(), toIso: toEx.toISOString(), fromDay, toDay };
+    }
     const d = new Date();
     d.setDate(d.getDate() - RANGES[range]);
-    return d.toISOString();
-  }, [range]);
+    return { fromIso: d.toISOString(), toIso: null, fromDay: startOfDay(d), toDay: startOfDay(new Date()) };
+  }, [range, customFrom, customTo]);
 
-  const recent = entries.filter((e) => e.startIso >= cutoff);
+  const onRangeChange = (v: RangeKey) => {
+    if (v === 'custom' && !customFrom && !customTo) {
+      // Pre-fill with the preset window currently shown so "Custom" starts
+      // from familiar bounds instead of an empty form.
+      const to = new Date();
+      const from = new Date();
+      from.setDate(from.getDate() - (range === 'custom' ? 30 : RANGES[range]));
+      setCustomFrom(isoDate(from));
+      setCustomTo(isoDate(to));
+    }
+    setRange(v);
+  };
+
+  // Filters compose: range AND project AND person, applied to all three reports.
+  const recent = entries.filter((e) =>
+    e.startIso >= period.fromIso &&
+    (period.toIso == null || e.startIso < period.toIso) &&
+    (projectFilter === 'all' || e.projectId === projectFilter) &&
+    (personFilter === 'all' || e.userId === personFilter));
 
   const totalMin = recent.reduce((s, e) => s + e.durationMin, 0);
   const billableEntries = recent.filter((e) => projects.find((p) => p.id === e.projectId)?.billable);
@@ -37,8 +78,9 @@ export default function ReportsPage() {
     return s + (e.durationMin / 60) * rate;
   }, 0);
 
-  // Utilization per user
-  const utilization = users.map((u) => {
+  // Utilization per user (only the selected person when that filter is set)
+  const visibleUsers = personFilter === 'all' ? users : users.filter((u) => u.id === personFilter);
+  const utilization = visibleUsers.map((u) => {
     const userEntries = recent.filter((e) => e.userId === u.id);
     const min = userEntries.reduce((s, e) => s + e.durationMin, 0);
     const bMin = userEntries.filter((e) => projects.find((p) => p.id === e.projectId)?.billable).reduce((s, e) => s + e.durationMin, 0);
@@ -65,6 +107,35 @@ export default function ReportsPage() {
     return { client: c, rev };
   }).filter((r) => r.rev > 0).sort((a, b) => b.rev - a.rev);
 
+  // S3.4 — CSV exports mirror each table's visible columns/rows exactly.
+  const today = isoDate(new Date());
+  const exportUtilization = () => {
+    const csv = toCsv(
+      ['Member', 'Total', 'Billable', 'Utilization'],
+      utilization.map((r) => [
+        r.user.name,
+        fmtMins(r.totalMin),
+        fmtMins(r.billableMin),
+        r.totalMin ? `${Math.round((r.billableMin / r.totalMin) * 100)}%` : '—',
+      ]),
+    );
+    downloadCsv(`utilization-${today}`, csv);
+  };
+  const exportBurn = () => {
+    const csv = toCsv(
+      ['Project', 'Used (h)', 'Budget (h)'],
+      burn.map((r) => [r.project.name, r.used.toFixed(1), r.budget]),
+    );
+    downloadCsv(`project-burn-${today}`, csv);
+  };
+  const exportClients = () => {
+    const csv = toCsv(
+      ['Client', 'Billable revenue'],
+      clientTotals.map((r) => [r.client.name, fmtMoney(r.rev)]),
+    );
+    downloadCsv(`client-revenue-${today}`, csv);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4 flex-wrap">
@@ -73,13 +144,38 @@ export default function ReportsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Utilization & burn</h1>
           <p className="text-sm text-gray-500">Time, billable, and revenue rollups.</p>
         </div>
-        <Field label="Range">
-          <Select value={range} onChange={(e) => setRange(e.target.value as keyof typeof RANGES)}>
-            <option value="7d">Last 7 days</option>
-            <option value="30d">Last 30 days</option>
-            <option value="90d">Last 90 days</option>
-          </Select>
-        </Field>
+        <div className="flex items-end gap-3 flex-wrap">
+          <Field label="Range">
+            <Select className="w-36" value={range} onChange={(e) => onRangeChange(e.target.value as RangeKey)}>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+              <option value="90d">Last 90 days</option>
+              <option value="custom">Custom</option>
+            </Select>
+          </Field>
+          {range === 'custom' && (
+            <>
+              <Field label="From">
+                <Input type="date" className="w-40" value={customFrom} max={customTo || undefined} onChange={(e) => setCustomFrom(e.target.value)} />
+              </Field>
+              <Field label="To">
+                <Input type="date" className="w-40" value={customTo} min={customFrom || undefined} onChange={(e) => setCustomTo(e.target.value)} />
+              </Field>
+            </>
+          )}
+          <Field label="Project">
+            <Select className="w-44" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
+              <option value="all">All projects</option>
+              {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </Select>
+          </Field>
+          <Field label="Person">
+            <Select className="w-44" value={personFilter} onChange={(e) => setPersonFilter(e.target.value)}>
+              <option value="all">All people</option>
+              {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </Select>
+          </Field>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -100,7 +196,17 @@ export default function ReportsPage() {
         </Tile>
       </div>
 
-      <Section title="Team utilization">
+      <Section
+        title="Team utilization"
+        action={
+          <Button variant="outline" size="sm" onClick={exportUtilization} disabled={utilization.length === 0}>
+            <Download className="w-3.5 h-3.5" /> Download CSV
+          </Button>
+        }
+      >
+        <Card>
+          <UtilizationBars rows={utilization} />
+        </Card>
         <Card>
           <div className="overflow-x-auto"><table className="w-full text-sm min-w-[560px]">
             <thead className="text-left text-[11px] uppercase text-gray-400 border-b border-gray-100">
@@ -127,7 +233,17 @@ export default function ReportsPage() {
         </Card>
       </Section>
 
-      <Section title="Project burn">
+      <Section
+        title="Project burn"
+        action={
+          <Button variant="outline" size="sm" onClick={exportBurn} disabled={burn.length === 0}>
+            <Download className="w-3.5 h-3.5" /> Download CSV
+          </Button>
+        }
+      >
+        <Card>
+          <BurnLineChart entries={recent} projects={projects} fromDay={period.fromDay} toDay={period.toDay} />
+        </Card>
         <Card>
           <div className="p-4 space-y-3">
             {burn.map((r) => {
@@ -155,7 +271,14 @@ export default function ReportsPage() {
         </Card>
       </Section>
 
-      <Section title="Client revenue">
+      <Section
+        title="Client revenue"
+        action={
+          <Button variant="outline" size="sm" onClick={exportClients} disabled={clientTotals.length === 0}>
+            <Download className="w-3.5 h-3.5" /> Download CSV
+          </Button>
+        }
+      >
         <Card>
           <div className="overflow-x-auto"><table className="w-full text-sm min-w-[560px]">
             <thead className="text-left text-[11px] uppercase text-gray-400 border-b border-gray-100">
