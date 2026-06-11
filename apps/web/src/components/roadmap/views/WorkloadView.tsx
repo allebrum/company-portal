@@ -23,7 +23,12 @@ export function WorkloadView(props: ViewProps) {
         if (active.length === 0) return null;
         const weight = active.reduce((s, g) => s + (MULT[g.priority] ?? 1), 0);
         const byClient = new Map<string, number>();
-        for (const g of active) byClient.set(g.clientId, (byClient.get(g.clientId) ?? 0) + (MULT[g.priority] ?? 1));
+        // Workspace-level goals (null client) bucket under a synthetic key —
+        // they render as the gray "no client" segment in the capacity bar.
+        for (const g of active) {
+          const key = g.clientId ?? 'workspace';
+          byClient.set(key, (byClient.get(key) ?? 0) + (MULT[g.priority] ?? 1));
+        }
         const segs = Array.from(byClient.entries())
           .map(([cid, w]) => ({ client: clients.find((c) => c.id === cid), w }))
           .sort((a, b) => b.w - a.w);

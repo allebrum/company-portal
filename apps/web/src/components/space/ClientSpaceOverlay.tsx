@@ -17,10 +17,10 @@ import {
 } from '@/hooks/useResources';
 import {
   useDriveStatus,
-  driveConnectUrl,
   useRenameSpaceFile,
   useRefreshSpaceFileNames,
 } from '@/hooks/useDrive';
+import { useIntegrationGate } from '@/components/shell/IntegrationGate';
 import { useUploadManager } from '@/contexts/UploadManagerContext';
 import { useMyTimer } from '@/hooks/useTimer';
 import { useToast } from '@/components/ui/Toast';
@@ -900,6 +900,7 @@ function FilesTab({
   data: ReturnType<typeof useSpaceData>;
 }) {
   const { data: driveStatus } = useDriveStatus();
+  const gate = useIntegrationGate();
   const { data: goals = [] } = useGoals();
   const { data: projects = [] } = useProjects();
   const { enqueue } = useUploadManager();
@@ -1108,9 +1109,13 @@ function FilesTab({
             </>
           ) : (
             <>
-              <a href={driveConnectUrl()} className="text-amber-700 font-semibold hover:underline">
+              <button
+                type="button"
+                onClick={() => gate.openConnect('drive')}
+                className="text-amber-700 font-semibold hover:underline"
+              >
                 Connect Google Drive
-              </a>{' '}
+              </button>{' '}
               to upload files. You can still{' '}
               <button
                 type="button"

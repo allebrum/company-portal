@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { Copy } from 'lucide-react';
 import { Card, Section, Pill, Empty } from '@/components/ui';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
@@ -14,6 +15,7 @@ import {
   useClients,
   useSubmitEntries,
   usePayPeriods,
+  useAddManualEntry,
   type EntryRow,
 } from '@/hooks/useResources';
 import { useAuth } from '@/hooks/useAuth';
@@ -28,6 +30,7 @@ export default function TimePage() {
   const { data: clients = [] } = useClients();
   const { data: periods = [] } = usePayPeriods();
   const submit = useSubmitEntries();
+  const addEntry = useAddManualEntry();
 
   const [scope, setScope] = useState<'me' | 'all'>('me');
   const [periodId, setPeriodId] = useState<string>('');
@@ -89,6 +92,27 @@ export default function TimePage() {
       toast.success('Entry resubmitted');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Resubmit failed');
+    }
+  };
+
+  const onDuplicate = async (e: EntryRow) => {
+    // Today's date at the source entry's wall-clock start time (local),
+    // running for the same duration.
+    const src = new Date(e.startIso);
+    const start = new Date();
+    start.setHours(src.getHours(), src.getMinutes(), 0, 0);
+    const end = new Date(start.getTime() + e.durationMin * 60000);
+    try {
+      await addEntry.mutateAsync({
+        projectId: e.projectId,
+        note: e.note,
+        startIso: start.toISOString(),
+        endIso: end.toISOString(),
+        todoId: e.todoId,
+      });
+      toast.success('Copied to today as a draft');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Copy failed');
     }
   };
 
@@ -205,9 +229,20 @@ export default function TimePage() {
                       <td className="px-4 py-3">
                         <Pill tone={ENTRY_STATUS_PILL[e.status]}>{ENTRY_STATUS_LABEL[e.status]}</Pill>
                       </td>
-                      <td className="px-4 py-3 text-right" onClick={(ev) => ev.stopPropagation()}>
+                      <td className="px-4 py-3 text-right whitespace-nowrap" onClick={(ev) => ev.stopPropagation()}>
                         {e.status === 'rejected' && e.userId === me?.id && (
                           <Button variant="ghost" size="sm" onClick={() => onResubmit(e.id)}>Resubmit</Button>
+                        )}
+                        {e.userId === me?.id && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="Log the same entry today"
+                            disabled={addEntry.isPending}
+                            onClick={() => onDuplicate(e)}
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </Button>
                         )}
                       </td>
                     </tr>

@@ -17,6 +17,7 @@ import { portalRouter } from './portal.js';
 import { qrRouter, qrPublicRouter } from './qr.js';
 import { uploadQrRouter } from './uploadQr.js';
 import { bootstrapRouter } from './bootstrap.js';
+import { onboardingRouter } from './onboarding.js';
 import { rbacRouter } from './rbac.js';
 import { settingsRouter } from './settings.js';
 import { twofaRouter } from './twofa.js';
@@ -62,6 +63,7 @@ apiRouter.use('/qr', qrRouter);
 apiRouter.use('/q', qrPublicRouter);
 apiRouter.use('/upload/qr', uploadQrRouter);
 apiRouter.use('/bootstrap', bootstrapRouter);
+apiRouter.use('/onboarding', onboardingRouter);
 apiRouter.use('/rbac', rbacRouter);
 apiRouter.use('/settings', settingsRouter);
 // Hoppa Phase 3: billing portal (session-gated, subscription-exempt) +

@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Menu, Lock } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
-import { useBootstrap, useAuthConfig } from '@/hooks/useResources';
+import { useBootstrap, useAuthConfig, useBillingInfo } from '@/hooks/useResources';
 import { api, ApiError } from '@/lib/api';
 import { Sidebar } from './Sidebar';
 import { TimerBar } from './TimerBar';
@@ -113,7 +113,9 @@ function ShellWithBootstrap({ children }: { children: ReactNode }) {
   // Hoppa: a 402 from the subscription gate → show the billing screen instead
   // of the generic error (the workspace's subscription lapsed/canceled).
   if (isError && error instanceof ApiError && error.status === 402) {
-    return <SubscriptionRequired />;
+    // The 402 body carries billingStatus/trialEndsAt so the lockout screen
+    // can explain WHY instead of a generic "subscription required".
+    return <SubscriptionRequired info={error.body as LockoutInfo | undefined} />;
   }
   if (isError) {
     return (
@@ -171,6 +173,7 @@ function ShellWithBootstrap({ children }: { children: ReactNode }) {
           </div>
         </div>
 
+        <TrialBanner />
         <TimerBar />
         <div className="flex-1 overflow-y-auto">
           <div className="px-4 sm:px-6 py-6 max-w-7xl w-full mx-auto">{children}</div>
@@ -180,22 +183,18 @@ function ShellWithBootstrap({ children }: { children: ReactNode }) {
   );
 }
 
-/**
- * Hoppa: shown when the active workspace's subscription is inactive (402 from
- * the gate). Billing lives on the marketing site, so "Update payment method"
- * redirects to the marketing-hosted fix-card page (via a short-lived signed
- * link); a multi-workspace user can switch to an active workspace; anyone can
- * sign out.
- */
-function SubscriptionRequired() {
-  const { me, switchWorkspace, logout } = useAuth();
+/** Shape of the enriched 402 body from the subscription gate. */
+type LockoutInfo = {
+  billingStatus?: string | null;
+  trialEndsAt?: string | null;
+  hasPaymentMethod?: boolean;
+};
+
+/** Mint a signed "manage billing" link and hand off to the marketing-hosted
+ *  card page. Shared by the lockout screen and the in-shell trial banner. */
+function useManageBilling() {
   const [busy, setBusy] = useState(false);
   const [billingErr, setBillingErr] = useState<string | null>(null);
-  const others = (me?.workspaces ?? []).filter((w) => w.id !== me?.tenantId);
-
-  // Mint a signed "manage billing" link on the portal and hand off (top-level
-  // redirect) to the marketing-hosted card page; it stores the card + reactivates
-  // and redirects back to /dashboard (the portal session is still live).
   const openManageBilling = async () => {
     setBusy(true);
     setBillingErr(null);
@@ -208,6 +207,113 @@ function SubscriptionRequired() {
       setBusy(false);
     }
   };
+  return { busy, billingErr, openManageBilling };
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Pre-lockout warning: a slim banner above the timer bar while the workspace
+ * is trialing and the end is near. past_due/canceled never reach the shell
+ * (the gate 402s bootstrap), so the trial countdown is the one warning we can
+ * give BEFORE the wall. Renders nothing on self-host (billing is null).
+ */
+function TrialBanner() {
+  const billing = useBillingInfo();
+  const { busy, openManageBilling } = useManageBilling();
+  if (billing?.status !== 'trialing' || !billing.trialEndsAt) return null;
+  const daysLeft = Math.ceil((new Date(billing.trialEndsAt).getTime() - Date.now()) / DAY_MS);
+  if (daysLeft > 7 || daysLeft < 0) return null; // quiet until the last week
+  const urgent = daysLeft <= 2;
+  return (
+    <div
+      className={`flex items-center gap-3 px-4 sm:px-6 py-2 text-sm border-b ${
+        urgent ? 'bg-red-50 border-red-200 text-red-800' : 'bg-amber-50 border-amber-200 text-amber-800'
+      }`}
+    >
+      <span className="font-semibold">
+        {daysLeft === 0 ? 'Your trial ends today' : `Your trial ends in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`}
+      </span>
+      <span className="hidden sm:inline text-[13px] opacity-80">
+        {billing.hasPaymentMethod
+          ? 'Your card on file will be charged when it ends — nothing else to do.'
+          : 'Add a payment method to keep access when it ends.'}
+      </span>
+      <button
+        type="button"
+        onClick={() => void openManageBilling()}
+        disabled={busy}
+        className={`ml-auto shrink-0 text-xs font-bold rounded-lg px-3 py-1.5 text-white disabled:opacity-60 ${
+          urgent ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-600 hover:bg-amber-700'
+        }`}
+      >
+        {busy ? 'Opening…' : 'Manage billing'}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Hoppa: shown when the active workspace's subscription is inactive (402 from
+ * the gate). Billing lives on the marketing site, so "Update payment method"
+ * redirects to the marketing-hosted fix-card page (via a short-lived signed
+ * link); a multi-workspace user can switch to an active workspace; anyone can
+ * sign out. `info` (the 402 body) picks reason-specific copy.
+ */
+function SubscriptionRequired({ info }: { info?: LockoutInfo }) {
+  const { me, switchWorkspace, logout } = useAuth();
+  const { busy, billingErr, openManageBilling } = useManageBilling();
+  const others = (me?.workspaces ?? []).filter((w) => w.id !== me?.tenantId);
+  const wsName = me?.workspaces?.find((w) => w.id === me?.tenantId)?.name ?? 'your workspace';
+
+  const status = info?.billingStatus ?? null;
+  const trialEnd = info?.trialEndsAt ? new Date(info.trialEndsAt) : null;
+  const reason =
+    status === 'trialing' && !info?.hasPaymentMethod
+      ? {
+          title: 'Add a card to start your trial',
+          body: (
+            <>
+              Your free trial of <span className="font-semibold">{wsName}</span> needs a payment
+              method on file{trialEnd ? <> — it runs until {trialEnd.toLocaleDateString()}</> : null}.
+              You won’t be charged until the trial ends.
+            </>
+          ),
+          cta: 'Add payment method',
+        }
+      : status === 'past_due'
+        ? {
+            title: 'Payment failed',
+            body: (
+              <>
+                The card on file for <span className="font-semibold">{wsName}</span> was declined.
+                Update it to restore access immediately — your data is intact and nothing has been
+                deleted.
+              </>
+            ),
+            cta: 'Update payment method',
+          }
+        : status === 'canceled'
+          ? {
+              title: 'Subscription canceled',
+              body: (
+                <>
+                  The subscription for <span className="font-semibold">{wsName}</span> was canceled.
+                  Reactivate to pick up exactly where you left off — your data is intact.
+                </>
+              ),
+              cta: 'Reactivate',
+            }
+          : {
+              title: 'Subscription required',
+              body: (
+                <>
+                  This workspace doesn’t have an active subscription. Reactivate it to get back into{' '}
+                  <span className="font-semibold">{wsName}</span>.
+                </>
+              ),
+              cta: 'Update payment method',
+            };
 
   return (
     <div className="min-h-screen grid place-items-center bg-gray-50 px-4">
@@ -215,11 +321,8 @@ function SubscriptionRequired() {
         <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 grid place-items-center mx-auto mb-4">
           <Lock className="w-6 h-6" />
         </div>
-        <h1 className="text-xl font-bold text-gray-900">Subscription required</h1>
-        <p className="mt-2 text-sm text-gray-500">
-          This workspace doesn’t have an active subscription. Reactivate it to get back into{' '}
-          <span className="font-semibold">{me?.workspaces?.find((w) => w.id === me?.tenantId)?.name ?? 'your workspace'}</span>.
-        </p>
+        <h1 className="text-xl font-bold text-gray-900">{reason.title}</h1>
+        <p className="mt-2 text-sm text-gray-500">{reason.body}</p>
         {billingErr && <div className="mt-4 text-sm text-red-600">{billingErr}</div>}
 
         <button
@@ -228,7 +331,7 @@ function SubscriptionRequired() {
           disabled={busy}
           className="mt-6 w-full rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-semibold py-2.5 disabled:opacity-60"
         >
-          {busy ? 'Opening…' : 'Update payment method'}
+          {busy ? 'Opening…' : reason.cta}
         </button>
 
         {others.length > 0 && (

@@ -120,8 +120,9 @@ export type ChecklistItemRow = { id: string; text: string; done: boolean };
 export type GoalHealth = 'on-track' | 'at-risk' | 'off-track' | 'done';
 export type GoalRow = {
   id: string;
-  clientId: string;
-  projectId: string;
+  // Both null = a WORKSPACE-level goal (not tied to client delivery).
+  clientId: string | null;
+  projectId: string | null;
   title: string;
   description: string | null;
   // Free-form: default workflow value OR a project custom-workflow status id.
@@ -259,6 +260,12 @@ export type GroupRow = {
 export type PermissionRow = { key: string; label: string; category: string };
 
 // ---- Bootstrap ----
+/** SaaS billing surface — null on self-host / billing-exempt workspaces. */
+export type BillingInfo = {
+  status: string | null; // 'trialing' | 'active' | 'past_due' | 'canceled' | null
+  trialEndsAt: string | null;
+  hasPaymentMethod: boolean;
+};
 export type BootstrapData = {
   me: (UserRow & { permissions: Permission[]; groupIds: string[] }) | null;
   users: UserRow[];
@@ -274,7 +281,18 @@ export type BootstrapData = {
   driveFolders: DriveFolderRow[];
   driveItems: DriveItemRow[];
   activity: ActivityPayload[];
+  billing: BillingInfo | null;
 };
+
+/** Billing info straight from the cached bootstrap payload (no extra fetch). */
+export function useBillingInfo(): BillingInfo | null {
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: qk.bootstrap,
+    enabled: false, // bootstrap is fetched by the shell; just read the cache
+    queryFn: () => api.get<BootstrapData>('/bootstrap'),
+  }).data?.billing ?? null;
+}
 
 export function useBootstrap() {
   const qc = useQueryClient();

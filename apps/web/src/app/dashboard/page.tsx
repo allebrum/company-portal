@@ -252,7 +252,17 @@ export default function DashboardPage() {
               onElaborate={(t) => { setTodoModal(t); setTodoModalOpen(true); }}
             />
             {plate.length === 0 ? (
-              <Empty title="All clear" description="Nothing on your plate right now — add a to-do above to get started." />
+              clients.length === 0 ? (
+                <Empty
+                  title="New here?"
+                  description="Create your first client to anchor projects and time."
+                  action={
+                    <Link href="/clients"><Button variant="primary" size="sm">Create your first client →</Button></Link>
+                  }
+                />
+              ) : (
+                <Empty title="All clear" description="Nothing on your plate right now — add a to-do above to get started." />
+              )
             ) : (
               <Card>
                 <ul className="divide-y divide-gray-100">
@@ -311,7 +321,13 @@ export default function DashboardPage() {
           }
         >
           {liveGoals.length === 0 ? (
-            <Empty title={liveGoalsTab === 'mine' ? 'No live goals' : "Your team has no live goals"} />
+            <Empty
+              title={liveGoalsTab === 'mine' ? 'No live goals' : "Your team has no live goals"}
+              description="Goals you plan on the roadmap show up here."
+              action={
+                <Link href="/roadmap"><Button variant="outline" size="sm">Plan your first goal →</Button></Link>
+              }
+            />
           ) : (
             <div className="space-y-2">
               {liveGoals.map((g) => {
@@ -358,7 +374,13 @@ export default function DashboardPage() {
         <Section title="Hours by project" className="lg:col-span-2">
           <Card className="p-5">
             {hoursByProject.length === 0 ? (
-              <Empty title="No time logged this week" />
+              <Empty
+                title="No time logged this week"
+                description="Tracked hours roll up by project here."
+                action={
+                  <Link href="/time"><Button variant="outline" size="sm">Log your first hour →</Button></Link>
+                }
+              />
             ) : (
               <div className="space-y-3">
                 {hoursByProject.map((r) => (
@@ -398,7 +420,11 @@ export default function DashboardPage() {
                   </li>
                 );
               })}
-              {activity.length === 0 && <li className="px-5 py-3 text-sm text-gray-500">No activity yet.</li>}
+              {activity.length === 0 && (
+                <li className="px-5 py-3 text-sm text-gray-500">
+                  No activity yet. Team actions show up here as they happen.
+                </li>
+              )}
             </ul>
           </Card>
         </Section>

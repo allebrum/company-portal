@@ -37,7 +37,15 @@ export async function requireActiveSubscription(req: Request, res: Response, nex
       next();
       return;
     }
-    res.status(402).json({ error: 'subscription_inactive', billingPortalHint: true });
+    // Carry the WHY so the lockout screen can explain (trial needs a card vs
+    // payment failed vs canceled) instead of a generic "subscription required".
+    res.status(402).json({
+      error: 'subscription_inactive',
+      billingPortalHint: true,
+      billingStatus: tenant?.billingStatus ?? null,
+      trialEndsAt: tenant?.trialEndsAt ?? null,
+      hasPaymentMethod: !!tenant?.stripePaymentMethodId,
+    });
   } catch (e) {
     next(e);
   }
