@@ -27,7 +27,7 @@ import { buildConsentUrl, exchangeCodeForProfile } from '../auth/google.js';
 import { needsSecondFactor } from '../services/twofa.js';
 import { db } from '../db/client.js';
 import { oauthTokens, users } from '../db/schema.js';
-import { env, googleOAuthConfigured, passwordLoginEnabled } from '../env.js';
+import { env, googleOAuthConfigured, passwordLoginEnabled, provisioningConfigured } from '../env.js';
 import { withTenant } from '../tenancy/context.js';
 import {
   issueToken,
@@ -40,18 +40,36 @@ import { appendActivity } from '../services/activity.js';
 
 export const authRouter = Router();
 
+// Pre-login branding for the hosted multi-tenant instance. On SaaS the
+// "default workspace" is just the internal team's tenant — its custom
+// name/logo/legal links must not leak to every visitor on the shared login
+// domain (app.hoppa.io). Legal links stay null until the marketing site has
+// real terms/privacy pages. Self-host keeps default-workspace branding, which
+// IS the instance brand there.
+const SAAS_PRELOGIN_BRANDING = {
+  portalName: 'Hoppa',
+  brandPrimaryColor: '#9333ea',
+  brandLogoDataUrl: null,
+  termsUrl: null,
+  privacyUrl: null,
+} as const;
+
 // Public: step 1 of login. The shared login page can't know a user's workspace
 // before they identify themselves, so the METHODS here are INSTANCE-level (is
 // password offered on this deployment + is Google configured). Per-account /
 // per-workspace refinement happens at `POST /auth/methods` once an email is
-// entered. Branding/legal links come from the default workspace so the initial
-// page still renders on-brand.
+// entered. Branding/legal links come from the default workspace on self-host;
+// on SaaS (PROVISIONING_SECRET set) the pre-login surface is product-branded.
 authRouter.get('/config', async (_req, res, next) => {
   try {
+    const methodFlags = { passwordLoginEnabled, googleLoginEnabled: googleOAuthConfigured };
+    if (provisioningConfigured) {
+      res.json({ ...methodFlags, ...SAAS_PRELOGIN_BRANDING } satisfies AuthConfig);
+      return;
+    }
     const s = await getSettings();
     const cfg: AuthConfig = {
-      passwordLoginEnabled,
-      googleLoginEnabled: googleOAuthConfigured,
+      ...methodFlags,
       termsUrl: s.termsUrl,
       privacyUrl: s.privacyUrl,
       portalName: s.portalName,
@@ -77,12 +95,20 @@ authRouter.post(
   async (req, res, next) => {
     try {
       const { email } = getValidated<typeof ForgotPasswordSchema._type>(req);
-      const def = await getSettings(); // default workspace → fallback branding
-      const fallbackBranding = {
-        portalName: def.portalName,
-        brandPrimaryColor: def.brandPrimaryColor,
-        brandLogoDataUrl: def.brandLogoDataUrl,
-      };
+      const def = await getSettings(); // default workspace → domain allowlist (+ self-host fallback branding)
+      // Unknown emails must not reveal the internal team's workspace branding
+      // on SaaS — same rule as /config above.
+      const fallbackBranding = provisioningConfigured
+        ? {
+            portalName: SAAS_PRELOGIN_BRANDING.portalName,
+            brandPrimaryColor: SAAS_PRELOGIN_BRANDING.brandPrimaryColor,
+            brandLogoDataUrl: SAAS_PRELOGIN_BRANDING.brandLogoDataUrl,
+          }
+        : {
+            portalName: def.portalName,
+            brandPrimaryColor: def.brandPrimaryColor,
+            brandLogoDataUrl: def.brandLogoDataUrl,
+          };
       // The Google callback resolves new sign-ins into the default workspace and
       // enforces ITS email-domain allowlist, so only offer Google when this
       // email's domain would actually pass (empty allowlist = any domain). This
