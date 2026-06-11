@@ -10,7 +10,12 @@ import { useUsers } from '@/hooks/useResources';
 import { useIntegrationGate } from '@/components/shell/IntegrationGate';
 import { UserFormModal } from '@/components/features/UserFormModal';
 
+// v1 stored '1' for "dismissed" — migrated to 'hidden' below.
 const DISMISS_KEY = 'onboardingChecklist:dismissed:v1';
+// 'open' = full card · 'pill' = compact progress pill (the "resume setup"
+// affordance; also the mobile default since the card covers ~27% of a phone
+// viewport) · 'hidden' = fully dismissed.
+type Display = 'open' | 'pill' | 'hidden';
 
 type Item = {
   key: string;
@@ -22,12 +27,13 @@ type Item = {
 };
 
 /**
- * First-run "finish setting up" card, pinned bottom-right. Tracks the three
- * setup steps (connect Gmail, connect Drive, invite teammates), auto-checking
- * each as React Query status updates — so connecting an integration anywhere
- * (incl. via the IntegrationGate modal) ticks it off here. Each open step links
- * straight into its connect/invite modal. Dismissible (persisted in
- * localStorage); only shown to workspace admins, and only while steps remain.
+ * First-run "finish setting up" card, pinned bottom-right. Tracks the setup
+ * steps (connect Gmail, connect Drive, invite teammates), auto-checking each
+ * as React Query status updates. Integration steps only render when the
+ * instance has Google OAuth configured — on a self-host without it, the
+ * connect buttons would dead-end in a JSON error. Dismissing the card
+ * collapses it to a small pill first (so setup is resumable); dismissing the
+ * pill hides it for good.
  */
 export function OnboardingChecklist() {
   const { can } = useAuth();
@@ -36,19 +42,33 @@ export function OnboardingChecklist() {
   const { data: drive } = useDriveStatus();
   const { data: users } = useUsers();
   const [inviteOpen, setInviteOpen] = useState(false);
-  // Hidden until the localStorage read resolves, to avoid a flash for users
-  // who already dismissed it.
-  const [dismissed, setDismissed] = useState(true);
+  // Start hidden until the localStorage read resolves, to avoid a flash for
+  // users who already dismissed it.
+  const [display, setDisplay] = useState<Display>('hidden');
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
     try {
-      setDismissed(window.localStorage.getItem(DISMISS_KEY) === '1');
+      const stored = window.localStorage.getItem(DISMISS_KEY);
+      if (stored === '1' || stored === 'hidden') setDisplay('hidden');
+      else if (stored === 'pill') setDisplay('pill');
+      // No stored preference: compact pill on phones, full card otherwise.
+      else setDisplay(window.matchMedia('(max-width: 639px)').matches ? 'pill' : 'open');
     } catch {
-      setDismissed(false);
+      setDisplay('open');
     }
   }, []);
+
+  const setAndPersist = (next: Display) => {
+    setDisplay(next);
+    try {
+      if (next === 'open') window.localStorage.removeItem(DISMISS_KEY);
+      else window.localStorage.setItem(DISMISS_KEY, next);
+    } catch {
+      /* private mode / quota — fine, just won't persist */
+    }
+  };
 
   const canInvite = can('users.manage');
   const canDrive = can('media.manage') || can('integrations.manage');
@@ -59,22 +79,23 @@ export function OnboardingChecklist() {
   const ready = gmail !== undefined && drive !== undefined && users !== undefined;
 
   const items = useMemo<Item[]>(() => {
-    const list: Item[] = [
-      {
+    const list: Item[] = [];
+    if (gmail?.configured) {
+      list.push({
         key: 'gmail',
         label: 'Connect Gmail',
         icon: Mail,
-        done: !!gmail?.connected,
+        done: !!gmail.connected,
         cta: 'Connect',
         onClick: () => gate.openConnect('gmail'),
-      },
-    ];
-    if (canDrive) {
+      });
+    }
+    if (canDrive && drive?.configured) {
       list.push({
         key: 'drive',
         label: 'Connect Google Drive',
         icon: FolderOpen,
-        done: !!drive?.connected,
+        done: !!drive.connected,
         cta: 'Connect',
         onClick: () => gate.openConnect('drive'),
       });
@@ -93,22 +114,35 @@ export function OnboardingChecklist() {
   }, [gmail, drive, users, canDrive, canInvite, gate]);
 
   const doneCount = items.filter((i) => i.done).length;
-  const allDone = items.length > 0 && doneCount === items.length;
+  const allDone = items.length === 0 || doneCount === items.length;
 
-  const dismiss = () => {
-    setDismissed(true);
-    try {
-      window.localStorage.setItem(DISMISS_KEY, '1');
-    } catch {
-      /* private mode / quota — fine, just won't persist */
-    }
-  };
-
-  const showCard = mounted && isWorkspaceAdmin && ready && !dismissed && !allDone;
+  const show = mounted && isWorkspaceAdmin && ready && !allDone && display !== 'hidden';
 
   return (
     <>
-      {showCard && (
+      {show && display === 'pill' && (
+        <div className="fixed bottom-6 right-6 z-40 group flex items-center">
+          <button
+            onClick={() => setAndPersist('open')}
+            className="flex items-center gap-2 rounded-full bg-white border border-gray-200 shadow-lg pl-3 pr-3.5 py-2 hover:shadow-xl hover:border-brand-300"
+            aria-label={`Resume setup — ${doneCount} of ${items.length} steps done`}
+          >
+            <Sparkles className="w-4 h-4 text-brand-600" />
+            <span className="text-xs font-bold text-gray-800 tabular-nums">
+              {doneCount}/{items.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setAndPersist('hidden')}
+            aria-label="Hide setup checklist permanently"
+            className="ml-1 w-6 h-6 rounded-full bg-white border border-gray-200 shadow items-center justify-center text-gray-500 hover:text-gray-700 hidden group-hover:flex"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
+      {show && display === 'open' && (
         <div className="fixed bottom-6 right-6 z-40 w-80 max-w-[calc(100vw-2rem)] rounded-2xl bg-white border border-gray-200 shadow-xl">
           <div className="flex items-start justify-between gap-2 px-4 pt-4">
             <div className="flex items-center gap-2.5">
@@ -123,9 +157,10 @@ export function OnboardingChecklist() {
               </div>
             </div>
             <button
-              onClick={dismiss}
-              aria-label="Dismiss setup checklist"
-              className="text-gray-400 hover:text-gray-700 -mt-1 -mr-1 p-1"
+              onClick={() => setAndPersist('pill')}
+              aria-label="Minimize setup checklist"
+              title="Minimize — resume any time from the pill"
+              className="text-gray-500 hover:text-gray-700 -mt-1 -mr-1 p-1.5"
             >
               <X className="w-4 h-4" />
             </button>
@@ -151,7 +186,7 @@ export function OnboardingChecklist() {
                   <span
                     className={cn(
                       'w-7 h-7 rounded-full grid place-items-center shrink-0',
-                      it.done ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400',
+                      it.done ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500',
                     )}
                   >
                     {it.done ? <Check className="w-4 h-4" /> : <Icon className="w-4 h-4" />}

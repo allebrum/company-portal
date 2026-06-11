@@ -1,16 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Play, Square } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Modal } from '../ui/Modal';
 import { Field, Input, Select } from '../ui/Field';
+import { useToast } from '@/components/ui/Toast';
 import { useMyTimer } from '@/hooks/useTimer';
 import { useClients, useProjects, useTodos, useStartTimer, useStopTimer } from '@/hooks/useResources';
 import { fmtTimer } from '@/lib/formatters';
 
 export function TimerBar() {
   const { timer, elapsedSec } = useMyTimer();
+  const toast = useToast();
   const start = useStartTimer();
   const stop = useStopTimer();
   const { data: clients } = useClients();
@@ -51,6 +53,30 @@ export function TimerBar() {
 
   const activeProject = timer ? projects?.find((p) => p.id === timer.projectId) : null;
   const activeClient = activeProject ? clients?.find((c) => c.id === activeProject.clientId) : null;
+
+  // Forgotten-timer guard: derive warning state from elapsed time (no extra timers).
+  const longRunning = elapsedSec > 6 * 3600;
+  const veryLongRunning = elapsedSec > 12 * 3600;
+
+  // Return-to-tab nudge: when the tab becomes visible with a 6h+ timer running,
+  // toast once — and at most once per hour thereafter.
+  const lastNudgeAtRef = useRef(0);
+  const startedAtMs = timer ? new Date(timer.startedAt).getTime() : null;
+  const activeProjectName = activeProject?.name;
+  useEffect(() => {
+    if (startedAtMs === null) return;
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      const elapsedHours = (Date.now() - startedAtMs) / 3_600_000;
+      if (elapsedHours <= 6) return;
+      if (Date.now() - lastNudgeAtRef.current < 3_600_000) return;
+      lastNudgeAtRef.current = Date.now();
+      toast.error(`Your timer on ${activeProjectName ?? 'this project'} has been running ${elapsedHours.toFixed(1)}h.`);
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [startedAtMs, activeProjectName, toast]);
+
   const clientProjects = (projects ?? []).filter((p) => p.clientId === clientId);
   const filteredTodos = (todos ?? []).filter((t) => t.status !== 'done' && (!projectId || t.projectId === projectId));
 
@@ -80,7 +106,13 @@ export function TimerBar() {
                 {activeProject?.name ?? ''} <span className="text-brand-200/80">— {timer.note}</span>
               </div>
             </div>
-            <div className="font-mono text-lg font-bold tabular-nums bg-white/15 px-3 py-1 rounded-lg">{fmtTimer(elapsedSec)}</div>
+            {longRunning && (
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-300">
+                <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" aria-hidden="true" />
+                <span>{veryLongRunning ? 'Did you forget this timer?' : 'Running 6h+ — still working on this?'}</span>
+              </div>
+            )}
+            <div className={`font-mono text-lg font-bold tabular-nums px-3 py-1 rounded-lg ${longRunning ? 'bg-amber-400/20 ring-1 ring-amber-300/70' : 'bg-white/15'}`}>{fmtTimer(elapsedSec)}</div>
             <Button variant="danger" onClick={() => stop.mutate()} className="shadow-md">
               <Square className="w-4 h-4" /> Stop
             </Button>

@@ -7,6 +7,7 @@ import { qk } from '@/lib/queryKeys';
 import { EV, type ActivityPayload, type TimerPayload } from '@allebrum/shared';
 import { AuthProvider } from '@/hooks/useAuth';
 import { ToastProvider } from '@/components/ui/Toast';
+import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import { SpaceProvider } from '@/contexts/SpaceContext';
 import { UploadManagerProvider } from '@/contexts/UploadManagerContext';
 import { PostHogBindings } from '@/components/analytics/PostHogBindings';
@@ -105,6 +106,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={qc}>
       <ToastProvider>
+        <ConfirmProvider>
         <AuthProvider>
           <SpaceProvider>
             <UploadManagerProvider>
@@ -114,6 +116,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
             </UploadManagerProvider>
           </SpaceProvider>
         </AuthProvider>
+        </ConfirmProvider>
       </ToastProvider>
     </QueryClientProvider>
   );

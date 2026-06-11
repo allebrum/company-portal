@@ -5,6 +5,7 @@ import { ExternalLink, Mail, MailCheck, RefreshCw, Send, Trash2 } from 'lucide-r
 import { Button } from '@/components/ui/Button';
 import { Field, Input, Select } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import {
   useClientContacts,
   useInviteClientContact,
@@ -229,6 +230,7 @@ function ContactsCard({ clientId }: { clientId: string }) {
   const resend = useResendClientInvite();
   const remove = useRemoveClientContact();
   const toast = useToast();
+  const confirmDialog = useConfirm();
   const [showAdd, setShowAdd] = useState(false);
   const [addName, setAddName] = useState('');
   const [addEmail, setAddEmail] = useState('');
@@ -336,7 +338,12 @@ function ContactsCard({ clientId }: { clientId: string }) {
                 <button
                   type="button"
                   onClick={async () => {
-                    if (!confirm(`Remove ${c.email}? Their sign-in link will stop working immediately.`)) return;
+                    const ok = await confirmDialog({
+                      title: `Remove ${c.email}?`,
+                      body: 'Their sign-in link will stop working immediately.',
+                      confirmLabel: 'Remove contact',
+                    });
+                    if (!ok) return;
                     try {
                       await remove.mutateAsync({ clientId, contactId: c.id });
                       toast.success('Contact removed');

@@ -8,6 +8,39 @@ import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { useCreateQrUploadSession, type QrUploadTarget, type CreateQrUploadSessionResult } from '@/hooks/useQrUploadSession';
 
+/**
+ * Live "Expires in 17h 42m" line shown under a QR upload code. Turns amber
+ * once under two hours remain. Re-renders on a coarse 30s tick — minute
+ * precision is plenty for a ~24h link — and cleans the interval up on
+ * unmount. Renders nothing when `expiresAt` isn't a parseable timestamp.
+ */
+export function QrExpiryCountdown({ expiresAt }: { expiresAt: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const exp = new Date(expiresAt).getTime();
+  if (Number.isNaN(exp)) return null;
+  const remainingMs = exp - now;
+  const urgent = remainingMs < 2 * 60 * 60 * 1000;
+  let label: string;
+  if (remainingMs <= 0) {
+    label = 'Link expired';
+  } else {
+    const totalMin = Math.floor(remainingMs / 60_000);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    label = h > 0 ? `Expires in ${h}h ${m}m` : `Expires in ${m}m`;
+  }
+  return (
+    <div className={`mt-2 text-[11px] ${urgent ? 'text-amber-600 font-semibold' : 'text-gray-500'}`}>
+      {label}
+    </div>
+  );
+}
+
 export function QrUploadModal({
   open,
   onClose,
@@ -73,6 +106,7 @@ export function QrUploadModal({
           <>
             <div className="rounded-2xl border border-gray-200 bg-white p-4 grid place-items-center">
               <QRCodeCanvas value={session.uploadUrl} size={220} includeMargin />
+              <QrExpiryCountdown expiresAt={session.expiresAt} />
             </div>
             <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-[12px] text-gray-700 break-all">
               {session.uploadUrl}

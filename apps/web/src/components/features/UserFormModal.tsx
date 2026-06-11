@@ -46,6 +46,9 @@ export function UserFormModal({
   // "set a password" email at all.
   const [sendInvite, setSendInvite] = useState(true);
   const [resending, setResending] = useState(false);
+  // Inline validation — errors render under their fields after a save
+  // attempt instead of living only in a transient toast.
+  const [attempted, setAttempted] = useState(false);
 
   // Invites/resends email from the current admin's Gmail. The integration gate
   // pops a connect modal (and offers Connect or Skip-email) when Gmail isn't
@@ -54,6 +57,7 @@ export function UserFormModal({
 
   useEffect(() => {
     if (!open) return;
+    setAttempted(false);
     if (user) {
       setName(user.name);
       setEmail(user.email);
@@ -105,7 +109,7 @@ export function UserFormModal({
 
   const onSave = async () => {
     if (!name.trim() || !email.trim()) {
-      toast.error('Name and email are required');
+      setAttempted(true);
       return;
     }
     if (isEdit && user) {
@@ -181,8 +185,12 @@ export function UserFormModal({
       }
     >
       <div className="space-y-3">
-        <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-        <Field label="Email"><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+        <Field label="Name" required error={attempted && !name.trim() ? 'Name is required.' : undefined}>
+          <Input value={name} invalid={attempted && !name.trim()} onChange={(e) => setName(e.target.value)} autoFocus placeholder="Full name" />
+        </Field>
+        <Field label="Email" required error={attempted && !email.trim() ? 'Email is required.' : undefined}>
+          <Input type="email" value={email} invalid={attempted && !email.trim()} onChange={(e) => setEmail(e.target.value)} placeholder="name@company.com" />
+        </Field>
         <Field label="Billable rate ($/hr)">
           <Input type="number" value={billable} onChange={(e) => setBillable(Number(e.target.value) || 0)} />
         </Field>

@@ -31,3 +31,17 @@
 @layer utilities {
   .tabular-nums { font-variant-numeric: tabular-nums; }
 }
+
+/* Respect the OS accessibility preference: collapse animations and
+   transitions to imperceptible durations instead of removing them, so JS
+   that waits on animation/transition events still fires. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

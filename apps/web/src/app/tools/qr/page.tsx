@@ -29,6 +29,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Field, Input, Select } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { relativeFromIso } from '@/lib/formatters';
 import type { QrCodeRow, QrErrorLevel, QrVisibility, QrScanRow } from '@allebrum/shared';
 
@@ -157,6 +158,7 @@ function CodeRow({
 }) {
   const del = useDeleteQrCode();
   const toast = useToast();
+  const confirmDialog = useConfirm();
   return (
     <li className="px-4 py-3 flex items-center gap-3">
       <button
@@ -197,7 +199,12 @@ function CodeRow({
         <button
           type="button"
           onClick={async () => {
-            if (!confirm(`Delete "${code.label || code.shortCode}"? Scan history is preserved.`)) return;
+            const ok = await confirmDialog({
+              title: `Delete "${code.label || code.shortCode}"?`,
+              body: 'Scan history is preserved.',
+              confirmLabel: 'Delete code',
+            });
+            if (!ok) return;
             try {
               await del.mutateAsync(code.id);
               toast.success('Deleted');
@@ -232,6 +239,7 @@ function DetailModal({
   const update = useUpdateQrCode();
   const scans = useQrScans(code.id);
   const toast = useToast();
+  const confirmDialog = useConfirm();
   const canvasRef = useRef<HTMLDivElement>(null);
 
   // Local editor state — debounced PATCH to the server so dragging color
@@ -279,9 +287,12 @@ function DetailModal({
 
   const onSave = async () => {
     if (pendingTargetChange && targetUrl !== code.targetUrl) {
-      const ok = confirm(
-        `This code is already live. Changing the target URL will send scanners to ${targetUrl} from now on. Continue?`,
-      );
+      const ok = await confirmDialog({
+        title: 'Change the live target URL?',
+        body: `This code is already live. Scanners will be sent to ${targetUrl} from now on.`,
+        confirmLabel: 'Change target',
+        danger: false,
+      });
       if (!ok) return;
     }
     try {

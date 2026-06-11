@@ -642,7 +642,7 @@ function PeriodReviewModal({
             />
           ) : (
             <Card>
-              <div className="overflow-x-auto"><table className="w-full text-sm min-w-[820px]">
+              <div className="overflow-x-auto"><table className="w-full text-sm min-w-[920px]">
                 <thead className="text-left text-[11px] uppercase text-gray-400 border-b border-gray-100">
                   <tr>
                     <th className="px-3 py-3 w-10"></th>
@@ -654,6 +654,7 @@ function PeriodReviewModal({
                     <th className="px-3 py-3">Project</th>
                     <th className="px-3 py-3">Note</th>
                     <th className="px-3 py-3">Status</th>
+                    <th className="px-3 py-3">Approved by</th>
                     <th className="px-3 py-3"></th>
                   </tr>
                 </thead>
@@ -661,6 +662,7 @@ function PeriodReviewModal({
                   {visibleEntries.map((e) => {
                     const u = users.find((x) => x.id === e.userId);
                     const proj = projects.find((p) => p.id === e.projectId);
+                    const approver = e.approvedBy ? users.find((x) => x.id === e.approvedBy) : null;
                     const selectable = e.status === 'submitted' && canMutate;
                     return (
                       <tr
@@ -696,6 +698,7 @@ function PeriodReviewModal({
                           )}
                         </td>
                         <td className="px-3 py-3"><Pill tone={ENTRY_STATUS_PILL[e.status]}>{ENTRY_STATUS_LABEL[e.status]}</Pill></td>
+                        <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{approver?.name ?? '—'}</td>
                         <td className="px-3 py-3 text-right" onClick={(ev) => ev.stopPropagation()}>
                           {e.status === 'approved' && canMutate && (
                             <Button variant="ghost" size="sm" onClick={() => run(() => reopenMut.mutateAsync([e.id]), 'Entry reopened')}>Reopen</Button>

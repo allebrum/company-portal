@@ -1,11 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 let modalLayerCounter = 0;
+
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function Modal({
   open,
@@ -27,7 +30,28 @@ export function Modal({
   // Portal target only exists on the client (app is a static export).
   const [mounted, setMounted] = useState(false);
   const [layerZ, setLayerZ] = useState<number>(layerBase);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
   useEffect(() => setMounted(true), []);
+
+  // Focus management: move focus into the dialog on open (unless something
+  // inside — e.g. an autoFocus input — already took it) and restore it to
+  // the trigger element on close, so keyboard/screen-reader users aren't
+  // dropped at the top of the page.
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.activeElement as HTMLElement | null;
+    const t = window.setTimeout(() => {
+      const panel = panelRef.current;
+      if (!panel || panel.contains(document.activeElement)) return;
+      const first = panel.querySelector<HTMLElement>(FOCUSABLE);
+      (first ?? panel).focus();
+    }, 0);
+    return () => {
+      window.clearTimeout(t);
+      prev?.focus?.();
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -40,6 +64,28 @@ export function Modal({
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
+      // Focus trap: keep Tab cycling inside the dialog.
+      if (e.key === 'Tab') {
+        const panel = panelRef.current;
+        if (!panel) return;
+        const focusables = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+          (el) => el.offsetParent !== null,
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement;
+        if (!panel.contains(active)) {
+          e.preventDefault();
+          first.focus();
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault();
+          first.focus();
+        } else if (e.shiftKey && active === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
     // Lock background scroll while the dialog is open.
@@ -74,16 +120,23 @@ export function Modal({
     <div className="fixed inset-0 flex items-center justify-center p-4 sm:p-6" style={{ zIndex: layerZ }}>
       <div className="absolute inset-0 bg-gray-900/40 backdrop-blur-sm" onClick={onClose} />
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
+        tabIndex={-1}
         className={cn(
-          'relative w-full bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-3rem)]',
+          'relative w-full bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-3rem)] outline-none',
           widths[size],
         )}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
-          <div className="text-sm font-bold text-gray-900">{title}</div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700" aria-label="Close">
+          <div id={titleId} className="text-sm font-bold text-gray-900">{title}</div>
+          <button
+            onClick={onClose}
+            className="w-9 h-9 -my-2 -mr-2.5 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+            aria-label="Close"
+          >
             <X className="w-4 h-4" />
           </button>
         </div>

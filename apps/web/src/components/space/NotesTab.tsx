@@ -17,6 +17,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useSpaceData, useUpdateSpaceBlocks, useUpdateSpaceFiles } from '@/hooks/useSpace';
 import { useUploadManager } from '@/contexts/UploadManagerContext';
 import { useCreateQrUploadSession, useQrUploadSessionFiles } from '@/hooks/useQrUploadSession';
+import { QrExpiryCountdown } from '@/components/upload/QrUploadModal';
 import { useToast } from '@/components/ui/Toast';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
@@ -704,6 +705,7 @@ export function NotesTab({ scope }: { scope: Scope }) {
                 <>
                   <div className="rounded-2xl border border-gray-200 bg-white p-4 grid place-items-center">
                     <QRCodeCanvas value={qrInsertSession.uploadUrl} size={220} includeMargin />
+                    <QrExpiryCountdown expiresAt={qrInsertSession.expiresAt} />
                   </div>
                   <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-[12px] text-gray-700 break-all">
                     {qrInsertSession.uploadUrl}

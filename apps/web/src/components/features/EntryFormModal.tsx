@@ -5,6 +5,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Field, Input, Select } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { fmtMins } from '@/lib/formatters';
 import {
   useAddManualEntry,
@@ -47,6 +48,7 @@ export function EntryFormModal({
 }) {
   const isEdit = !!entry;
   const toast = useToast();
+  const confirmDialog = useConfirm();
   const { data: clients = [] } = useClients();
   const { data: projects = [] } = useProjects();
   const add = useAddManualEntry();
@@ -128,9 +130,11 @@ export function EntryFormModal({
     // while logging; submitted/approved entries are workflow actions
     // worth a second click before the row goes away.
     if (entry.status !== 'draft') {
-      const ok = window.confirm(
-        `Delete this ${entry.status} entry? It will be removed from any pay-period totals and approval queues.`,
-      );
+      const ok = await confirmDialog({
+        title: `Delete this ${entry.status} entry?`,
+        body: 'It will be removed from any pay-period totals and approval queues.',
+        confirmLabel: 'Delete entry',
+      });
       if (!ok) return;
     }
     try {
@@ -239,11 +243,16 @@ export function EntryFormModal({
             />
           </Field>
         </div>
-        <div className={`text-sm ${durationValid ? 'text-gray-600' : 'text-red-600'}`}>
-          Duration:{' '}
-          <span className="font-semibold tabular-nums">
-            {durationValid ? fmtMins(durationMin) : durationMin <= 0 ? 'end must be after start' : 'exceeds 24h'}
-          </span>
+        <div className="flex items-baseline justify-between gap-3">
+          <div className={`text-sm ${durationValid ? 'text-gray-600' : 'text-red-600'}`}>
+            Duration:{' '}
+            <span className="font-semibold tabular-nums">
+              {durationValid ? fmtMins(durationMin) : durationMin <= 0 ? 'end must be after start' : 'exceeds 24h'}
+            </span>
+          </div>
+          <div className="text-[11px] text-gray-500">
+            Times are local ({Intl.DateTimeFormat().resolvedOptions().timeZone})
+          </div>
         </div>
         <Field label="Note">
           <Input

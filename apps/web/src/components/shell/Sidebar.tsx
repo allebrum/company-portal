@@ -9,6 +9,8 @@ import { useEntries, useAuthConfig } from '@/hooks/useResources';
 import { useAuth } from '@/hooks/useAuth';
 import { Avatar } from '../ui/Avatar';
 import { Button } from '../ui/Button';
+import { HoppaMark } from '../ui/HoppaMark';
+import { useToast } from '../ui/Toast';
 import { cn } from '@/lib/utils';
 
 const NAV: { id: string; href: string; label: string; Icon: typeof Home; anyPerm?: Permission[] }[] = [
@@ -31,12 +33,13 @@ const NAV: { id: string; href: string; label: string; Icon: typeof Home; anyPerm
  */
 function WorkspaceSwitcher() {
   const { me, switchWorkspace } = useAuth();
+  const toast = useToast();
   const [busy, setBusy] = useState(false);
   const workspaces = me?.workspaces ?? [];
   if (workspaces.length <= 1) return null;
   return (
     <div className="px-3 pb-3">
-      <label className="block text-[10px] uppercase tracking-widest text-gray-400 font-semibold mb-1">
+      <label className="block text-[10px] uppercase tracking-widest text-gray-500 font-semibold mb-1">
         Workspace
       </label>
       <select
@@ -48,6 +51,12 @@ function WorkspaceSwitcher() {
           setBusy(true);
           try {
             await switchWorkspace(next);
+            // Explicit confirmation — without it a switch is easy to miss
+            // and users lose track of which workspace they're acting in.
+            const name = workspaces.find((w) => w.id === next)?.name;
+            if (name) toast.success(`Switched to ${name}`);
+          } catch (err) {
+            toast.error(err instanceof Error ? err.message : 'Could not switch workspace');
           } finally {
             setBusy(false);
           }
@@ -89,6 +98,8 @@ export function Sidebar() {
           {logoDataUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={logoDataUrl} alt={`${portalName} logo`} className="w-full h-full object-contain" />
+          ) : portalName === 'Hoppa' ? (
+            <HoppaMark className="w-5 h-5 text-white" />
           ) : (
             <span className="text-white text-base font-bold">{portalName.charAt(0).toUpperCase() || 'H'}</span>
           )}
@@ -146,6 +157,10 @@ export function Sidebar() {
             <div className="flex items-center justify-between">
               <span>New to-do</span>
               <kbd className="kbd">Cmd/Ctrl+Shift+N</kbd>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>All shortcuts</span>
+              <kbd className="kbd">?</kbd>
             </div>
           </div>
         </div>

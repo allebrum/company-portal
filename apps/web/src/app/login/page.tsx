@@ -49,7 +49,7 @@ function GoogleButton() {
 
 function OrDivider() {
   return (
-    <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-gray-400">
+    <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-gray-500">
       <span className="flex-1 h-px bg-gray-200" /> or <span className="flex-1 h-px bg-gray-200" />
     </div>
   );
@@ -315,7 +315,7 @@ export default function LoginPage() {
 
         {/* External legal links — only render the ones the admin has set. */}
         {(cfg?.termsUrl || cfg?.privacyUrl) && (
-          <div className="pt-2 text-center text-[11px] text-gray-400 space-x-2">
+          <div className="pt-2 text-center text-[11px] text-gray-500 space-x-2">
             {cfg?.termsUrl && (
               <a href={cfg.termsUrl} target="_blank" rel="noreferrer" className="hover:text-brand-700">Terms of Service</a>
             )}
