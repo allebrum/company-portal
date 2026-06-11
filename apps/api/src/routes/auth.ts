@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import argon2 from 'argon2';
 import { eq } from 'drizzle-orm';
 import {
@@ -80,6 +80,20 @@ authRouter.get('/config', async (_req, res, next) => {
   } catch (e) {
     next(e);
   }
+});
+
+// PostHog Support widget — identity verification. Signs the session user's
+// distinct id (their user id, the same id the web app passes to
+// posthog.identify) with the team's secret_api_token so support tickets
+// follow the user across browsers/devices. The secret never leaves the
+// server — the client gets only the HMAC. Null hash = not configured →
+// the widget falls back to browser-session tickets.
+authRouter.get('/posthog-identity', requireAuth, (req, res) => {
+  const me = req.session.user!;
+  const identityHash = env.POSTHOG_IDENTITY_SECRET
+    ? createHmac('sha256', env.POSTHOG_IDENTITY_SECRET).update(me.userId).digest('hex')
+    : null;
+  res.json({ distinctId: me.userId, identityHash });
 });
 
 // Public: step 2 of login — given an email, which methods does THIS account
