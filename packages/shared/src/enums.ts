@@ -85,6 +85,15 @@ export type Priority = (typeof PRIORITIES)[number];
 export const TODO_STATUSES = ['open', 'done'] as const;
 export type TodoStatus = (typeof TODO_STATUSES)[number];
 
+// Sprint 4 — client tickets. Lifecycle: open → in_progress → (waiting_on_client ↔) →
+// resolved → closed. `resolved` = staff done, client may reopen by replying;
+// `closed` = terminal unless staff reopens.
+export const TICKET_STATUSES = ['open', 'in_progress', 'waiting_on_client', 'resolved', 'closed'] as const;
+export type TicketStatus = (typeof TICKET_STATUSES)[number];
+
+export const TICKET_AUTHOR_KINDS = ['contact', 'staff'] as const;
+export type TicketAuthorKind = (typeof TICKET_AUTHOR_KINDS)[number];
+
 export const CLIENT_KINDS = ['gov', 'edu', 'agency', 'finance', 'internal'] as const;
 export type ClientKind = (typeof CLIENT_KINDS)[number];
 

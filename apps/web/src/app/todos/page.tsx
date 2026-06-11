@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, Lock } from 'lucide-react';
+import { Plus, Trash2, Lock, MessageSquare } from 'lucide-react';
 import { qk } from '@/lib/queryKeys';
 import { Card, Pill, Section, Empty } from '@/components/ui';
 import { Button } from '@/components/ui/Button';
@@ -171,6 +171,9 @@ export default function TodosPage() {
                         <span>· est {fmtMins(t.estimateMin)} · logged {fmtMins(t.loggedMin)}</span>
                       </div>
                     </button>
+                    {t.tags.includes('ticket') && (
+                      <Pill tone="blue"><MessageSquare className="w-3 h-3" /> From ticket</Pill>
+                    )}
                     {t.private && <Pill tone="purple"><Lock className="w-3 h-3" /> Private</Pill>}
                     {u && <Avatar user={u} size={24} />}
                     <TodoTimerButton todo={t} />

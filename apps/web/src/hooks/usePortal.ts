@@ -14,6 +14,9 @@ import { api } from '@/lib/api';
 export type PortalMe = {
   contact: { id: string; name: string; email: string; role: 'primary' | 'viewer' };
   client: { id: string; name: string; color: string; slug: string };
+  /** The owning WORKSPACE's branding (the agency, not the Hoppa product) —
+   *  null only for legacy rows with no tenant. */
+  workspace: { name: string; color: string; logo: string | null } | null;
 };
 
 export type PortalLookup = { name: string; color: string; slug: string };
@@ -148,6 +151,76 @@ export function usePortalFiles(enabled = true) {
     queryFn: () => api.get<PortalFileRow[]>('/portal/files'),
     enabled,
     retry: false,
+  });
+}
+
+// ---- Tickets (Sprint 4) ----------------------------------------------
+
+export type PortalTicketRow = {
+  id: string;
+  clientId: string;
+  projectId: string | null;
+  todoId: string | null;
+  title: string;
+  status: 'open' | 'in_progress' | 'waiting_on_client' | 'resolved' | 'closed';
+  priority: 'low' | 'medium' | 'high';
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
+  messageCount: number;
+  openedBy: string | null;
+};
+
+export type PortalTicketMessage = {
+  id: string;
+  ticketId: string;
+  authorKind: 'contact' | 'staff';
+  authorName: string | null;
+  body: string;
+  createdAt: string;
+};
+
+export type PortalTicketDetail = PortalTicketRow & {
+  body: string;
+  messages: PortalTicketMessage[];
+};
+
+export function usePortalTickets(enabled = true) {
+  return useQuery({
+    queryKey: ['portal', 'tickets'],
+    queryFn: () => api.get<PortalTicketRow[]>('/portal/tickets'),
+    enabled,
+    retry: false,
+  });
+}
+
+export function usePortalTicket(id: string | null) {
+  return useQuery({
+    queryKey: ['portal', 'tickets', id ?? ''],
+    queryFn: () => api.get<PortalTicketDetail>(`/portal/tickets/${id}`),
+    enabled: !!id,
+    retry: false,
+  });
+}
+
+export function useCreatePortalTicket() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { title: string; body: string; projectId?: string }) =>
+      api.post<PortalTicketDetail>('/portal/tickets', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['portal', 'tickets'] }),
+  });
+}
+
+export function useReplyPortalTicket() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: string }) =>
+      api.post<PortalTicketMessage>(`/portal/tickets/${id}/messages`, { body }),
+    onSuccess: (_m, { id }) => {
+      qc.invalidateQueries({ queryKey: ['portal', 'tickets'] });
+      qc.invalidateQueries({ queryKey: ['portal', 'tickets', id] });
+    },
   });
 }
 

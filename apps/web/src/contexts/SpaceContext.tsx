@@ -26,7 +26,8 @@ type SpaceCtx = {
    * the Clients directory's "Jump back in" row.
    */
   recentSpaces: Scope[];
-  openSpace: (scope: Scope) => void;
+  /** `opts.tab` lands the overlay on a specific tab (default Notes). */
+  openSpace: (scope: Scope, opts?: { tab?: string }) => void;
   closeSpace: () => void;
 };
 
@@ -53,15 +54,16 @@ function readScopeFromUrl(): Scope | null {
   return fromUrlScope(url.searchParams.get(SPACE_PARAM));
 }
 
-function writeScopeToUrl(scope: Scope | null, mode: 'push' | 'replace'): void {
+function writeScopeToUrl(scope: Scope | null, mode: 'push' | 'replace', tab?: string): void {
   const url = new URL(window.location.href);
   if (!scope || scope.kind === 'all') {
     url.searchParams.delete(SPACE_PARAM);
     url.searchParams.delete(SPACE_TAB_PARAM);
   } else {
     url.searchParams.set(SPACE_PARAM, `${scope.kind}:${scope.id}`);
-    // Opening a new scope starts on Notes by default.
-    url.searchParams.set(SPACE_TAB_PARAM, 'notes');
+    // Opening a new scope starts on Notes unless the caller asks otherwise
+    // (the overlay restores the active tab from this param).
+    url.searchParams.set(SPACE_TAB_PARAM, tab ?? 'notes');
   }
   const next = `${url.pathname}${url.search}${url.hash}`;
   if (mode === 'push') window.history.pushState(window.history.state, '', next);
@@ -80,7 +82,7 @@ export function SpaceProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const openSpace = useCallback((scope: Scope) => {
+  const openSpace = useCallback((scope: Scope, opts?: { tab?: string }) => {
     // The "All clients" scope has no space — refuse it defensively.
     if (scope.kind === 'all') return;
     const isSame =
@@ -91,7 +93,7 @@ export function SpaceProvider({ children }: { children: ReactNode }) {
     setOpenScope(scope);
     // Update recents LRU — push to front, dedupe by (kind, id), cap.
     rememberRecent(scope);
-    if (!isSame) writeScopeToUrl(scope, 'push');
+    if (!isSame || opts?.tab) writeScopeToUrl(scope, 'push', opts?.tab);
   }, [openScope, rememberRecent]);
 
   const closeSpace = useCallback(() => {

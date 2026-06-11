@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import {
   X, Layers, Target, CheckSquare, FileText, Play, Square,
   Upload, ExternalLink, Trash2, Link2, Plus, FolderOpen, Globe, Pencil, RefreshCw,
+  MessageSquare,
 } from 'lucide-react';
 import { useSpace } from '@/contexts/SpaceContext';
 import { useSpaceData, useUpdateSpaceFiles } from '@/hooks/useSpace';
@@ -20,6 +21,7 @@ import {
   useRenameSpaceFile,
   useRefreshSpaceFileNames,
 } from '@/hooks/useDrive';
+import { useTickets } from '@/hooks/useTickets';
 import { useIntegrationGate } from '@/components/shell/IntegrationGate';
 import { useUploadManager } from '@/contexts/UploadManagerContext';
 import { useMyTimer } from '@/hooks/useTimer';
@@ -36,6 +38,7 @@ import { Input } from '@/components/ui/Field';
 import { NotesTab } from './NotesTab';
 import { EmbedDialog, type EmbedDialogValue } from './pickers/EmbedDialog';
 import { PortalTab } from './PortalTab';
+import { TicketsTab } from './TicketsTab';
 import { ProjectOverviewTab } from './ProjectOverviewTab';
 import { ClientOverviewTab } from './ClientOverviewTab';
 import { ItemComposer } from '@/components/features/ItemComposer';
@@ -66,9 +69,9 @@ function useSpaceModals(): SpaceModals {
 // Narrowed scope (the overlay never opens for 'all').
 type OpenScope = Exclude<Scope, { kind: 'all' }>;
 
-type TabKey = 'overview' | 'notes' | 'goals' | 'todos' | 'files' | 'portal';
+type TabKey = 'overview' | 'notes' | 'goals' | 'todos' | 'files' | 'portal' | 'tickets';
 const SPACE_TAB_PARAM = 'spaceTab';
-const TAB_KEYS: ReadonlyArray<TabKey> = ['overview', 'notes', 'goals', 'todos', 'files', 'portal'];
+const TAB_KEYS: ReadonlyArray<TabKey> = ['overview', 'notes', 'goals', 'todos', 'files', 'portal', 'tickets'];
 
 function readTabFromUrl(): TabKey | null {
   const raw = new URL(window.location.href).searchParams.get(SPACE_TAB_PARAM);
@@ -205,6 +208,9 @@ export function ClientSpaceOverlay() {
             )}
             {tab === 'portal' && narrowed.kind === 'client' && data.client && (
               <PortalTab client={data.client} />
+            )}
+            {tab === 'tickets' && narrowed.kind === 'client' && data.client && (
+              <TicketsTab client={data.client} />
             )}
             {tab === 'overview' && narrowed.kind === 'project' && data.project && (
               <ProjectOverviewTab project={data.project} />
@@ -459,6 +465,16 @@ function SpaceTabs({
   // Portal tab only at client scope, and only for staff with the F23
   // `portal.manage` permission. Projects don't have their own portal.
   const showPortalTab = !!data.client && !data.project && can('portal.manage');
+  // Tickets tab (Sprint 4): client scope only — tickets belong to a client,
+  // not a project. Visible to all staff; status edits gate server-side.
+  const showTicketsTab = !!data.client && !data.project;
+  const { data: clientTickets = [] } = useTickets(
+    { clientId: data.client?.id },
+    showTicketsTab,
+  );
+  const openTicketCount = showTicketsTab
+    ? clientTickets.filter((t) => t.status !== 'resolved' && t.status !== 'closed').length
+    : 0;
 
   const Tab = ({ k, label, count, icon: Icon }: { k: TabKey; label: string; count?: number; icon: typeof Target }) => (
     <button
@@ -484,6 +500,7 @@ function SpaceTabs({
       <Tab k="goals" label="Goals" icon={Target} count={scopedGoals.length} />
       <Tab k="todos" label="To-dos" icon={CheckSquare} count={scopedOpenTodos.length} />
       <Tab k="files" label="Files" icon={Upload} count={filesCount} />
+      {showTicketsTab && <Tab k="tickets" label="Tickets" icon={MessageSquare} count={openTicketCount} />}
       {showPortalTab && <Tab k="portal" label="Portal" icon={Globe} />}
       {showOverviewTab && <Tab k="overview" label="Overview" icon={Layers} />}
       <div className="ml-auto text-[11px] text-gray-400 italic">

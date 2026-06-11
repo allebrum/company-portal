@@ -24,6 +24,8 @@ import {
   RESOURCE_KINDS,
   CADENCES,
   WEEKEND_RULES,
+  TICKET_STATUSES,
+  TICKET_AUTHOR_KINDS,
 } from '@allebrum/shared';
 
 // ---- Enums ----
@@ -37,6 +39,8 @@ export const resourceKindEnum = pgEnum('resource_kind', RESOURCE_KINDS);
 export const cadenceEnum = pgEnum('cadence', CADENCES);
 export const weekendRuleEnum = pgEnum('weekend_rule', WEEKEND_RULES);
 export const overrideEffectEnum = pgEnum('override_effect', ['grant', 'deny']);
+export const ticketStatusEnum = pgEnum('ticket_status', TICKET_STATUSES);
+export const ticketAuthorKindEnum = pgEnum('ticket_author_kind', TICKET_AUTHOR_KINDS);
 
 const ts = () => timestamp('created_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull();
 const updTs = () => timestamp('updated_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull();
@@ -510,6 +514,48 @@ export const todos = pgTable('todos', {
   statusIdx: index('todos_status_idx').on(t.status),
 }));
 
+// ---- Tickets (Sprint 4 — client portal → team to-dos) ----
+// Clients open tickets in the portal; the server auto-creates a linked,
+// unassigned to-do (`todoId`) for staff triage. Status lives HERE — the
+// linked to-do mirrors it (resolved/closed ⇄ done) via services/tickets.ts.
+export const tickets = pgTable('tickets', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRef(),
+  clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
+  // The portal contact who opened it. set null: contact rows can be deleted
+  // by staff; the ticket (and its thread) must survive.
+  contactId: uuid('contact_id').references(() => clientContacts.id, { onDelete: 'set null' }),
+  title: text('title').notNull(),
+  body: text('body').notNull(),
+  status: ticketStatusEnum('status').notNull().default('open'),
+  priority: priorityEnum('priority').notNull().default('medium'),
+  todoId: uuid('todo_id').references(() => todos.id, { onDelete: 'set null' }),
+  createdAt: ts(),
+  updatedAt: updTs(),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true, mode: 'string' }),
+}, (t) => ({
+  tenantIdx: index('tickets_tenant_idx').on(t.tenantId),
+  clientStatusIdx: index('tickets_client_status_idx').on(t.clientId, t.status),
+  todoIdx: index('tickets_todo_idx').on(t.todoId),
+}));
+
+// The conversation thread. Author is EITHER a portal contact OR a staff
+// user (authorKind discriminates; same XOR-by-convention as auth_tokens'
+// subject columns — services only ever set the matching id column).
+export const ticketMessages = pgTable('ticket_messages', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRef(),
+  ticketId: uuid('ticket_id').notNull().references(() => tickets.id, { onDelete: 'cascade' }),
+  authorKind: ticketAuthorKindEnum('author_kind').notNull(),
+  authorContactId: uuid('author_contact_id').references(() => clientContacts.id, { onDelete: 'set null' }),
+  authorUserId: uuid('author_user_id').references(() => users.id, { onDelete: 'set null' }),
+  body: text('body').notNull(),
+  createdAt: ts(),
+}, (t) => ({
+  ticketIdx: index('ticket_messages_ticket_idx').on(t.ticketId),
+}));
+
 // ---- Pay periods ----
 export const payPeriods = pgTable('pay_periods', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -762,6 +808,8 @@ export type GoalResource = typeof goalResources.$inferSelect;
 export type Epic = typeof epics.$inferSelect;
 export type Milestone = typeof milestones.$inferSelect;
 export type Todo = typeof todos.$inferSelect;
+export type Ticket = typeof tickets.$inferSelect;
+export type TicketMessage = typeof ticketMessages.$inferSelect;
 export type PayPeriod = typeof payPeriods.$inferSelect;
 export type PayConfig = typeof payConfig.$inferSelect;
 export type TimeEntry = typeof timeEntries.$inferSelect;

@@ -4,6 +4,8 @@ import { eq, and, isNotNull, inArray, gte, asc } from 'drizzle-orm';
 import {
   PortalRequestAccessSchema,
   PortalExchangeSchema,
+  CreateTicketSchema,
+  TicketMessageSchema,
 } from '@allebrum/shared';
 import { db } from '../db/client.js';
 import {
@@ -19,8 +21,15 @@ import { rateLimit } from '../middleware/rateLimit.js';
 import { findContactByEmail, resendContactInvite } from '../services/clientContacts.js';
 import { consumeToken, type TokenSubject } from '../auth/tokens.js';
 import { requireClientPortalAuth } from '../middleware/requireClientPortalAuth.js';
+import { getSettings } from '../services/settings.js';
 import { withTenant } from '../tenancy/context.js';
 import { appendActivity } from '../services/activity.js';
+import {
+  listTickets,
+  getTicketDetail,
+  createTicketFromPortal,
+  addTicketMessage,
+} from '../services/tickets.js';
 
 /**
  * F23 client-portal routes — split into three surface areas:
@@ -186,7 +195,7 @@ portalRouter.get('/me', requireClientPortalAuth, async (req, res, next) => {
       .where(eq(clientContacts.id, sess.contactId))
       .limit(1);
     const [client] = await db
-      .select({ id: clients.id, name: clients.name, color: clients.color, slug: clients.portalSlug })
+      .select({ id: clients.id, name: clients.name, color: clients.color, slug: clients.portalSlug, tenantId: clients.tenantId })
       .from(clients)
       .where(eq(clients.id, sess.clientId))
       .limit(1);
@@ -196,9 +205,17 @@ portalRouter.get('/me', requireClientPortalAuth, async (req, res, next) => {
       res.status(401).json({ error: 'session_invalidated' });
       return;
     }
+    // The portal header should carry the WORKSPACE's branding (the agency the
+    // client belongs to), not the instance/product branding — on the SaaS the
+    // pre-login /auth/config is deliberately product-branded (see routes/
+    // auth.ts), so the header would otherwise read "Hoppa" for every tenant.
+    const ws = client.tenantId ? await withTenant(client.tenantId, () => getSettings()) : null;
     res.json({
       contact: { id: contact.id, name: contact.name, email: contact.email, role: contact.role },
       client: { id: client.id, name: client.name, color: client.color, slug: client.slug },
+      workspace: ws
+        ? { name: ws.portalName, color: ws.brandPrimaryColor, logo: ws.brandLogoDataUrl }
+        : null,
     });
   } catch (e) {
     next(e);
@@ -534,6 +551,122 @@ portalRouter.post(
         ok: true,
         signOff: { at: signedAt, by: contact?.name ?? null, comment: comment?.trim() || null },
       });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+// ---- Tickets (Sprint 4) -------------------------------------------------
+//
+// Portal contacts open tickets and reply on their threads. Every call is
+// scoped to the session's clientId; the service layer runs inside the
+// client's tenant context (portal requests carry no staff session, so the
+// tenant is bound explicitly from the client row — same pattern as the
+// sign-off activity entry above).
+
+async function portalTenantId(clientId: string): Promise<string | null> {
+  const [c] = await db
+    .select({ tenantId: clients.tenantId })
+    .from(clients)
+    .where(eq(clients.id, clientId))
+    .limit(1);
+  return c?.tenantId ?? null;
+}
+
+portalRouter.get('/tickets', requireClientPortalAuth, async (req, res, next) => {
+  try {
+    const sess = req.session.clientPortalSession!;
+    const tenantId = await portalTenantId(sess.clientId);
+    if (!tenantId) {
+      res.json([]);
+      return;
+    }
+    res.json(await withTenant(tenantId, () => listTickets({ clientId: sess.clientId })));
+  } catch (e) {
+    next(e);
+  }
+});
+
+portalRouter.get('/tickets/:id', requireClientPortalAuth, async (req, res, next) => {
+  try {
+    const sess = req.session.clientPortalSession!;
+    const tenantId = await portalTenantId(sess.clientId);
+    const detail = tenantId
+      ? await withTenant(tenantId, () => getTicketDetail(req.params.id!, { clientId: sess.clientId }))
+      : undefined;
+    if (!detail) {
+      res.status(404).json({ error: 'ticket_not_found' });
+      return;
+    }
+    res.json(detail);
+  } catch (e) {
+    next(e);
+  }
+});
+
+portalRouter.post(
+  '/tickets',
+  rateLimit({ key: 'portal-ticket-create', max: 6, windowSec: 60 }),
+  requireClientPortalAuth,
+  validate(CreateTicketSchema),
+  async (req, res, next) => {
+    try {
+      const sess = req.session.clientPortalSession!;
+      const input = getValidated<typeof CreateTicketSchema._type>(req);
+      const [contact] = await db
+        .select({ name: clientContacts.name })
+        .from(clientContacts)
+        .where(eq(clientContacts.id, sess.contactId))
+        .limit(1);
+      const tenantId = await portalTenantId(sess.clientId);
+      if (!tenantId) {
+        res.status(404).json({ error: 'client_not_found' });
+        return;
+      }
+      const detail = await withTenant(tenantId, () =>
+        createTicketFromPortal({
+          ...input,
+          clientId: sess.clientId,
+          contactId: sess.contactId,
+          contactName: contact?.name ?? 'A client contact',
+        }),
+      );
+      res.status(201).json(detail);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+portalRouter.post(
+  '/tickets/:id/messages',
+  rateLimit({ key: 'portal-ticket-message', max: 12, windowSec: 60 }),
+  requireClientPortalAuth,
+  validate(TicketMessageSchema),
+  async (req, res, next) => {
+    try {
+      const sess = req.session.clientPortalSession!;
+      const { body } = getValidated<typeof TicketMessageSchema._type>(req);
+      const [contact] = await db
+        .select({ name: clientContacts.name })
+        .from(clientContacts)
+        .where(eq(clientContacts.id, sess.contactId))
+        .limit(1);
+      const tenantId = await portalTenantId(sess.clientId);
+      if (!tenantId) {
+        res.status(404).json({ error: 'ticket_not_found' });
+        return;
+      }
+      const message = await withTenant(tenantId, () =>
+        addTicketMessage({
+          ticketId: req.params.id!,
+          body,
+          clientId: sess.clientId,
+          author: { kind: 'contact', contactId: sess.contactId, name: contact?.name ?? 'A client contact' },
+        }),
+      );
+      res.status(201).json(message);
     } catch (e) {
       next(e);
     }
