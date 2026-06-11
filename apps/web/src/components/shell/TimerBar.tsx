@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Play, Square } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Modal } from '../ui/Modal';
@@ -9,6 +9,9 @@ import { useToast } from '@/components/ui/Toast';
 import { useMyTimer } from '@/hooks/useTimer';
 import { useClients, useProjects, useTodos, useStartTimer, useStopTimer } from '@/hooks/useResources';
 import { fmtTimer } from '@/lib/formatters';
+
+// Last-used client/project, persisted when a timer starts successfully.
+const LAST_SELECTION_KEY = 'timer:lastSelection:v1';
 
 export function TimerBar() {
   const { timer, elapsedSec } = useMyTimer();
@@ -33,9 +36,33 @@ export function TimerBar() {
   }, [clients, clientId]);
   useEffect(() => {
     if (!clientId || !projects) return;
-    const first = projects.find((p) => p.clientId === clientId);
-    setProjectId(first?.id ?? '');
+    setProjectId((prev) => {
+      // Keep a selection that already belongs to this client (e.g. the
+      // last-used prefill); otherwise default to the client's first project.
+      if (prev && projects.some((p) => p.id === prev && p.clientId === clientId)) return prev;
+      return projects.find((p) => p.clientId === clientId)?.id ?? '';
+    });
   }, [clientId, projects]);
+
+  // Open the start picker, prefilled from the last successfully started
+  // timer — only ids that still exist in the loaded lists are applied.
+  const openStartPicker = useCallback(() => {
+    try {
+      const raw = window.localStorage.getItem(LAST_SELECTION_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as { clientId?: string; projectId?: string };
+        const client = (clients ?? []).find((c) => c.id === saved.clientId);
+        const project = client
+          ? (projects ?? []).find((p) => p.id === saved.projectId && p.clientId === client.id)
+          : undefined;
+        setClientId(client?.id ?? '');
+        setProjectId(project?.id ?? '');
+      }
+    } catch {
+      // Corrupt JSON or unavailable storage — keep the current defaults.
+    }
+    setOpen(true);
+  }, [clients, projects]);
 
   // Keyboard shortcut: Cmd/Ctrl+Shift+T opens picker
   useEffect(() => {
@@ -45,11 +72,11 @@ export function TimerBar() {
       if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
       if (e.key.toLowerCase() !== 't') return;
       e.preventDefault();
-      if (!timer) setOpen(true);
+      if (!timer) openStartPicker();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [timer]);
+  }, [timer, openStartPicker]);
 
   const activeProject = timer ? projects?.find((p) => p.id === timer.projectId) : null;
   const activeClient = activeProject ? clients?.find((c) => c.id === activeProject.clientId) : null;
@@ -87,6 +114,11 @@ export function TimerBar() {
       note: note || filteredTodos.find((t) => t.id === todoId)?.title || 'Working',
       todoId: todoId || null,
     });
+    try {
+      window.localStorage.setItem(LAST_SELECTION_KEY, JSON.stringify({ clientId, projectId }));
+    } catch {
+      // Storage unavailable (private mode / quota) — skip remembering.
+    }
     setOpen(false);
     setNote('');
     setTodoId('');
@@ -120,7 +152,7 @@ export function TimerBar() {
         ) : (
           <div className="flex items-center gap-2">
             <span className="hidden sm:inline text-xs text-gray-500">No timer running</span>
-            <Button variant="primary" onClick={() => setOpen(true)} className="shadow-md">
+            <Button variant="primary" onClick={openStartPicker} className="shadow-md">
               <Play className="w-4 h-4" /> Start timer
             </Button>
           </div>

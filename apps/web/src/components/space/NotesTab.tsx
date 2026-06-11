@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { Trash2, Sparkles, Play, Square, Target, CheckCircle, Link as LinkIcon, ExternalLink, Image as EmbedIcon, Upload, Camera, QrCode, FolderOpen, Copy } from 'lucide-react';
+import { useMutationState } from '@tanstack/react-query';
+import { Trash2, Sparkles, Play, Square, Target, CheckCircle, AlertCircle, Link as LinkIcon, ExternalLink, Image as EmbedIcon, Upload, Camera, QrCode, FolderOpen, Copy } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { SlashMenu, type SlashCommandId } from './SlashMenu';
 import { EmbedDialog, type EmbedDialogValue } from './pickers/EmbedDialog';
@@ -125,11 +126,50 @@ export function NotesTab({ scope }: { scope: Scope }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope.kind === 'all' ? null : scope.id, data.loading]);
 
+  // ----- save-state indicator (S2.6) -----
+  // Purely observational — the save itself stays the 250ms trailing debounce
+  // in useUpdateSpaceBlocks (fire-and-forget full-replace PATCH on the
+  // client/project row, no automatic retry). We watch those mutations in the
+  // React Query mutation cache and timestamp local edits so the header can
+  // show the debounce gap ("Unsaved changes") plus the real mutation
+  // lifecycle. The only retry path is the next edit, which re-sends the
+  // whole doc — the error copy reflects that.
+  const scopeId = scope.kind === 'all' ? null : scope.id;
+  const [lastEditAt, setLastEditAt] = useState(0);
+  const blockSaves = useMutationState({
+    filters: {
+      predicate: (m) => {
+        if (!scopeId) return false;
+        const vars = m.state.variables as { id?: string; patch?: Record<string, unknown> } | undefined;
+        if (!vars?.patch) return false;
+        return vars.id === scopeId && 'spaceBlocks' in vars.patch;
+      },
+    },
+    select: (m) => ({ status: m.state.status, submittedAt: m.state.submittedAt }),
+  });
+  const latestSave = blockSaves[blockSaves.length - 1] ?? null;
+  // Older cache entries are GC'd after a few idle minutes; remember the
+  // newest submit so a long-idle canvas can't fall back to a phantom
+  // "Unsaved changes".
+  const newestSubmitRef = useRef(0);
+  if (latestSave && latestSave.submittedAt > newestSubmitRef.current) {
+    newestSubmitRef.current = latestSave.submittedAt;
+  }
+  const saveState: SaveState = (() => {
+    if (lastEditAt > newestSubmitRef.current) return 'unsaved'; // debounce window (or edits during an in-flight save)
+    if (!latestSave) return 'idle';
+    if (latestSave.status === 'pending') return 'saving';
+    if (latestSave.status === 'error') return 'error';
+    if (latestSave.status === 'success') return 'saved';
+    return 'idle';
+  })();
+
   // Push reducer state out to the server after edits — but only after the
   // initial load has settled so the initial dispatch doesn't double-write.
   useEffect(() => {
     if (!initialized.current) return;
     save(blocks);
+    setLastEditAt(Date.now());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blocks]);
 
@@ -566,6 +606,10 @@ export function NotesTab({ scope }: { scope: Scope }) {
 
   return (
     <div className="max-w-3xl mx-auto">
+      {/* S2.6 — autosave status. Fixed-height strip so state flips don't shift the canvas. */}
+      <div className="h-5 flex items-center justify-end" aria-live="polite">
+        <SaveStatus state={saveState} savedKey={latestSave?.submittedAt ?? 0} />
+      </div>
       {blocks.map((b, i) => (
         <BlockRow
           key={b.id}
@@ -820,6 +864,62 @@ function guessEmbedKind(url: string): 'figma' | 'github' | 'drive' | 'link' {
     /* fallthrough */
   }
   return 'link';
+}
+
+// ============================================================================
+// SaveStatus — truthful autosave indicator for the canvas header (S2.6)
+// ============================================================================
+
+type SaveState = 'idle' | 'unsaved' | 'saving' | 'saved' | 'error';
+
+function SaveStatus({ state, savedKey }: { state: SaveState; savedKey: number }) {
+  // "Saved ✓" lingers ~2s after a successful write, then fades out. Keyed on
+  // the mutation's submittedAt so each fresh save re-shows it.
+  const [faded, setFaded] = useState(false);
+  useEffect(() => {
+    setFaded(false);
+    if (state !== 'saved') return;
+    const t = setTimeout(() => setFaded(true), 2000);
+    return () => clearTimeout(t);
+  }, [state, savedKey]);
+
+  if (state === 'idle') return null;
+  if (state === 'unsaved') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-amber-600">
+        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+        Unsaved changes
+      </span>
+    );
+  }
+  if (state === 'saving') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+        <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-pulse" />
+        Saving…
+      </span>
+    );
+  }
+  if (state === 'error') {
+    // Truth of the mechanism: the PATCH is fire-and-forget with no automatic
+    // retry — only the next edit re-sends the doc (it's a full replace).
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-red-600">
+        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+        Save failed — not retried automatically; edit again to resend
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-xs text-emerald-600 transition-opacity duration-700 ${
+        faded ? 'opacity-0' : 'opacity-100'
+      }`}
+    >
+      <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+      Saved
+    </span>
+  );
 }
 
 // ============================================================================

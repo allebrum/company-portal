@@ -65,8 +65,8 @@ function Inner() {
       <div className="max-w-md mx-auto pt-16 px-4 text-center">
         <h1 className="text-xl font-bold text-gray-900">Sign-in link expired</h1>
         <p className="text-sm text-gray-500 mt-2">
-          This link is no longer valid. They&apos;re single-use and expire 30 days after
-          they&apos;re issued.
+          This link is no longer valid. Sign-in links are single-use, and each link
+          expires 30 days after it&apos;s sent.
         </p>
         <Link
           href={`/portal/login?slug=${encodeURIComponent(slug)}`}
@@ -89,7 +89,7 @@ function Inner() {
 
 export default function PortalAccessPage() {
   return (
-    <Suspense fallback={<div className="text-sm text-gray-400 p-8 text-center">Loading…</div>}>
+    <Suspense fallback={<div className="text-sm text-gray-500 p-8 text-center">Loading…</div>}>
       <Inner />
     </Suspense>
   );

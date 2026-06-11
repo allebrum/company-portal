@@ -1,11 +1,26 @@
 'use client';
 
-import { Suspense, useEffect } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowRight, Calendar, FileText, Target } from 'lucide-react';
-import { usePortalMe, usePortalOverview } from '@/hooks/usePortal';
+import { ArrowRight, Calendar, CheckCircle2, FileText, Target } from 'lucide-react';
+import {
+  usePortalMe,
+  usePortalOverview,
+  useSignOffMilestone,
+  type PortalMilestoneRow,
+  type PortalProjectRow,
+} from '@/hooks/usePortal';
 import { PortalHeader } from '@/components/portal/PortalHeader';
+
+const HEALTH_LABEL: Record<NonNullable<PortalProjectRow['health']>, { text: string; dot: string }> = {
+  'on-track': { text: 'On track', dot: 'bg-green-500' },
+  'at-risk': { text: 'At risk', dot: 'bg-amber-500' },
+  'off-track': { text: 'Off track', dot: 'bg-red-500' },
+};
+
+const shortDate = (iso: string) =>
+  new Date(`${iso}T00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
 function Page() {
   const search = useSearchParams();
@@ -62,7 +77,7 @@ function Page() {
           {!data ? (
             <SkeletonBlock />
           ) : data.projects.length === 0 ? (
-            <Empty title="No projects yet" description="Your team will add them as work kicks off." />
+            <Empty title="Nothing here yet" description="Your team usually adds projects after kickoff." />
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {data.projects.map((p) => (
@@ -82,8 +97,16 @@ function Page() {
                       <div className="text-sm font-semibold text-gray-900 truncate group-hover:text-brand-700">
                         {p.name}
                       </div>
-                      <div className="text-[11px] text-gray-500">
-                        {p.goalCount} {p.goalCount === 1 ? 'goal' : 'goals'} · {p.avgProgress}%
+                      <div className="text-[11px] text-gray-500 truncate">
+                        {p.health && (
+                          <span className="inline-flex items-center gap-1 font-semibold text-gray-700">
+                            <span className={`w-1.5 h-1.5 rounded-full ${HEALTH_LABEL[p.health].dot}`} />
+                            {HEALTH_LABEL[p.health].text}
+                            {' · '}
+                          </span>
+                        )}
+                        {p.avgProgress}% complete
+                        {p.nextMilestone && ` · next: ${p.nextMilestone.title} ${shortDate(p.nextMilestone.date)}`}
                       </div>
                     </div>
                     <ArrowRight className="w-4 h-4 text-gray-300 group-hover:text-brand-700 transition-colors" />
@@ -104,7 +127,7 @@ function Page() {
           {!data ? (
             <SkeletonBlock />
           ) : data.inFlightGoals.length === 0 ? (
-            <Empty title="No goals in flight" description="Everything that's been started is wrapped up." />
+            <Empty title="Nothing in motion right now" description="Goals your team is actively working on will appear here." />
           ) : (
             <ul className="rounded-xl border border-gray-200 bg-white divide-y divide-gray-100">
               {data.inFlightGoals.map((g) => (
@@ -124,7 +147,7 @@ function Page() {
                           style={{ width: `${g.progress}%` }}
                         />
                       </div>
-                      <div className="text-[10px] text-gray-400 tabular-nums mt-0.5 text-right">
+                      <div className="text-[10px] text-gray-500 tabular-nums mt-0.5 text-right">
                         {g.progress}%
                       </div>
                     </div>
@@ -139,19 +162,11 @@ function Page() {
           {!data ? (
             <SkeletonBlock />
           ) : data.upcomingMilestones.length === 0 ? (
-            <Empty title="No milestones in the next 90 days" />
+            <Empty title="No milestones on the calendar yet" description="Dates your team sets for the next 90 days will appear here." />
           ) : (
             <ul className="rounded-xl border border-gray-200 bg-white divide-y divide-gray-100">
               {data.upcomingMilestones.map((m) => (
-                <li key={m.id} className="px-4 py-2.5 flex items-center gap-3">
-                  <span className="text-[11px] uppercase tracking-wider font-bold text-gray-500 w-16 tabular-nums">
-                    {m.date}
-                  </span>
-                  <span className="text-sm font-semibold text-gray-900 truncate">{m.title}</span>
-                  <span className="ml-auto text-[10px] uppercase tracking-wider bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">
-                    {m.kind}
-                  </span>
-                </li>
+                <MilestoneRow key={m.id} milestone={m} />
               ))}
             </ul>
           )}
@@ -168,6 +183,97 @@ function Page() {
         )}
       </div>
     </>
+  );
+}
+
+/**
+ * S3.2: a milestone row the client can APPROVE. Unsigned → an "Approve"
+ * button that expands a small optional-comment form; signed → a green
+ * confirmation with who/when (+ the comment). Errors render inline — the
+ * portal has no toast surface, and the state change itself is the feedback.
+ */
+function MilestoneRow({ milestone: m }: { milestone: PortalMilestoneRow }) {
+  const signOff = useSignOffMilestone();
+  const [formOpen, setFormOpen] = useState(false);
+  const [comment, setComment] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const onApprove = async () => {
+    setError(null);
+    try {
+      await signOff.mutateAsync({ id: m.id, comment });
+      setFormOpen(false);
+    } catch (e) {
+      setError(e instanceof Error && /already_signed/.test(e.message)
+        ? 'Someone already approved this — refresh to see it.'
+        : 'Could not record your approval. Please try again.');
+    }
+  };
+
+  return (
+    <li className="px-4 py-2.5">
+      <div className="flex items-center gap-3">
+        <span className="text-[11px] uppercase tracking-wider font-bold text-gray-500 w-16 tabular-nums shrink-0">
+          {m.date}
+        </span>
+        <span className="text-sm font-semibold text-gray-900 truncate">{m.title}</span>
+        <span className="ml-auto text-[10px] uppercase tracking-wider bg-gray-100 text-gray-600 rounded-full px-2 py-0.5 shrink-0">
+          {m.kind}
+        </span>
+        {m.signOff ? (
+          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-700 shrink-0">
+            <CheckCircle2 className="w-3.5 h-3.5" /> Approved
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setFormOpen((v) => !v)}
+            className="shrink-0 text-[11px] font-bold text-brand-700 hover:text-brand-800 border border-brand-200 hover:border-brand-300 hover:bg-brand-50 rounded-lg px-2.5 py-1"
+          >
+            Approve
+          </button>
+        )}
+      </div>
+
+      {m.signOff && (
+        <div className="mt-1 ml-[76px] text-[11px] text-gray-500">
+          Approved{m.signOff.by ? ` by ${m.signOff.by}` : ''} ·{' '}
+          {new Date(m.signOff.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+          {m.signOff.comment && <span className="italic"> — “{m.signOff.comment}”</span>}
+        </div>
+      )}
+
+      {!m.signOff && formOpen && (
+        <div className="mt-2 ml-[76px] flex flex-col sm:flex-row gap-2">
+          <input
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Optional comment (e.g. looks great, one note…)"
+            maxLength={1000}
+            autoFocus
+            className="flex-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent"
+          />
+          <div className="flex gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => { setFormOpen(false); setError(null); }}
+              className="text-xs font-semibold text-gray-500 hover:text-gray-700 px-2"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void onApprove()}
+              disabled={signOff.isPending}
+              className="text-xs font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-3 py-1.5 disabled:opacity-60"
+            >
+              {signOff.isPending ? 'Approving…' : 'Confirm approval'}
+            </button>
+          </div>
+        </div>
+      )}
+      {error && <div className="mt-1 ml-[76px] text-[11px] text-red-600">{error}</div>}
+    </li>
   );
 }
 
@@ -208,7 +314,7 @@ function PortalLoading({ slug }: { slug: string }) {
   return (
     <>
       <PortalHeader slug={slug} me={null} active={null} />
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 text-center text-sm text-gray-400">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 text-center text-sm text-gray-500">
         Loading…
       </div>
     </>
@@ -217,7 +323,7 @@ function PortalLoading({ slug }: { slug: string }) {
 
 export default function PortalOverviewPage() {
   return (
-    <Suspense fallback={<div className="text-sm text-gray-400 p-8 text-center">Loading…</div>}>
+    <Suspense fallback={<div className="text-sm text-gray-500 p-8 text-center">Loading…</div>}>
       <Page />
     </Suspense>
   );

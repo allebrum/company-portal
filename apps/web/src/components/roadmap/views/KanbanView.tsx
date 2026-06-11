@@ -46,8 +46,13 @@ export function KanbanView(props: ViewProps) {
         }));
       }
       case 'client': {
-        const ids = Array.from(new Set(goals.map((g) => g.clientId)));
-        return ids.map((id) => ({ id, label: props.clients.find((c) => c.id === id)?.name ?? 'Client', color: props.clients.find((c) => c.id === id)?.color ?? '#9ca3af' }));
+        // null clientId = workspace-level goal → its own "Workspace" column.
+        const ids = Array.from(new Set(goals.map((g) => g.clientId ?? 'none')));
+        return ids.map((id) => ({
+          id,
+          label: id === 'none' ? 'Workspace' : props.clients.find((c) => c.id === id)?.name ?? 'Client',
+          color: id === 'none' ? '#9ca3af' : props.clients.find((c) => c.id === id)?.color ?? '#9ca3af',
+        }));
       }
       case 'status':
       default:
@@ -60,7 +65,7 @@ export function KanbanView(props: ViewProps) {
       case 'priority': return g.priority;
       case 'owner': return g.ownerId ?? 'none';
       case 'epic': return g.epicId ?? 'none';
-      case 'client': return g.clientId;
+      case 'client': return g.clientId ?? 'none';
       case 'status':
       default: return bucketStatus(g.status, statuses);
     }
