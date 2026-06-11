@@ -41,8 +41,9 @@ export async function createGoal(input: CreateGoalInput, whoId: string): Promise
   // user owner null so the XOR CHECK holds.
   const ownerId = input.ownerGroupId != null ? null : (input.ownerId ?? null);
   const [row] = await db.insert(goals).values(stampTenant({
-    clientId: input.clientId,
-    projectId: input.projectId,
+    // Both nullable since 0026 — null/null = workspace-level goal.
+    clientId: input.clientId ?? null,
+    projectId: input.projectId ?? null,
     title: input.title,
     description: input.description ?? null,
     status: input.status,
@@ -194,6 +195,10 @@ export async function uploadGoalResource(
 
   if (!(await driveIsConnected())) {
     throw new HttpError(503, 'drive_not_connected');
+  }
+  // Workspace-level goals (no project) have no Drive folder to upload into.
+  if (!goal.projectId) {
+    throw new HttpError(400, 'goal_has_no_project');
   }
 
   // Lazy-backfills client + project folders as needed, returns project folder id.

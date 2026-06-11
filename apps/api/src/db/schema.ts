@@ -379,8 +379,12 @@ export const projects = pgTable('projects', {
 export const goals = pgTable('goals', {
   id: uuid('id').defaultRandom().primaryKey(),
   tenantId: tenantRef(),
-  clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'restrict' }),
-  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'restrict' }),
+  // Nullable since 0026: a goal with neither client nor project is a
+  // WORKSPACE-level goal (strategic/internal work that isn't client
+  // delivery). Client-only goals are also allowed; a project implies its
+  // client at the UI layer.
+  clientId: uuid('client_id').references(() => clients.id, { onDelete: 'restrict' }),
+  projectId: uuid('project_id').references(() => projects.id, { onDelete: 'restrict' }),
   title: text('title').notNull(),
   // Free-form status string. The default workflow uses GOAL_STATUSES
   // (backlog/in-progress/review/done) but projects may define custom

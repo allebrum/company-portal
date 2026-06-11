@@ -5,8 +5,10 @@ import { ChecklistItemSchema } from './todo';
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD');
 
 export const CreateGoalSchema = z.object({
-  clientId: z.string().uuid(),
-  projectId: z.string().uuid(),
+  // Both optional since 0026: neither → a workspace-level goal; client-only
+  // is allowed; a project requires its client (refined below).
+  clientId: z.string().uuid().nullable().optional(),
+  projectId: z.string().uuid().nullable().optional(),
   title: z.string().min(1).max(240),
   description: z.string().max(10_000).nullable().optional(),
   // Free-form status (default workflow OR a project's custom workflow id).

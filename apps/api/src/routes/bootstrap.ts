@@ -12,6 +12,8 @@ import { listIntegrations, listDriveFolders, listDriveItems } from '../services/
 import { listActivity } from '../services/activity.js';
 import { getEffectivePermissions } from '../auth/permissions.js';
 import { getUserGroupIds } from '../services/rbac.js';
+import { getTenant } from '../services/tenants.js';
+import { billingEnforced } from '../env.js';
 
 export const bootstrapRouter = Router();
 
@@ -38,6 +40,7 @@ bootstrapRouter.get('/', async (req, res, next) => {
       driveFolders,
       driveItems,
       activity,
+      tenant,
     ] = await Promise.all([
       getUser(me.userId),
       getUserGroupIds(me.userId),
@@ -54,6 +57,7 @@ bootstrapRouter.get('/', async (req, res, next) => {
       listDriveFolders(),
       listDriveItems(),
       listActivity(30),
+      getTenant(me.tenantId),
     ]);
     res.json({
       me: meRow ? { ...meRow, permissions: [...permSet], groupIds } : null,
@@ -70,6 +74,18 @@ bootstrapRouter.get('/', async (req, res, next) => {
       driveFolders,
       driveItems,
       activity,
+      // Billing surface for in-app pre-warnings (trial countdown banner).
+      // Null when billing isn't enforced (self-host) or the workspace is
+      // exempt — the web renders no banner in that case. past_due/canceled
+      // never reach here (the subscription gate 402s bootstrap first).
+      billing:
+        billingEnforced && tenant && !tenant.billingExempt
+          ? {
+              status: tenant.billingStatus,
+              trialEndsAt: tenant.trialEndsAt,
+              hasPaymentMethod: !!tenant.stripePaymentMethodId,
+            }
+          : null,
     });
   } catch (e) {
     next(e);
