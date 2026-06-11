@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Download } from 'lucide-react';
 import { Card, Pill, Empty, Section } from '@/components/ui';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
@@ -36,6 +37,7 @@ import {
   PAY_PERIOD_STATUS_LABEL,
   PAY_PERIOD_STATUS_PILL,
 } from '@/lib/formatters';
+import { toCsv, downloadCsv } from '@/lib/csv';
 
 export default function ApprovalsPage() {
   const { me, can } = useAuth();
@@ -453,6 +455,25 @@ function PeriodReviewModal({
   const summaries = [...byUser.values()].sort((a, b) => a.name.localeCompare(b.name));
   const totalHours = summaries.reduce((s, r) => s + r.hours, 0);
   const totalRev = summaries.reduce((s, r) => s + r.revenue, 0);
+  // CSV export of the visible summary rows. Underlying numbers, not
+  // display strings — hours as a decimal, revenue as plain dollars —
+  // so the bookkeeper can sum them without stripping "h" / "$".
+  const exportSummaryCsv = () => {
+    const slug =
+      period.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+      || period.endDate;
+    const csv = toCsv(
+      ['Employee', 'Email', 'Hours', 'Billable revenue', 'Approvers'],
+      summaries.map((r) => [
+        r.name,
+        r.email,
+        Number(r.hours.toFixed(2)),
+        Number(r.revenue.toFixed(2)),
+        [...r.approverNames].sort().join(', '),
+      ]),
+    );
+    downloadCsv(`payroll-${slug}.csv`, csv);
+  };
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleExpanded = (userId: string) => {
     setExpanded((prev) => {
@@ -546,7 +567,7 @@ function PeriodReviewModal({
               <Button
                 variant="outline"
                 disabled={acting.length === 0 || rejectMut.isPending}
-                onClick={() => setRejectFormOpen((v) => !v)}
+                onClick={() => setRejectFormOpen(true)}
               >
                 Return {selected.size > 0 ? `(${selected.size})` : '(all)'}
               </Button>
@@ -561,21 +582,32 @@ function PeriodReviewModal({
           </div>
         )}
 
-        {/* Inline reject-note form (slides open under the toolbar) */}
-        {rejectFormOpen && canMutate && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-4 space-y-2">
-            <div className="text-sm font-semibold text-amber-900">
-              Returning {acting.length} {acting.length === 1 ? 'entry' : 'entries'} to the submitter
+        {/* Reject-note modal — replaces the old inline amber panel, which
+            pushed the entries table off-screen on mobile when combined with
+            the toolbar. Same handler + pending state; only the surface moved.
+            layerBase lifts it above this (screen-size) review modal, matching
+            the QrUploadModal nesting precedent. */}
+        {canMutate && (
+          <Modal
+            open={rejectFormOpen}
+            onClose={() => setRejectFormOpen(false)}
+            title={`Returning ${acting.length} ${acting.length === 1 ? 'entry' : 'entries'} to the submitter`}
+            size="md"
+            layerBase={140}
+            footer={
+              <>
+                <Button variant="ghost" onClick={() => setRejectFormOpen(false)}>Cancel</Button>
+                <Button variant="danger" disabled={rejectMut.isPending} onClick={() => void doReject()}>
+                  Send back {acting.length}
+                </Button>
+              </>
+            }
+          >
+            <div className="space-y-2">
+              <p className="text-[12px] text-gray-600">The owner will see the note below alongside each entry.</p>
+              <Textarea autoFocus value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} rows={3} />
             </div>
-            <p className="text-[12px] text-amber-800">The owner will see the note below alongside each entry.</p>
-            <Textarea value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} rows={3} />
-            <div className="flex items-center justify-end gap-2">
-              <Button variant="ghost" onClick={() => setRejectFormOpen(false)}>Cancel</Button>
-              <Button variant="danger" onClick={() => void doReject()}>
-                Send back {acting.length}
-              </Button>
-            </div>
-          </div>
+          </Modal>
         )}
 
         {/* Employee filter ribbon — both a search box and chip multi-
@@ -716,8 +748,18 @@ function PeriodReviewModal({
         {/* Per-employee payroll summary */}
         {summaries.length > 0 && (
           <div>
-            <div className="text-[11px] uppercase tracking-widest font-bold text-gray-400 mb-1">
-              Payroll summary · final check before {isClosed ? 'reopen' : 'close'}
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+              <div className="text-[11px] uppercase tracking-widest font-bold text-gray-400">
+                Payroll summary · final check before {isClosed ? 'reopen' : 'close'}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={exportSummaryCsv}
+                title="Download this per-employee summary as a CSV"
+              >
+                <Download className="w-3.5 h-3.5" /> Download CSV
+              </Button>
             </div>
             <div className="border border-gray-200 rounded-xl overflow-hidden">
               <table className="w-full text-sm">

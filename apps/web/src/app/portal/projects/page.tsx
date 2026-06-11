@@ -32,8 +32,8 @@ function Inner() {
           <div className="rounded-xl bg-gray-100 animate-pulse h-40" />
         ) : projects.data.length === 0 ? (
           <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-8 text-center">
-            <div className="font-semibold text-gray-700">No projects yet</div>
-            <p className="mt-1 text-sm text-gray-500">Your team will add them as work kicks off.</p>
+            <div className="font-semibold text-gray-700">Nothing here yet</div>
+            <p className="mt-1 text-sm text-gray-500">Your team usually adds projects after kickoff.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -61,7 +61,7 @@ function Inner() {
                     <div className="text-xl font-bold tabular-nums" style={{ color: p.color }}>
                       {p.avgProgress}%
                     </div>
-                    <div className="text-[10px] uppercase tracking-widest text-gray-400">
+                    <div className="text-[10px] uppercase tracking-widest text-gray-500">
                       Progress
                     </div>
                   </div>
@@ -83,7 +83,7 @@ function Inner() {
 
 export default function PortalProjectsPage() {
   return (
-    <Suspense fallback={<div className="text-sm text-gray-400 p-8 text-center">Loading…</div>}>
+    <Suspense fallback={<div className="text-sm text-gray-500 p-8 text-center">Loading…</div>}>
       <Inner />
     </Suspense>
   );

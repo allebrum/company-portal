@@ -24,7 +24,8 @@ function Inner() {
         <h1 className="text-xl font-bold text-gray-900">Check your email</h1>
         <p className="text-sm text-gray-600 mt-2">
           If <span className="font-semibold text-gray-900">{email ?? 'that address'}</span> is on
-          the invite list, a one-time sign-in link is on the way. It expires in 30 days.
+          the invite list, a one-time sign-in link is on the way. The link expires 30 days
+          after it&apos;s sent.
         </p>
         <p className="text-[12px] text-gray-500 mt-3">
           Didn&apos;t get it? Check spam, or{' '}
@@ -44,7 +45,7 @@ function Inner() {
 
 export default function CheckEmailPage() {
   return (
-    <Suspense fallback={<div className="text-sm text-gray-400 p-8 text-center">Loading…</div>}>
+    <Suspense fallback={<div className="text-sm text-gray-500 p-8 text-center">Loading…</div>}>
       <Inner />
     </Suspense>
   );

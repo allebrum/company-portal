@@ -92,8 +92,14 @@ export function CalendarView(props: ViewProps) {
                   <div key={di} className={`border-r border-gray-50 px-1.5 py-1 ${inMonth ? '' : 'bg-gray-50/40'}`}>
                     <div className={`text-[11px] font-bold ${isToday ? 'bg-brand-600 text-white w-5 h-5 rounded-full flex items-center justify-center' : inMonth ? 'text-gray-700' : 'text-gray-300'}`}>{day.getDate()}</div>
                     {dayMs.map((m) => (
-                      <div key={m.id} className="mt-0.5 inline-flex items-center gap-1 px-1 py-0.5 rounded text-[9px] font-semibold truncate max-w-full" style={{ backgroundColor: `${m.color}15`, color: m.color }}>
+                      <div
+                        key={m.id}
+                        className="mt-0.5 inline-flex items-center gap-1 px-1 py-0.5 rounded text-[9px] font-semibold truncate max-w-full"
+                        style={{ backgroundColor: `${m.color}15`, color: m.color }}
+                        title={m.signedOffAt ? `Client approved${m.signOffComment ? ` — “${m.signOffComment}”` : ''}` : m.title}
+                      >
                         <span className="w-1.5 h-1.5 rotate-45 shrink-0" style={{ backgroundColor: m.color }} /> {m.title}
+                        {m.signedOffAt && <span aria-label="Client approved" className="shrink-0 font-bold">✓</span>}
                       </div>
                     ))}
                     {overflowByDay[di] ? <div className="mt-0.5 text-[9px] text-gray-400">+{overflowByDay[di]} more</div> : null}

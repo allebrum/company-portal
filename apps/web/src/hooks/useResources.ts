@@ -160,6 +160,10 @@ export type MilestoneRow = {
   date: string;
   kind: 'release' | 'review' | 'deadline' | 'phase';
   color: string;
+  // S3.2 client sign-off — null until a portal contact approves it.
+  signedOffAt: string | null;
+  signedOffByContactId: string | null;
+  signOffComment: string | null;
 };
 export type TodoRow = {
   id: string;
