@@ -7,6 +7,7 @@ import { emit } from '../realtime/emit.js';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { tenantEq, stampTenant } from '../tenancy/scope.js';
+import { syncTicketForTodoStatus } from './tickets.js';
 
 /** Returns all todos visible to viewerId — public ones + private ones assigned to viewer. */
 export async function listVisibleTodos(viewerId: string): Promise<Todo[]> {
@@ -128,6 +129,11 @@ export async function updateTodo(id: string, patch: UpdateTodoInput, whoId: stri
   } else {
     emitTodo('updated', row, whoId);
   }
+  // Sprint 4: completing a ticket-linked todo resolves the ticket (and
+  // reopening pulls a resolved one back). No-ops for ordinary todos.
+  if (patch.status !== undefined && patch.status !== before.status) {
+    await syncTicketForTodoStatus(row.id, row.status, whoId);
+  }
   return row;
 }
 
@@ -145,6 +151,7 @@ export async function toggleTodo(id: string, whoId: string): Promise<Todo> {
   if (next === 'done') {
     await appendActivity({ whoId, kind: 'todo.done', target: row.title });
   }
+  await syncTicketForTodoStatus(row.id, row.status, whoId);
   return row;
 }
 

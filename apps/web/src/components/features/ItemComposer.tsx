@@ -27,7 +27,8 @@ import { QuickAddTodo } from '@/components/features/QuickAddTodo';
 import { QrUploadModal } from '@/components/upload/QrUploadModal';
 import { statusesForScope, HEALTH_TONE } from '@/lib/roadmap';
 import { EpicChip } from '@/components/composer/chips/EpicChip';
-import { Activity, Gauge, Layers } from 'lucide-react';
+import { Activity, Gauge, Layers, MessageSquare } from 'lucide-react';
+import { useSpace } from '@/contexts/SpaceContext';
 import { PropertyCell } from '@/components/composer/PropertyCell';
 import { Checklist } from '@/components/composer/Checklist';
 import { UserChip } from '@/components/composer/chips/UserChip';
@@ -75,6 +76,7 @@ export function ItemComposer(props: ItemComposerProps) {
   const toast = useToast();
   const confirmDialog = useConfirm();
   const { me } = useAuth();
+  const { openSpace } = useSpace();
 
   // Shared lookups (one set of hooks for everything in the composer).
   const { data: users = [] } = useUsers();
@@ -551,6 +553,23 @@ export function ItemComposer(props: ItemComposerProps) {
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {/* Sprint 4: ticket-linked todos carry the `ticket` tag — link
+                staff back to the conversation in the client's Tickets tab.
+                Completing this to-do resolves the ticket automatically. */}
+            {mode === 'todo' && props.todo?.tags?.includes('ticket') && props.todo.clientId && (
+              <button
+                type="button"
+                onClick={() => {
+                  openSpace({ kind: 'client', id: props.todo!.clientId! }, { tab: 'tickets' });
+                  onClose();
+                }}
+                className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-blue-50 text-blue-700 text-[12px] font-semibold px-2.5 py-1.5 hover:bg-blue-100 transition-colors"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                From a client ticket — open the conversation
+              </button>
+            )}
 
             <input
               autoFocus

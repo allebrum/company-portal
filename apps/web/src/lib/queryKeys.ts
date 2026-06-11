@@ -8,6 +8,7 @@ export const qk = {
   epics: ['epics'] as const,
   milestones: ['milestones'] as const,
   todos: ['todos'] as const,
+  tickets: ['tickets'] as const,
   entries: (params?: Record<string, unknown>) => (params ? (['entries', params] as const) : (['entries'] as const)),
   timers: ['timers'] as const,
   payPeriods: ['payPeriods'] as const,

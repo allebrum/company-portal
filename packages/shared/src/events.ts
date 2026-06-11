@@ -21,6 +21,10 @@ export const EV = {
   TODO_CREATED: 'todo:created',
   TODO_UPDATED: 'todo:updated',
   TODO_DELETED: 'todo:deleted',
+  // tickets (Sprint 4)
+  TICKET_CREATED: 'ticket:created',
+  TICKET_UPDATED: 'ticket:updated',
+  TICKET_MESSAGE: 'ticket:message',
   // entries
   ENTRY_CREATED: 'entry:created',
   ENTRY_UPDATED: 'entry:updated',
@@ -97,6 +101,9 @@ export interface ServerToClientEvents {
   [EV.TODO_CREATED]: (p: IdPayload) => void;
   [EV.TODO_UPDATED]: (p: IdPayload) => void;
   [EV.TODO_DELETED]: (p: IdPayload) => void;
+  [EV.TICKET_CREATED]: (p: IdPayload) => void;
+  [EV.TICKET_UPDATED]: (p: IdPayload) => void;
+  [EV.TICKET_MESSAGE]: (p: IdPayload) => void;
   [EV.ENTRY_CREATED]: (p: IdPayload) => void;
   [EV.ENTRY_UPDATED]: (p: IdPayload) => void;
   [EV.ENTRY_DELETED]: (p: IdPayload) => void;

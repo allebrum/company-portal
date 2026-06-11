@@ -42,6 +42,10 @@ function LiveEventBindings(): null {
     s.on(EV.TODO_UPDATED, () => invalidate([qk.todos]));
     s.on(EV.TODO_DELETED, () => invalidate([qk.todos]));
 
+    s.on(EV.TICKET_CREATED, () => invalidate([qk.tickets]));
+    s.on(EV.TICKET_UPDATED, () => invalidate([qk.tickets, qk.todos]));
+    s.on(EV.TICKET_MESSAGE, () => invalidate([qk.tickets]));
+
     s.on(EV.ENTRY_CREATED, () => invalidate([['entries']]));
     s.on(EV.ENTRY_UPDATED, () => invalidate([['entries']]));
     s.on(EV.ENTRY_DELETED, () => invalidate([['entries']]));
