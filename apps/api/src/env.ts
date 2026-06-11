@@ -49,6 +49,13 @@ const EnvSchema = z.object({
   // separate static site. (z.coerce.boolean would treat "false" as truthy.)
   SERVE_WEB: z.string().optional().transform((v) => v === 'true' || v === '1'),
   WEB_DIST_DIR: z.string().optional(),                // path to apps/web/out (defaults derived in index.ts)
+  // PostHog Support widget — the team's `secret_api_token` from PostHog
+  // Support settings. Used ONLY to HMAC-sign the session user's distinct id
+  // (GET /auth/posthog-identity) so support tickets follow the user across
+  // browsers/devices. Optional → when unset the endpoint returns a null hash
+  // and the widget falls back to browser-session tickets. Never sent to the
+  // client; only the hash is.
+  POSTHOG_IDENTITY_SECRET: z.string().optional(),
   // Instance-level: is email+password login offered AT ALL on this deployment?
   // Default true; a pure-SSO self-host sets PASSWORD_LOGIN_ENABLED=false to hide
   // it entirely. This is the shared-login-page gate — per-WORKSPACE password
