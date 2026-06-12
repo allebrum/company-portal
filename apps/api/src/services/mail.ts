@@ -372,6 +372,71 @@ export async function sendResetEmail(args: {
   await send(args.senderUserId, args.to, subject, html, text);
 }
 
+/**
+ * Sprint 4 follow-up — client-facing ticket notifications. Sent to the
+ * portal contact who opened the ticket whenever STAFF act on it (reply, or
+ * a status change the client should know about). Client-initiated changes
+ * never email the client back. Sender = the acting staffer's connected
+ * Gmail; the usual log-and-noop fallback applies when not connected.
+ */
+export async function sendTicketUpdateEmail(args: {
+  senderUserId: string | null;
+  to: string;
+  contactName: string;
+  clientName: string;
+  ticketTitle: string;
+  kind: 'reply' | 'waiting_on_client' | 'resolved' | 'closed';
+  /** Staff reply body — included (truncated) when kind === 'reply'. */
+  message?: string;
+  portalUrl: string;
+}): Promise<void> {
+  const COPY: Record<typeof args.kind, { subject: string; lead: string; cta: string }> = {
+    reply: {
+      subject: `New reply on “${args.ticketTitle}”`,
+      lead: 'The team replied on your ticket:',
+      cta: 'View the conversation',
+    },
+    waiting_on_client: {
+      subject: `Your input is needed on “${args.ticketTitle}”`,
+      lead: 'The team needs something from you before this ticket can move forward.',
+      cta: 'Reply in the portal',
+    },
+    resolved: {
+      subject: `Resolved: “${args.ticketTitle}”`,
+      lead: 'The team marked your ticket as resolved. If this isn’t sorted, just reply in the portal — that reopens it automatically.',
+      cta: 'View the ticket',
+    },
+    closed: {
+      subject: `Closed: “${args.ticketTitle}”`,
+      lead: 'Your ticket has been closed. Need anything else? Open a new ticket any time.',
+      cta: 'Open the portal',
+    },
+  };
+  const c = COPY[args.kind];
+  const snippet = args.message ? (args.message.length > 600 ? `${args.message.slice(0, 600)}…` : args.message) : null;
+
+  const text = [
+    `Hi ${args.contactName},`,
+    '',
+    c.lead,
+    ...(snippet ? ['', `> ${snippet.replace(/\n/g, '\n> ')}`] : []),
+    '',
+    `${c.cta}: ${args.portalUrl}`,
+    '',
+    'Sign in with this email address if your session has expired.',
+  ].join('\n');
+  const html = wrap(`
+    <h2 style="margin:0 0 12px 0;font-size:20px;color:#111;">${esc(c.subject)}</h2>
+    <p style="margin:0 0 16px 0;color:#374151;">Hi ${esc(args.contactName)}, ${esc(c.lead)}</p>
+    ${snippet ? `<blockquote style="margin:0 0 16px 0;padding:12px 16px;background:#f9fafb;border-left:3px solid #9333ea;border-radius:6px;color:#374151;white-space:pre-wrap;">${esc(snippet)}</blockquote>` : ''}
+    ${button(args.portalUrl, c.cta)}
+    <p style="margin:24px 0 0 0;font-size:12px;color:#9ca3af;">
+      This is the ${esc(args.clientName)} portal. Sign in with this email address if your session has expired.
+    </p>
+  `);
+  await send(args.senderUserId, args.to, c.subject, html, text);
+}
+
 // ---- HTML helpers ----
 
 function wrap(body: string): string {

@@ -5,10 +5,13 @@ import {
   ticketMessages,
   todos,
   projects,
+  clients,
   clientContacts,
   users,
   type Ticket,
 } from '../db/schema.js';
+import { env } from '../env.js';
+import { sendTicketUpdateEmail } from './mail.js';
 import type { CreateTicketInput, UpdateTicketInput, TicketRow, TicketMessageRow, TicketDetail, TicketStatus } from '@allebrum/shared';
 import { EV } from '@allebrum/shared';
 import { emit } from '../realtime/emit.js';
@@ -30,6 +33,51 @@ import { tenantEq, stampTenant } from '../tenancy/scope.js';
  */
 
 const DONE_STATUSES: TicketStatus[] = ['resolved', 'closed'];
+
+// Staff-driven status changes the CLIENT should hear about. `open` /
+// `in_progress` are internal workflow noise from the client's seat.
+const CLIENT_NOTIFY_STATUSES: TicketStatus[] = ['waiting_on_client', 'resolved', 'closed'];
+
+/**
+ * Email the ticket's opening contact about a staff action. Best-effort:
+ * failures log and never break the surrounding mutation (same posture as
+ * the rest of the mail layer). No-ops when the contact was deleted.
+ */
+async function notifyContact(
+  ticket: Ticket,
+  kind: 'reply' | 'waiting_on_client' | 'resolved' | 'closed',
+  opts: { byUserId: string | null; message?: string },
+): Promise<void> {
+  if (!ticket.contactId) return;
+  try {
+    const [contact] = await db
+      .select({ name: clientContacts.name, email: clientContacts.email })
+      .from(clientContacts)
+      .where(eq(clientContacts.id, ticket.contactId))
+      .limit(1);
+    if (!contact) return;
+    const [client] = await db
+      .select({ name: clients.name, slug: clients.portalSlug })
+      .from(clients)
+      .where(eq(clients.id, ticket.clientId))
+      .limit(1);
+    const portalUrl = client?.slug
+      ? `${env.WEB_ORIGIN}/portal/tickets?slug=${encodeURIComponent(client.slug)}&ticket=${ticket.id}`
+      : `${env.WEB_ORIGIN}/portal`;
+    await sendTicketUpdateEmail({
+      senderUserId: opts.byUserId,
+      to: contact.email,
+      contactName: contact.name,
+      clientName: client?.name ?? 'client',
+      ticketTitle: ticket.title,
+      kind,
+      message: opts.message,
+      portalUrl,
+    });
+  } catch (e) {
+    console.error('[tickets] contact notification failed', e);
+  }
+}
 
 // ---- Row shaping --------------------------------------------------------
 
@@ -226,6 +274,9 @@ export async function addTicketMessage(input: {
       kind: 'ticket.message',
       target: `${input.author.name} replied on ticket “${ticket.title}”${reopened ? ' (reopened)' : ''}`,
     });
+  } else {
+    // Staff replied → tell the client. Their own replies never email them.
+    await notifyContact(ticket, 'reply', { byUserId: input.author.userId, message: input.body });
   }
 
   const [shaped] = await shapeMessages(ticket.id).then((ms) => ms.filter((m) => m.id === row.id));
@@ -262,6 +313,14 @@ async function applyTicketStatus(ticket: Ticket, status: TicketStatus, byUserId:
     }
   }
   emit.toOrg(EV.TICKET_UPDATED, { id: ticket.id, by: byUserId, at: now });
+
+  // Client notification — STAFF-driven transitions only (byUserId set: the
+  // staff PATCH and the linked-todo completion hook both carry the acting
+  // user; the client-reply reopen passes null and is skipped). `open` /
+  // `in_progress` are internal noise from the client's seat.
+  if (byUserId && CLIENT_NOTIFY_STATUSES.includes(status)) {
+    await notifyContact(ticket, status as 'waiting_on_client' | 'resolved' | 'closed', { byUserId });
+  }
 }
 
 export async function updateTicket(id: string, patch: UpdateTicketInput, whoUserId: string): Promise<TicketRow> {
