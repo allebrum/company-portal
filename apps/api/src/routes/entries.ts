@@ -10,6 +10,9 @@ import {
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requirePermission, userCan } from '../auth/permissions.js';
 import { validate, getValidated } from '../middleware/validate.js';
+import { isMember } from '../services/tenants.js';
+import { getUser } from '../services/users.js';
+import { appendActivity } from '../services/activity.js';
 import {
   listEntries,
   createManualEntry,
@@ -103,7 +106,31 @@ entriesRouter.post('/timer/stop', async (req, res, next) => {
 entriesRouter.post('/', validate(ManualEntrySchema), async (req, res, next) => {
   try {
     const me = req.session.user!;
-    const row = await createManualEntry(me.userId, getValidated<typeof ManualEntrySchema._type>(req));
+    const input = getValidated<typeof ManualEntrySchema._type>(req);
+    // On-behalf entry: admins with `time_entry.edit` can log time for any
+    // member of the ACTIVE workspace (cross-tenant ids 404 via isMember).
+    // The entry lands as that user's draft, exactly as if they logged it.
+    let targetUserId = me.userId;
+    if (input.userId && input.userId !== me.userId) {
+      if (!(await userCan(req, 'time_entry.edit'))) {
+        res.status(403).json({ error: 'forbidden' });
+        return;
+      }
+      if (!(await isMember(input.userId, me.tenantId))) {
+        res.status(404).json({ error: 'user_not_found' });
+        return;
+      }
+      targetUserId = input.userId;
+    }
+    const row = await createManualEntry(targetUserId, input);
+    if (targetUserId !== me.userId) {
+      const target = await getUser(targetUserId);
+      await appendActivity({
+        whoId: me.userId,
+        kind: 'time.create_on_behalf',
+        target: `Logged ${row.durationMin}m for ${target?.name ?? 'a teammate'}`,
+      });
+    }
     res.status(201).json(row);
   } catch (e) {
     next(e);
@@ -135,7 +162,10 @@ entriesRouter.delete('/:id', async (req, res, next) => {
 entriesRouter.post('/submit', validate(BulkIdsSchema), async (req, res, next) => {
   try {
     const me = req.session.user!;
-    const count = await submitEntries(getValidated<typeof BulkIdsSchema._type>(req).ids, me.userId);
+    // `time_entry.edit` admins may submit on behalf of teammates; everyone
+    // else is scoped to their own entries inside submitEntries.
+    const canManageAll = await userCan(req, 'time_entry.edit');
+    const count = await submitEntries(getValidated<typeof BulkIdsSchema._type>(req).ids, me.userId, canManageAll);
     res.json({ count });
   } catch (e) {
     next(e);

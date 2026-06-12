@@ -30,3 +30,20 @@ export const GeneratePeriodsSchema = z.object({
   fromDate: isoDate.optional(),
 });
 export type GeneratePeriodsInput = z.infer<typeof GeneratePeriodsSchema>;
+
+/** Admin adjustment of a single period (PATCH /pay-periods/:id, `pay.manage`).
+ *  Closed periods must be reopened first — the route 409s otherwise. */
+export const UpdatePayPeriodSchema = z
+  .object({
+    label: z.string().min(1).max(80).optional(),
+    startDate: isoDate.optional(),
+    endDate: isoDate.optional(),
+    approvalCutoff: isoDate.optional(),
+    payDate: isoDate.optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to update' })
+  .refine((v) => !(v.startDate && v.endDate) || v.startDate <= v.endDate, {
+    message: 'Start must be on or before end',
+    path: ['endDate'],
+  });
+export type UpdatePayPeriodInput = z.infer<typeof UpdatePayPeriodSchema>;

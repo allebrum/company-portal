@@ -3,9 +3,12 @@
 import { useEffect, useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 
+// Single-key shortcuts (Gmail/Linear style) — they only fire outside of
+// inputs and never collide with browser combos the way the old
+// Cmd/Ctrl+Shift+T (reopen tab) / +N (incognito) bindings did.
 const SHORTCUTS: { keys: string; label: string }[] = [
-  { keys: 'Cmd/Ctrl+Shift+T', label: 'Start or stop the timer' },
-  { keys: 'Cmd/Ctrl+Shift+N', label: 'New to-do (anywhere)' },
+  { keys: 'T', label: 'Start the timer' },
+  { keys: 'N', label: 'New to-do (from the to-dos page)' },
   { keys: 'Enter', label: 'Quick-add a to-do from the dashboard / to-dos bar' },
   { keys: '⇧Enter', label: 'Quick-add with details (opens the composer)' },
   { keys: 'Cmd/Ctrl+Enter', label: 'Save & close the composer' },

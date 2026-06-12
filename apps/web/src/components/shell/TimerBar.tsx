@@ -64,12 +64,14 @@ export function TimerBar() {
     setOpen(true);
   }, [clients, projects]);
 
-  // Keyboard shortcut: Cmd/Ctrl+Shift+T opens picker
+  // Keyboard shortcut: plain "t" (no modifiers) opens the start picker.
+  // Single-key like Gmail/Linear — the old Cmd/Ctrl+Shift+T collided with
+  // the browser's reopen-closed-tab and could never fire reliably.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)) return;
-      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       if (e.key.toLowerCase() !== 't') return;
       e.preventDefault();
       if (!timer) openStartPicker();

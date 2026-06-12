@@ -13,8 +13,10 @@ import {
   useDeleteEntry,
   useClients,
   useProjects,
+  useUsers,
   type EntryRow,
 } from '@/hooks/useResources';
+import { useAuth } from '@/hooks/useAuth';
 
 // ISO (UTC) -> value for <input type="datetime-local"> (local wall time, no tz)
 function isoToLocalInput(iso: string): string {
@@ -49,8 +51,10 @@ export function EntryFormModal({
   const isEdit = !!entry;
   const toast = useToast();
   const confirmDialog = useConfirm();
+  const { me, can } = useAuth();
   const { data: clients = [] } = useClients();
   const { data: projects = [] } = useProjects();
+  const { data: users = [] } = useUsers();
   const add = useAddManualEntry();
   const update = useUpdateEntry();
   const del = useDeleteEntry();
@@ -60,6 +64,10 @@ export function EntryFormModal({
   const [start, setStart] = useState(defaultStart());
   const [end, setEnd] = useState(plusHours(defaultStart(), 1));
   const [note, setNote] = useState('');
+  // Admins with `time_entry.edit` can log time on behalf of a teammate —
+  // the entry lands as that user's draft. Everyone else logs for themselves.
+  const canLogForOthers = can('time_entry.edit');
+  const [forUserId, setForUserId] = useState('');
 
   useEffect(() => {
     if (!open) return;
@@ -84,6 +92,7 @@ export function EntryFormModal({
       setStart(s);
       setEnd(plusHours(s, 1));
       setNote('');
+      setForUserId('');
     }
   }, [open, entry, projects]);
 
@@ -115,8 +124,20 @@ export function EntryFormModal({
         await update.mutateAsync({ id: entry.id, patch: { projectId: pid, note, startIso, endIso } });
         toast.success('Entry updated');
       } else {
-        await add.mutateAsync({ projectId: pid, note: note || 'Manual entry', startIso, endIso, todoId: null });
-        toast.success('Entry added');
+        const onBehalf = canLogForOthers && forUserId && forUserId !== me?.id;
+        await add.mutateAsync({
+          projectId: pid,
+          note: note || 'Manual entry',
+          startIso,
+          endIso,
+          todoId: null,
+          ...(onBehalf ? { userId: forUserId } : {}),
+        });
+        toast.success(
+          onBehalf
+            ? `Entry added for ${users.find((u) => u.id === forUserId)?.name ?? 'teammate'}`
+            : 'Entry added',
+        );
       }
       onClose();
     } catch (e) {
@@ -199,6 +220,16 @@ export function EntryFormModal({
           <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
             This entry has been {entry?.status}. Fields are read-only; use Delete below if you need to retract it.
           </div>
+        )}
+        {!isEdit && canLogForOthers && (
+          <Field label="Log time for" hint="The entry lands as their draft, exactly as if they logged it.">
+            <Select value={forUserId} onChange={(e) => setForUserId(e.target.value)}>
+              <option value="">Me{me ? ` (${me.name})` : ''}</option>
+              {users
+                .filter((u) => u.id !== me?.id && u.status === 'active')
+                .map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </Select>
+          </Field>
         )}
         <Field label="Client">
           <Select

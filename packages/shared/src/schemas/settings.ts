@@ -31,11 +31,31 @@ export type AuthMethods = {
   brandLogoDataUrl: string | null;
 };
 
+/** Gmail caps CC recipients at 100 per message — the bookkeeper field
+ *  accepts up to that many addresses (first = To, rest = Cc). */
+export const BOOKKEEPER_EMAIL_LIMIT = 100;
+
+/** A comma/semicolon/whitespace-separated list of emails, normalized to
+ *  `a@x.com, b@y.com`. Stored in the same single text column as before, so
+ *  no migration — one address remains a valid one-element list. */
+const EmailListSchema = z
+  .string()
+  .trim()
+  .transform((s) => s.split(/[,;\s]+/).filter(Boolean))
+  .refine((list) => list.length > 0, { message: 'At least one email' })
+  .refine((list) => list.length <= BOOKKEEPER_EMAIL_LIMIT, {
+    message: `At most ${BOOKKEEPER_EMAIL_LIMIT} emails (Gmail CC limit)`,
+  })
+  .refine((list) => list.every((e) => z.string().email().safeParse(e).success), {
+    message: 'Every entry must be a valid email',
+  })
+  .transform((list) => list.join(', '));
+
 export const UpdateAppSettingsSchema = z.object({
   passwordLoginEnabled: z.boolean().optional(),
   googleLoginEnabled: z.boolean().optional(),
   allowedEmailDomains: z.array(z.string().min(1).max(253)).max(50).optional(),
-  bookkeeperEmail: z.string().email().nullable().optional(),
+  bookkeeperEmail: EmailListSchema.nullable().optional(),
   sendToBookkeeperOn: z.enum(['never', 'pay_period_closed']).optional(),
   // The user whose connected Gmail is used to send mail with no session
   // (password reset). Pass null to clear. Validated by the route to ensure

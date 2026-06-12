@@ -83,12 +83,15 @@ export default function TodosPage() {
     });
   }, [todos, scope, showDone, me]);
 
-  // Keyboard shortcut: Cmd/Ctrl+Shift+N opens create
+  // Keyboard shortcut: plain "n" (no modifiers) opens create. Single-key
+  // like Gmail/Linear — the old Cmd/Ctrl+Shift+N collided with the
+  // browser's incognito/private-window shortcut, which the page never
+  // even receives in most browsers.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)) return;
-      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       if (e.key.toLowerCase() !== 'n') return;
       e.preventDefault();
       setEditing(null);

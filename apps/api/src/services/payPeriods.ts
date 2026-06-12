@@ -1,4 +1,4 @@
-import { eq, and, gt, gte, lte, asc, desc, inArray, isNotNull } from 'drizzle-orm';
+import { eq, and, gt, gte, lte, asc, desc, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
   payPeriods, payConfig, timeEntries, users, projects, type PayPeriod,
@@ -101,6 +101,13 @@ export function generatePeriodSchedule(
           const periodStart = prevPeriodEnd
             ? addDays(prevPeriodEnd, 1)
             : addDays(periodEnd, -14);
+          // Inversion guard: when the chained-off previous period already
+          // ends ON or AFTER this pay run's computed end (buffer/config
+          // drift between generations), the would-be period is empty or
+          // inverted (start > end) — e.g. the "Jun 16 – Jun 10" rows this
+          // used to emit. The work is already covered by the previous
+          // period, so skip this pay date WITHOUT advancing the chain.
+          if (periodStart > periodEnd) continue;
           out.push({
             start: isoDate(periodStart),
             end: isoDate(periodEnd),
@@ -199,6 +206,9 @@ export async function generateAndInsert(args: {
   const haveStart = new Set(existing.map((r) => r.s));
   const havePayDate = new Set(existing.map((r) => r.p));
   const toInsert = schedule
+    // Belt-and-braces: never persist an inverted range, whatever the
+    // generator produced (the schedule guard should make this a no-op).
+    .filter((s) => s.start <= s.end)
     .filter((s) => !haveStart.has(s.start) && !havePayDate.has(s.payDate))
     .map((s) => ({
       label: s.label,
@@ -430,6 +440,107 @@ export async function regenerateFuturePeriods(args: { whoId: string }): Promise<
   return { deleted: toDelete.length, inserted, preserved, merged };
 }
 
+/**
+ * Admin adjustment of a single period's label/dates (`pay.manage`).
+ * Closed periods are payroll history — 409, reopen first. When the date
+ * range changes, entries are re-mapped conservatively:
+ *   - entries on THIS period whose start date now falls outside it are
+ *     re-resolved (another period covering the date, else unassigned);
+ *   - UNASSIGNED entries whose start date now falls inside are adopted.
+ * Entries attached to OTHER periods are never stolen — overlaps are an
+ * explicit admin problem solved by Recalculate (consolidation), not a
+ * side effect of editing dates.
+ */
+export async function updatePeriod(
+  id: string,
+  patch: { label?: string; startDate?: string; endDate?: string; approvalCutoff?: string; payDate?: string },
+  whoId: string,
+): Promise<PayPeriod> {
+  const rows = await db
+    .select()
+    .from(payPeriods)
+    .where(and(eq(payPeriods.id, id), tenantEq(payPeriods.tenantId)))
+    .limit(1);
+  const period = rows[0];
+  if (!period) throw new HttpError(404, 'period_not_found');
+  if (period.status === 'closed') throw new HttpError(409, 'period_closed');
+
+  const nextStart = patch.startDate ?? period.startDate;
+  const nextEnd = patch.endDate ?? period.endDate;
+  if (nextStart > nextEnd) throw new HttpError(400, 'start_after_end');
+
+  // The (tenant, start, end) unique index would reject an exact duplicate —
+  // pre-check for a clean 409 instead of a 500.
+  if (nextStart !== period.startDate || nextEnd !== period.endDate) {
+    const [dupe] = await db
+      .select({ id: payPeriods.id })
+      .from(payPeriods)
+      .where(and(
+        eq(payPeriods.startDate, nextStart),
+        eq(payPeriods.endDate, nextEnd),
+        tenantEq(payPeriods.tenantId),
+      ))
+      .limit(1);
+    if (dupe && dupe.id !== id) throw new HttpError(409, 'period_range_conflict');
+  }
+
+  const now = new Date().toISOString();
+  const [updated] = await db
+    .update(payPeriods)
+    .set({
+      ...(patch.label !== undefined ? { label: patch.label } : {}),
+      ...(patch.startDate !== undefined ? { startDate: patch.startDate } : {}),
+      ...(patch.endDate !== undefined ? { endDate: patch.endDate } : {}),
+      ...(patch.approvalCutoff !== undefined ? { approvalCutoff: patch.approvalCutoff } : {}),
+      ...(patch.payDate !== undefined ? { payDate: patch.payDate } : {}),
+      updatedAt: now,
+    })
+    .where(and(eq(payPeriods.id, id), tenantEq(payPeriods.tenantId)))
+    .returning();
+  if (!updated) throw new HttpError(404, 'period_not_found');
+
+  if (nextStart !== period.startDate || nextEnd !== period.endDate) {
+    // Entries on this period whose date fell outside the new range →
+    // re-resolve each distinct date once (cheap: ranges are ≤ a few weeks).
+    const onPeriod = await db
+      .select({ id: timeEntries.id, startIso: timeEntries.startIso })
+      .from(timeEntries)
+      .where(and(eq(timeEntries.payPeriodId, id), tenantEq(timeEntries.tenantId)));
+    const strays = onPeriod.filter((e) => {
+      const d = e.startIso.slice(0, 10);
+      return d < nextStart || d > nextEnd;
+    });
+    for (const e of strays) {
+      const home = await periodForDate(e.startIso);
+      await db
+        .update(timeEntries)
+        .set({ payPeriodId: home && home.id !== id ? home.id : null, updatedAt: now })
+        .where(and(eq(timeEntries.id, e.id), tenantEq(timeEntries.tenantId)));
+    }
+    // Unassigned entries that the new range now covers → adopt.
+    const orphans = await db
+      .select({ id: timeEntries.id, startIso: timeEntries.startIso })
+      .from(timeEntries)
+      .where(and(isNull(timeEntries.payPeriodId), tenantEq(timeEntries.tenantId)));
+    const adopt = orphans
+      .filter((e) => {
+        const d = e.startIso.slice(0, 10);
+        return d >= nextStart && d <= nextEnd;
+      })
+      .map((e) => e.id);
+    if (adopt.length > 0) {
+      await db
+        .update(timeEntries)
+        .set({ payPeriodId: id, updatedAt: now })
+        .where(and(inArray(timeEntries.id, adopt), tenantEq(timeEntries.tenantId)));
+    }
+  }
+
+  emit.toOrg(EV.PAY_PERIOD_UPDATED, { id, by: whoId, at: now });
+  await appendActivity({ whoId, kind: 'period.adjust', target: `Pay period ${updated.label} adjusted` });
+  return updated;
+}
+
 export async function moveToReview(id: string, whoId: string): Promise<void> {
   await db.update(payPeriods).set({ status: 'review', updatedAt: new Date().toISOString() }).where(and(eq(payPeriods.id, id), tenantEq(payPeriods.tenantId)));
   emit.toOrg(EV.PAY_PERIOD_UPDATED, { id, by: whoId, at: new Date().toISOString() });
@@ -472,8 +583,16 @@ export async function sendPayrollReportToBookkeeper(
   whoId: string,
 ): Promise<{ ok: true; sentTo: string; rows: number }> {
   const settings = await getSettings();
-  const to = settings.bookkeeperEmail;
-  if (!to || to.trim() === '') {
+  // The setting holds a normalized comma-separated list (up to the Gmail CC
+  // limit, validated at write time). First address rides To:, the rest Cc:
+  // — so a whole bookkeeping team gets the same payroll report.
+  const recipients = (settings.bookkeeperEmail ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const to = recipients[0];
+  const cc = recipients.length > 1 ? recipients.slice(1).join(', ') : null;
+  if (!to) {
     throw new HttpError(400, 'bookkeeper_email_not_set');
   }
   const periodRows = await db
@@ -599,6 +718,7 @@ export async function sendPayrollReportToBookkeeper(
   await sendPayrollReportEmail({
     senderUserId: whoId,
     to,
+    cc,
     period: {
       label: period.label,
       startDate: period.startDate,
@@ -608,12 +728,13 @@ export async function sendPayrollReportToBookkeeper(
     },
     summaries,
   });
+  const sentTo = recipients.join(', ');
   await appendActivity({
     whoId,
     kind: 'pay.bookkeeper_sent',
-    target: `${period.label} → ${to}`,
+    target: `${period.label} → ${sentTo}`,
   });
-  return { ok: true, sentTo: to, rows: summaries.length };
+  return { ok: true, sentTo, rows: summaries.length };
 }
 
 export async function reopenPeriod(id: string, whoId: string): Promise<void> {
