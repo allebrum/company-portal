@@ -65,6 +65,7 @@ export async function createTodo(input: CreateTodoInput, whoId: string): Promise
       priority: input.priority,
       tags: input.tags,
       private: input.private,
+      sharedWithClient: input.sharedWithClient ?? false,
       checklist: input.checklist,
       attachments: input.attachments ?? [],
     }))
@@ -101,6 +102,7 @@ export async function updateTodo(id: string, patch: UpdateTodoInput, whoId: stri
   if (patch.priority !== undefined) upd.priority = patch.priority;
   if (patch.tags !== undefined) upd.tags = patch.tags;
   if (patch.private !== undefined) upd.private = patch.private;
+  if (patch.sharedWithClient !== undefined) upd.sharedWithClient = patch.sharedWithClient;
   if (patch.status !== undefined) upd.status = patch.status;
   if (patch.checklist !== undefined) upd.checklist = patch.checklist;
   if (patch.attachments !== undefined) upd.attachments = patch.attachments;

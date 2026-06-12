@@ -83,7 +83,7 @@ function Page() {
               {data.projects.map((p) => (
                 <Link
                   key={p.id}
-                  href={`/portal/projects${q}#${p.id}`}
+                  href={`/portal/projects${q}&project=${p.id}`}
                   className="group rounded-xl border border-gray-200 bg-white p-4 hover:border-brand-300 hover:shadow-sm transition-all"
                 >
                   <div className="flex items-center gap-2.5">

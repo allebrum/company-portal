@@ -145,6 +145,33 @@ export function usePortalProjects(enabled = true) {
   });
 }
 
+// ---- Project detail (0029) --------------------------------------------
+
+export type PortalProjectTodo = {
+  id: string;
+  title: string;
+  status: 'open' | 'done';
+  dueDate: string | null;
+};
+
+export type PortalProjectDetail = {
+  project: PortalProjectRow;
+  /** Only items staff explicitly shared (`sharedWithClient`). */
+  goals: PortalGoalRow[];
+  todos: PortalProjectTodo[];
+  files: PortalFileRow[];
+  milestones: (PortalMilestoneRow & { date: string })[];
+};
+
+export function usePortalProject(id: string | null) {
+  return useQuery({
+    queryKey: ['portal', 'projects', id ?? ''],
+    queryFn: () => api.get<PortalProjectDetail>(`/portal/projects/${id}`),
+    enabled: !!id,
+    retry: false,
+  });
+}
+
 export function usePortalFiles(enabled = true) {
   return useQuery({
     queryKey: ['portal', 'files'],

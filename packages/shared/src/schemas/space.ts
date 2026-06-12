@@ -51,5 +51,10 @@ export const SpaceFileSchema = z.object({
   source: z.enum(['notes', 'files']).default('files'),
   addedBy: z.string().uuid(),
   addedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  // Portal sharing (0029): only files with this flag appear in the client
+  // portal (Files tab + project view). Optional — rows written before the
+  // flag existed lack it; the 0029 migration backfills client-level files
+  // to true (they were already exposed pre-flag), new uploads default off.
+  sharedWithClient: z.boolean().optional(),
 });
 export type SpaceFile = z.infer<typeof SpaceFileSchema>;

@@ -1014,6 +1014,15 @@ function FilesTab({
     await setFiles(inSpace.filter((f) => f.id !== id));
   };
 
+  // 0029 — toggle a file's client-portal visibility (full-replace, same as
+  // rename/remove). Client-scope files show on the portal Files tab;
+  // project-scope files show inside the portal's project view.
+  const onToggleShare = async (id: string) => {
+    const target = inSpace.find((f) => f.id === id);
+    await setFiles(inSpace.map((f) => (f.id === id ? { ...f, sharedWithClient: !f.sharedWithClient } : f)));
+    toast.success(target?.sharedWithClient ? 'Hidden from the client portal' : 'Shared to the client portal');
+  };
+
   const openRenameForSpaceFile = (args: {
     scopeKind: 'client' | 'project';
     scopeId: string;
@@ -1213,6 +1222,15 @@ function FilesTab({
                   </span>
                 )}
                 <span className="text-[11px] text-gray-400 truncate max-w-[180px]">{f.meta}</span>
+                <button
+                  type="button"
+                  onClick={() => void onToggleShare(f.id)}
+                  className={f.sharedWithClient ? 'text-brand-600 hover:text-brand-800' : 'text-gray-300 hover:text-brand-700'}
+                  aria-label={f.sharedWithClient ? 'Hide from client portal' : 'Share to client portal'}
+                  title={f.sharedWithClient ? 'Visible in the client portal — click to hide' : 'Share to the client portal'}
+                >
+                  <Globe className="w-4 h-4" />
+                </button>
                 <button
                   type="button"
                   onClick={() => openRenameForSpaceFile({

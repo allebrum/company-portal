@@ -27,7 +27,8 @@ import { QuickAddTodo } from '@/components/features/QuickAddTodo';
 import { QrUploadModal } from '@/components/upload/QrUploadModal';
 import { statusesForScope, HEALTH_TONE } from '@/lib/roadmap';
 import { EpicChip } from '@/components/composer/chips/EpicChip';
-import { Activity, Gauge, Layers, MessageSquare } from 'lucide-react';
+import { Activity, Gauge, Layers, MessageSquare, Globe2 } from 'lucide-react';
+import { ChipButton } from '@/components/composer/chips/ChipButton';
 import { useSpace } from '@/contexts/SpaceContext';
 import { PropertyCell } from '@/components/composer/PropertyCell';
 import { Checklist } from '@/components/composer/Checklist';
@@ -120,6 +121,8 @@ export function ItemComposer(props: ItemComposerProps) {
   const [tags, setTags] = useState<string[]>([]);
   const [priv, setPriv] = useState(false);
   const [todoStatus, setTodoStatus] = useState<'open' | 'done'>('open');
+  // 0029: opt this item into the client-facing portal (todos + goals).
+  const [sharedWithClient, setSharedWithClient] = useState(false);
 
   // goal-specific
   const [ownerId, setOwnerId] = useState<string | null>(null);
@@ -181,6 +184,7 @@ export function ItemComposer(props: ItemComposerProps) {
       setTodoStatus(t?.status ?? 'open');
       setChecklist(t?.checklist ?? []);
       setAttachments(t?.attachments ?? []);
+      setSharedWithClient(t?.sharedWithClient ?? false);
     } else {
       const g = props.goal ?? null;
       const d = props.defaults ?? {};
@@ -200,6 +204,7 @@ export function ItemComposer(props: ItemComposerProps) {
       setGoalHealth(g?.health ?? null);
       setGoalProgress(g?.progress ?? null);
       setGoalEpicId(g?.epicId ?? null);
+      setSharedWithClient(g?.sharedWithClient ?? false);
     }
     // reset transient form-y state
     setRKind('link');
@@ -270,6 +275,9 @@ export function ItemComposer(props: ItemComposerProps) {
           priority,
           tags,
           private: priv,
+          // A private todo can never be portal-shared; sharing requires a
+          // client to share WITH.
+          sharedWithClient: !priv && !!clientId && sharedWithClient,
           checklist,
           attachments,
         };
@@ -307,6 +315,7 @@ export function ItemComposer(props: ItemComposerProps) {
           health: goalHealth,
           progress: goalProgress,
           epicId: goalEpicId,
+          sharedWithClient: !!clientId && sharedWithClient,
         };
         if (props.goal) {
           await updateGoal.mutateAsync({ id: props.goal.id, patch: payload });
@@ -742,8 +751,21 @@ export function ItemComposer(props: ItemComposerProps) {
                     onChange={(v) => {
                       setPriv(v);
                       if (v && me?.id) setAssigneeId(me.id);
+                      // Private and portal-shared are mutually exclusive.
+                      if (v) setSharedWithClient(false);
                     }}
                   />
+                </PropertyCell>
+              )}
+
+              {/* 0029 — portal sharing. Only meaningful with a client to
+                  share with, and never for private todos. */}
+              {!!clientId && !(mode === 'todo' && priv) && (
+                <PropertyCell icon={Globe2} label="Client portal">
+                  <ChipButton active={sharedWithClient} onClick={() => setSharedWithClient(!sharedWithClient)}>
+                    <Globe2 className="w-3.5 h-3.5" />
+                    {sharedWithClient ? 'Shared to portal' : 'Internal only'}
+                  </ChipButton>
                 </PropertyCell>
               )}
             </div>

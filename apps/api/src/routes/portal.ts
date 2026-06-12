@@ -340,6 +340,9 @@ portalRouter.get('/overview', requireClientPortalAuth, async (req, res, next) =>
     const projectRollup = await buildProjectRollup(sess.clientId);
 
     // In-flight goals: status not 'done' and health (if present) not 'done'.
+    // 0029: only goals staff explicitly shared appear in portal LISTS
+    // (aggregate counts/progress in the rollup still cover everything —
+    // they're summary numbers, not item details).
     const goalRows = await db
       .select({
         id: goals.id,
@@ -351,7 +354,7 @@ portalRouter.get('/overview', requireClientPortalAuth, async (req, res, next) =>
         health: goals.health,
       })
       .from(goals)
-      .where(eq(goals.clientId, sess.clientId));
+      .where(and(eq(goals.clientId, sess.clientId), eq(goals.sharedWithClient, true)));
     const inFlightGoals = goalRows
       .filter((g) => g.status !== 'done' && g.health !== 'done')
       .slice(0, 12)
@@ -424,6 +427,125 @@ portalRouter.get('/projects', requireClientPortalAuth, async (req, res, next) =>
   }
 });
 
+// ---- Project detail (0029) ---------------------------------------------
+//
+// Clicking a project in the portal opens its own view: shared goals, shared
+// to-dos, shared project files, and the full milestone timeline. Item lists
+// only contain rows staff explicitly opted in via `sharedWithClient`; the
+// header keeps the rollup's aggregate numbers (real progress, not just the
+// shared subset).
+portalRouter.get('/projects/:id', requireClientPortalAuth, async (req, res, next) => {
+  try {
+    const sess = req.session.clientPortalSession!;
+    const [project] = await db
+      .select({
+        id: projects.id,
+        name: projects.name,
+        code: projects.code,
+        color: projects.color,
+        spaceFiles: projects.spaceFiles,
+      })
+      .from(projects)
+      .where(and(eq(projects.id, req.params.id!), eq(projects.clientId, sess.clientId)))
+      .limit(1);
+    if (!project) {
+      res.status(404).json({ error: 'project_not_found' });
+      return;
+    }
+
+    const rollup = (await buildProjectRollup(sess.clientId)).find((p) => p.id === project.id);
+
+    const [goalRows, todoRows, milestoneRows] = await Promise.all([
+      db
+        .select({
+          id: goals.id,
+          title: goals.title,
+          status: goals.status,
+          progress: goals.progress,
+          endDate: goals.endDate,
+        })
+        .from(goals)
+        .where(and(eq(goals.projectId, project.id), eq(goals.sharedWithClient, true)))
+        .orderBy(asc(goals.title)),
+      db
+        .select({
+          id: todos.id,
+          title: todos.title,
+          status: todos.status,
+          dueDate: todos.dueDate,
+        })
+        .from(todos)
+        // `private` is a hard veto even if the share flag was somehow set.
+        .where(and(eq(todos.projectId, project.id), eq(todos.sharedWithClient, true), eq(todos.private, false)))
+        .orderBy(asc(todos.dueDate)),
+      db
+        .select({
+          id: milestones.id,
+          title: milestones.title,
+          date: milestones.date,
+          kind: milestones.kind,
+          signedOffAt: milestones.signedOffAt,
+          signedOffByContactId: milestones.signedOffByContactId,
+          signOffComment: milestones.signOffComment,
+        })
+        .from(milestones)
+        .where(eq(milestones.projectId, project.id))
+        .orderBy(asc(milestones.date)),
+    ]);
+
+    const signerIds = [...new Set(milestoneRows.map((m) => m.signedOffByContactId).filter((v): v is string => !!v))];
+    const signers = signerIds.length
+      ? await db.select({ id: clientContacts.id, name: clientContacts.name }).from(clientContacts).where(inArray(clientContacts.id, signerIds))
+      : [];
+    const signerName = (id: string | null) => signers.find((s) => s.id === id)?.name ?? null;
+
+    const files = (Array.isArray(project.spaceFiles) ? project.spaceFiles : []) as Array<{
+      id: string;
+      title: string;
+      url: string;
+      meta?: string;
+      addedAt: string;
+      sharedWithClient?: boolean;
+    }>;
+
+    res.json({
+      project: {
+        id: project.id,
+        name: project.name,
+        code: project.code,
+        color: project.color,
+        goalCount: rollup?.goalCount ?? 0,
+        openTodoCount: rollup?.openTodoCount ?? 0,
+        avgProgress: rollup?.avgProgress ?? 0,
+        health: rollup?.health ?? null,
+        nextMilestone: rollup?.nextMilestone ?? null,
+      },
+      goals: goalRows.map((g) => ({
+        id: g.id,
+        title: g.title,
+        status: g.status,
+        progress: g.progress,
+        dueDate: g.endDate,
+      })),
+      todos: todoRows,
+      files: files
+        .filter((f) => f.sharedWithClient === true)
+        .map((f) => ({ id: f.id, title: f.title, url: f.url, meta: f.meta, addedAt: f.addedAt })),
+      milestones: milestoneRows.map((m) => ({
+        id: m.id,
+        title: m.title,
+        date: m.date,
+        kind: m.kind,
+        signOff: m.signedOffAt
+          ? { at: m.signedOffAt, by: signerName(m.signedOffByContactId), comment: m.signOffComment }
+          : null,
+      })),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 portalRouter.get('/goals', requireClientPortalAuth, async (req, res, next) => {
   try {
     const sess = req.session.clientPortalSession!;
@@ -437,7 +559,7 @@ portalRouter.get('/goals', requireClientPortalAuth, async (req, res, next) => {
         endDate: goals.endDate,
       })
       .from(goals)
-      .where(eq(goals.clientId, sess.clientId))
+      .where(and(eq(goals.clientId, sess.clientId), eq(goals.sharedWithClient, true)))
       .orderBy(asc(goals.title));
     res.json(
       rows.map((g) => ({
@@ -466,18 +588,23 @@ portalRouter.get('/files', requireClientPortalAuth, async (req, res, next) => {
       res.json([]);
       return;
     }
-    // Phase 4 will gate on a per-file `sharedWithClient` flag; for v1 we
-    // expose the whole array. Internal staff today only put client-
-    // appropriate files in Spaces, but make this opt-in before merging
-    // Phase 4 so existing rows don't leak retroactively.
+    // 0029 (the long-promised "Phase 4" gate): only files staff explicitly
+    // shared appear. Pre-0029 rows were backfilled to shared=true by the
+    // migration (they were already exposed); NEW uploads default to
+    // unshared, so nothing leaks going forward.
     const files = (Array.isArray(client.spaceFiles) ? client.spaceFiles : []) as Array<{
       id: string;
       title: string;
       url: string;
       meta?: string;
       addedAt: string;
+      sharedWithClient?: boolean;
     }>;
-    res.json(files.map((f) => ({ id: f.id, title: f.title, url: f.url, meta: f.meta, addedAt: f.addedAt })));
+    res.json(
+      files
+        .filter((f) => f.sharedWithClient === true)
+        .map((f) => ({ id: f.id, title: f.title, url: f.url, meta: f.meta, addedAt: f.addedAt })),
+    );
   } catch (e) {
     next(e);
   }

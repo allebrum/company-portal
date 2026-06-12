@@ -142,6 +142,8 @@ export type GoalRow = {
   health: GoalHealth | null;
   progress: number | null;
   dependsOn: string[] | null;
+  // 0029: visible in the client-facing portal.
+  sharedWithClient: boolean;
 };
 export type EpicRow = {
   id: string;
@@ -183,6 +185,8 @@ export type TodoRow = {
   priority: 'low' | 'medium' | 'high';
   tags: string[];
   private: boolean;
+  // 0029: visible in the client portal's project view.
+  sharedWithClient: boolean;
   checklist: ChecklistItemRow[];
   // F25: file attachments on the todo itself. Always an array; server
   // defaults to [].
