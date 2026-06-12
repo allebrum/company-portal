@@ -12,6 +12,7 @@ import { sessionMiddleware } from './session.js';
 import { apiRouter } from './routes/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { initIO } from './realtime/io.js';
+import { startPayPeriodSweep } from './jobs/payPeriodSweep.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -90,6 +91,10 @@ httpServer.listen(env.API_PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`[api] listening on :${env.API_PORT}  (origin=${env.WEB_ORIGIN})`);
 });
+
+// Keep every workspace's pay-period runway topped up without anyone having
+// to visit the Approvals page (boot + every 12h; idempotent per tenant).
+startPayPeriodSweep();
 
 // Billing (Stripe + the recurring-charge cron) lives in the separate marketing
 // service now; the portal only reads the tenant billing columns to gate.

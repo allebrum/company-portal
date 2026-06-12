@@ -1122,11 +1122,11 @@ function PayTab() {
 
           <div className="md:col-span-2">
             <Field
-              label="Bookkeeper email"
-              hint="Where the payroll report goes when an admin clicks 'Close & send to bookkeeper' on a closed period."
+              label="Bookkeeper emails"
+              hint="Where the payroll report goes when an admin clicks 'Close & send to bookkeeper'. Separate multiple addresses with commas — the first gets the email, the rest are CC'd (up to 100, the Gmail limit)."
             >
               <Input
-                type="email"
+                type="text"
                 value={bookkeeperEmail}
                 onChange={(e) => setBookkeeperEmail(e.target.value)}
                 onBlur={async () => {
@@ -1134,12 +1134,12 @@ function PayTab() {
                   if (next === (settings?.bookkeeperEmail ?? null)) return;
                   try {
                     await updSettings.mutateAsync({ bookkeeperEmail: next });
-                    toast.success('Bookkeeper email updated');
+                    toast.success('Bookkeeper emails updated');
                   } catch (e) {
-                    toast.error(e instanceof Error ? e.message : 'Could not save bookkeeper email');
+                    toast.error(e instanceof Error ? e.message : 'Could not save — check every address is a valid email');
                   }
                 }}
-                placeholder="bookkeeper@allebrum.com"
+                placeholder="books@firm.com, assistant@firm.com"
                 className="max-w-md"
               />
             </Field>

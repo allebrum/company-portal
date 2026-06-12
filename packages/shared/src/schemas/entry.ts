@@ -21,6 +21,10 @@ export const ManualEntrySchema = z
     startIso: z.string().datetime({ offset: true }),
     endIso: z.string().datetime({ offset: true }),
     todoId: z.string().uuid().nullable().optional(),
+    // Log time ON BEHALF of another workspace member. Only honored when the
+    // caller has `time_entry.edit` (the route enforces it); everyone else
+    // can only create entries for themselves.
+    userId: z.string().uuid().optional(),
   })
   .refine((v) => new Date(v.endIso).getTime() > new Date(v.startIso).getTime(), {
     message: 'End must be after start',

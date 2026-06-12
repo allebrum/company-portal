@@ -21,12 +21,30 @@ import { EV } from '@allebrum/shared';
 import { emit } from '../realtime/emit.js';
 import { appendActivity } from './activity.js';
 import { getTodo, logTimeToTodo } from './todos.js';
-import { periodForDate } from './payPeriods.js';
+import { periodForDate, ensureFuturePeriods } from './payPeriods.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { tenantEq, stampTenant } from '../tenancy/scope.js';
 
 function minutesBetween(startIso: string, endIso: string): number {
   return Math.max(1, Math.round((new Date(endIso).getTime() - new Date(startIso).getTime()) / 60000));
+}
+
+/**
+ * Resolve the pay period covering `iso`, self-healing when the runway has
+ * run dry: if no period matches, top up the schedule (idempotent, cheap)
+ * and retry once. This is what guarantees entries always land in a period
+ * even for workspaces where nobody has opened the Approvals page in months
+ * — the lazy fill there was previously the only automatic generation.
+ */
+async function periodForDateEnsured(iso: string, whoId?: string) {
+  const found = await periodForDate(iso);
+  if (found) return found;
+  try {
+    await ensureFuturePeriods({ whoId });
+  } catch (e) {
+    console.error('[entries] ensureFuturePeriods failed during self-heal', e);
+  }
+  return periodForDate(iso);
 }
 
 // ---- Timer ----
@@ -85,7 +103,7 @@ export async function stopTimer(userId: string): Promise<TimeEntry | null> {
   if (!t) return null;
   const endIso = new Date().toISOString();
   const durationMin = minutesBetween(t.startedAt, endIso);
-  const period = await periodForDate(t.startedAt);
+  const period = await periodForDateEnsured(t.startedAt, userId);
   const [entry] = await db
     .insert(timeEntries)
     .values(stampTenant({
@@ -149,7 +167,7 @@ export async function listEntries(
 }
 
 export async function createManualEntry(userId: string, input: ManualEntryInput): Promise<TimeEntry> {
-  const period = await periodForDate(input.startIso);
+  const period = await periodForDateEnsured(input.startIso, userId);
   const durationMin = minutesBetween(input.startIso, input.endIso);
   // Same project-inference fallback as startTimer when caller omits projectId.
   let projectId: string | null = input.projectId ?? null;
@@ -267,18 +285,25 @@ export async function deleteEntry(id: string, viewerId: string, canManageAll: bo
 }
 
 // ---- Workflow ----
-export async function submitEntries(ids: string[], whoId: string): Promise<number> {
+/**
+ * Submit draft/rejected entries for approval. Without `canManageAll`
+ * (`time_entry.edit`), the update is scoped to the caller's OWN entries —
+ * previously any authenticated user could force ANY teammate's drafts into
+ * the approval queue by guessing ids. Admins keep the unscoped form so they
+ * can submit time on behalf of their team.
+ */
+export async function submitEntries(ids: string[], whoId: string, canManageAll = false): Promise<number> {
   const now = new Date().toISOString();
+  const conds = [
+    inArray(timeEntries.id, ids),
+    or(eq(timeEntries.status, 'draft'), eq(timeEntries.status, 'rejected')),
+    tenantEq(timeEntries.tenantId),
+  ];
+  if (!canManageAll) conds.push(eq(timeEntries.userId, whoId));
   const result = await db
     .update(timeEntries)
     .set({ status: 'submitted', submittedAt: now, rejectionNote: null, updatedAt: now })
-    .where(
-      and(
-        inArray(timeEntries.id, ids),
-        or(eq(timeEntries.status, 'draft'), eq(timeEntries.status, 'rejected')),
-        tenantEq(timeEntries.tenantId),
-      ),
-    )
+    .where(and(...conds))
     .returning({ id: timeEntries.id, userId: timeEntries.userId });
   const userIds = [...new Set(result.map((r) => r.userId))];
   for (const uid of userIds) {

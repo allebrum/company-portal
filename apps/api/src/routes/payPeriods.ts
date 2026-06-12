@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { GeneratePeriodsSchema } from '@allebrum/shared';
+import { GeneratePeriodsSchema, UpdatePayPeriodSchema } from '@allebrum/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requirePermission } from '../auth/permissions.js';
 import { validate, getValidated } from '../middleware/validate.js';
@@ -12,6 +12,7 @@ import {
   ensureFuturePeriods,
   regenerateFuturePeriods,
   sendPayrollReportToBookkeeper,
+  updatePeriod,
 } from '../services/payPeriods.js';
 
 export const payPeriodsRouter = Router();
@@ -50,6 +51,20 @@ payPeriodsRouter.post(
     }
   },
 );
+
+/**
+ * Adjust a single period's label/dates. Closed periods 409 (reopen first);
+ * date changes re-map entries conservatively (see service docs).
+ */
+payPeriodsRouter.patch('/:id', requirePermission('pay.manage'), validate(UpdatePayPeriodSchema), async (req, res, next) => {
+  try {
+    const me = req.session.user!;
+    const patch = getValidated<typeof UpdatePayPeriodSchema._type>(req);
+    res.json(await updatePeriod(req.params.id!, patch, me.userId));
+  } catch (e) {
+    next(e);
+  }
+});
 
 payPeriodsRouter.post('/:id/review', requirePermission('pay.manage'), async (req, res, next) => {
   try {

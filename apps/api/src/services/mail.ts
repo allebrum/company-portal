@@ -22,19 +22,21 @@ async function send(
   subject: string,
   html: string,
   text: string,
+  cc?: string | null,
 ): Promise<void> {
+  const rcpt = cc ? `to=${to} cc=${cc}` : `to=${to}`;
   if (!senderUserId) {
-    console.log(`[mail] no sender configured — would send to=${to} subject=${JSON.stringify(subject)}`);
+    console.log(`[mail] no sender configured — would send ${rcpt} subject=${JSON.stringify(subject)}`);
     console.log(text);
     return;
   }
   try {
-    await sendAsUser(senderUserId, { to, subject, html, text });
+    await sendAsUser(senderUserId, { to, cc, subject, html, text });
   } catch (e) {
     // 412 = sender hasn't connected Gmail yet. Log so the admin sees the
     // action URL and can hand-deliver while they finish the OAuth flow.
     if (e instanceof HttpError && e.status === 412) {
-      console.log(`[mail] sender ${senderUserId} has not connected Gmail — would send to=${to} subject=${JSON.stringify(subject)}`);
+      console.log(`[mail] sender ${senderUserId} has not connected Gmail — would send ${rcpt} subject=${JSON.stringify(subject)}`);
       console.log(text);
       return;
     }
@@ -172,6 +174,8 @@ export type PayrollSummaryRow = {
 export async function sendPayrollReportEmail(args: {
   senderUserId: string | null;
   to: string;
+  /** Comma-separated CC list (the rest of the bookkeeping team). */
+  cc?: string | null;
   period: { label: string; startDate: string; endDate: string; payDate: string; status: string };
   summaries: PayrollSummaryRow[];
 }): Promise<void> {
@@ -327,7 +331,7 @@ export async function sendPayrollReportEmail(args: {
     ` : ''}
   `);
 
-  await send(args.senderUserId, args.to, subject, html, text);
+  await send(args.senderUserId, args.to, subject, html, text, args.cc);
 }
 
 export async function sendResetEmail(args: {

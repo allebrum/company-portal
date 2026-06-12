@@ -141,7 +141,7 @@ async function getGmailClient(userId: string): Promise<gmail_v1.Gmail> {
  */
 export async function sendAsUser(
   senderUserId: string,
-  args: { to: string; subject: string; html: string; text: string },
+  args: { to: string; cc?: string | null; subject: string; html: string; text: string },
 ): Promise<void> {
   const senderRows = await db
     .select({ name: users.name, email: users.email })
@@ -155,6 +155,7 @@ export async function sendAsUser(
   const raw = buildRfc822({
     from: `${sender.name} <${sender.email}>`,
     to: args.to,
+    cc: args.cc ?? undefined,
     subject: args.subject,
     html: args.html,
     text: args.text,
@@ -173,6 +174,7 @@ export async function sendAsUser(
 function buildRfc822(args: {
   from: string;
   to: string;
+  cc?: string;
   subject: string;
   html: string;
   text: string;
@@ -181,6 +183,8 @@ function buildRfc822(args: {
   const headers = [
     `From: ${args.from}`,
     `To: ${args.to}`,
+    // Comma-separated list of additional recipients (bookkeeper team CC).
+    ...(args.cc ? [`Cc: ${args.cc}`] : []),
     `Subject: ${encodeHeader(args.subject)}`,
     'MIME-Version: 1.0',
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
