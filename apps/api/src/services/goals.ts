@@ -58,6 +58,7 @@ export async function createGoal(input: CreateGoalInput, whoId: string): Promise
     health: input.health ?? null,
     progress: input.progress ?? null,
     dependsOn: input.dependsOn ?? null,
+    sharedWithClient: input.sharedWithClient ?? false,
   })).returning();
   if (!row) throw new Error('goal insert failed');
   emit.toOrg(EV.GOAL_CREATED, { id: row.id, by: whoId, at: new Date().toISOString() });
@@ -91,6 +92,7 @@ export async function updateGoal(id: string, patch: UpdateGoalInput, whoId: stri
   if (patch.health !== undefined) upd.health = patch.health;
   if (patch.progress !== undefined) upd.progress = patch.progress;
   if (patch.dependsOn !== undefined) upd.dependsOn = patch.dependsOn;
+  if (patch.sharedWithClient !== undefined) upd.sharedWithClient = patch.sharedWithClient;
   const [row] = await db.update(goals).set(upd).where(and(eq(goals.id, id), tenantEq(goals.tenantId))).returning();
   if (!row) throw new HttpError(404, 'goal_not_found');
   emit.toOrg(EV.GOAL_UPDATED, { id: row.id, by: whoId, at: new Date().toISOString() });

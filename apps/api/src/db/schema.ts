@@ -405,6 +405,11 @@ export const goals = pgTable('goals', {
   endDate: date('end_date'),
   priority: priorityEnum('priority').notNull().default('medium'),
   tag: text('tag').notNull().default('Delivery'),
+  // Portal sharing (0029): staff opt this goal into the client-facing
+  // portal. Backfilled TRUE for pre-0029 rows — the portal exposed every
+  // client goal before the flag existed, so existing visibility is
+  // preserved; NEW goals default to private until explicitly shared.
+  sharedWithClient: boolean('shared_with_client').notNull().default(false),
   description: text('description'),
   checklist: jsonb('checklist').notNull().default(sql`'[]'::jsonb`),
   // PM workspace extensions:
@@ -497,6 +502,9 @@ export const todos = pgTable('todos', {
   priority: priorityEnum('priority').notNull().default('medium'),
   tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
   private: boolean('private').notNull().default(false),
+  // Portal sharing (0029): opt this to-do into the client portal's project
+  // view. No backfill — to-dos were never client-visible before.
+  sharedWithClient: boolean('shared_with_client').notNull().default(false),
   description: text('description'),
   // Inline checklist (array of { id, text, done }). Stored as JSONB so we
   // can keep the whole list with the row; server treats it as a full

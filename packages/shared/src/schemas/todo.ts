@@ -30,6 +30,9 @@ export const CreateTodoSchema = z.object({
   priority: z.enum(PRIORITIES).default('medium'),
   tags: z.array(z.string().max(40)).default([]),
   private: z.boolean().default(false),
+  // Portal sharing (0029): opt this to-do into the client portal's project
+  // view. Mutually pointless with `private` — the composer prevents both.
+  sharedWithClient: z.boolean().default(false),
   checklist: z.array(ChecklistItemSchema).max(50).default([]),
   // F25: file attachments on the todo. Full-replace on update; uploads
   // append atomically via POST /api/todos/:id/files.

@@ -28,6 +28,8 @@ export const CreateGoalSchema = z.object({
   health: z.enum(HEALTHS).nullable().optional(),
   progress: z.number().int().min(0).max(100).nullable().optional(),
   dependsOn: z.array(z.string().uuid()).nullable().optional(),
+  // Portal sharing (0029): opt this goal into the client-facing portal.
+  sharedWithClient: z.boolean().default(false),
 });
 // z.input so callers can omit fields with defaults (status/priority/tag/checklist).
 export type CreateGoalInput = z.input<typeof CreateGoalSchema>;
