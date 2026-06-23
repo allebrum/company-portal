@@ -13,6 +13,7 @@ import {
   type Tenant,
 } from '../db/schema.js';
 import { SYSTEM_GROUPS, SYSTEM_GROUP_PERMISSIONS } from '@modernzen/shared';
+import { getServiceSupabase } from '../lib/supabase.js';
 
 /**
  * A drizzle executor — the base `db` or a transaction handle. Lets the
@@ -223,12 +224,19 @@ export async function provisionTenant(
   if (existing[0]) {
     ownerUserId = existing[0].id;
   } else {
+    // The profile id FKs auth.users — create the Supabase auth identity first.
+    const supaUser = await getServiceSupabase().auth.admin.createUser({
+      email,
+      email_confirm: true,
+      user_metadata: { name: args.ownerName || email },
+    });
+    if (supaUser.error || !supaUser.data.user) throw new Error('owner auth user creation failed');
     const [u] = await ex
       .insert(users)
       .values({
+        id: supaUser.data.user.id,
         name: args.ownerName || email,
         email,
-        passwordHash: null,
         initials: email.slice(0, 2).toUpperCase(),
         status: 'invited',
       })
@@ -273,8 +281,9 @@ export async function provisionAccount(args: {
   ownerName: string;
   workspaceName: string;
   slug: string;
-  /** Precomputed argon2 hash — set only on a brand-new / not-yet-credentialed owner. */
-  passwordHash: string;
+  /** Plaintext password — set on the Supabase auth user for a brand-new /
+   *  not-yet-credentialed owner only. */
+  password: string;
   /** Stripe customer id, created by the marketing service before this call. */
   billingExternalId: string;
 }): Promise<ProvisionAccountResult> {
@@ -296,7 +305,7 @@ export async function provisionAccount(args: {
         return { kind: 'resumed', tenantId: owned.id, ownerUserId: existingUser.id, billingExternalId: owned.billingExternalId };
       }
       // A real prior account → don't silently attach a new paid workspace.
-      if (existingUser.passwordHash && existingUser.status === 'active') {
+      if (existingUser.status === 'active') {
         return { kind: 'account_exists' };
       }
       // else (invited / passwordless, no billing) → fall through and provision.
@@ -313,13 +322,15 @@ export async function provisionAccount(args: {
       tx,
     );
 
-    // Set the owner's password (portal is the login authority) on a brand-new /
-    // not-yet-credentialed owner only — never overwrite an existing one.
+    // Set the owner's password on the Supabase auth user (the credential
+    // authority) for a brand-new / not-yet-active owner only, and flip the
+    // profile to active.
     const [owner] = await tx.select().from(users).where(eq(users.id, prov.ownerUserId)).limit(1);
-    if (owner && (!owner.passwordHash || owner.status !== 'active')) {
+    if (owner && owner.status !== 'active') {
+      await getServiceSupabase().auth.admin.updateUserById(prov.ownerUserId, { password: args.password });
       await tx
         .update(users)
-        .set({ passwordHash: args.passwordHash, status: 'active', updatedAt: new Date().toISOString() })
+        .set({ status: 'active', updatedAt: new Date().toISOString() })
         .where(eq(users.id, prov.ownerUserId));
     }
 

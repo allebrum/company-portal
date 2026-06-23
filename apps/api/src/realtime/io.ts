@@ -1,11 +1,9 @@
 import type { Server as HttpServer } from 'node:http';
 import { Server } from 'socket.io';
-import { createAdapter } from '@socket.io/redis-adapter';
-import type { RequestHandler } from 'express';
-import { redisPub, redisSub } from '../redis.js';
 import { env } from '../env.js';
 import { ORG_ROOM, APPROVERS_ROOM, roomForUser, roomForTenant } from './rooms.js';
 import { getEffectivePermissions } from '../auth/permissions.js';
+import { resolveAuth } from '../auth/supabaseAuth.js';
 import type { ServerToClientEvents, ClientToServerEvents } from '@modernzen/shared';
 
 let _io: Server<ClientToServerEvents, ServerToClientEvents> | null = null;
@@ -15,24 +13,25 @@ export function getIO(): Server<ClientToServerEvents, ServerToClientEvents> {
   return _io;
 }
 
-export function initIO(httpServer: HttpServer, sessionMiddleware: RequestHandler) {
+// NOTE: this stays on Socket.IO's default in-memory adapter (no Redis) during
+// the migration. Realtime is replaced by Supabase Realtime in a later phase;
+// until then this serves a single API instance. Auth is the Supabase JWT,
+// passed by the client via `io(url, { auth: { token, tenantId } })`.
+export function initIO(httpServer: HttpServer) {
   const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
     cors: { origin: env.WEB_ORIGIN, credentials: true },
     transports: ['websocket', 'polling'],
   });
 
-  io.adapter(createAdapter(redisPub, redisSub));
-
-  // Share the express-session middleware so socket.request.session works.
-  // The engine.use signature differs from RequestHandler types — cast.
-  io.engine.use(sessionMiddleware as unknown as (req: unknown, res: unknown, next: () => void) => void);
-
   io.use((socket, next) => {
-    const req = socket.request as unknown as { session?: { user?: { userId: string; tenantId?: string } } };
-    const user = req.session?.user;
-    if (!user) return next(new Error('unauthorized'));
-    socket.data.user = user;
-    next();
+    const auth = (socket.handshake.auth ?? {}) as { token?: string; tenantId?: string };
+    void resolveAuth(auth.token, auth.tenantId)
+      .then((user) => {
+        if (!user) return next(new Error('unauthorized'));
+        socket.data.user = user;
+        next();
+      })
+      .catch(() => next(new Error('unauthorized')));
   });
 
   io.on('connection', (socket) => {
@@ -41,9 +40,6 @@ export function initIO(httpServer: HttpServer, sessionMiddleware: RequestHandler
       socket.disconnect(true);
       return;
     }
-    // Hoppa: join the user's workspace room so per-tenant broadcasts reach
-    // only that workspace. Keep ORG_ROOM during Phase 1 so emits that fall
-    // back to it (no tenant context) still deliver in the single-tenant case.
     if (user.tenantId) socket.join(roomForTenant(user.tenantId));
     socket.join(ORG_ROOM);
     socket.join(roomForUser(user.userId));

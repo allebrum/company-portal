@@ -10,9 +10,9 @@
  * Run after `drizzle-kit migrate` (see the PRE_DEPLOY job in app.spec.yaml).
  */
 import { randomUUID } from 'node:crypto';
-import argon2 from 'argon2';
 import { sql, eq } from 'drizzle-orm';
 import { db, sqlClient } from './client.js';
+import { getServiceSupabase } from '../lib/supabase.js';
 import { users, groups, permissions, groupPermissions, userGroups, appSettings, tenants, tenantMembers } from './schema.js';
 import { asc } from 'drizzle-orm';
 import {
@@ -58,7 +58,7 @@ async function main(): Promise<void> {
     } else {
       const [created] = await db
         .insert(tenants)
-        .values({ name: 'Hoppa', slug: 'hoppa', status: 'active' })
+        .values({ name: 'Modern Zen Portal', slug: 'modern-zen', status: 'active' })
         .returning({ id: tenants.id });
       defaultTenantId = created!.id;
     }
@@ -129,19 +129,33 @@ async function main(): Promise<void> {
     .limit(1);
   let adminCreated = false;
   if (!existingAdmin[0]) {
-    const id = randomUUID();
-    const passwordHash = await argon2.hash(adminPassword);
+    // Identity lives in Supabase Auth; reuse an existing auth user with this
+    // email (prior partial run) or create one, then mirror the profile (FK).
+    const admin = getServiceSupabase().auth.admin;
+    const list = await admin.listUsers({ perPage: 1000 });
+    let authId = list.data?.users.find((u) => u.email?.toLowerCase() === adminEmail)?.id;
+    if (!authId) {
+      const created = await admin.createUser({
+        email: adminEmail,
+        password: adminPassword,
+        email_confirm: true,
+        user_metadata: { name: 'Administrator' },
+      });
+      if (created.error || !created.data.user) {
+        throw new Error(`[init] failed to create admin auth user: ${created.error?.message ?? 'unknown'}`);
+      }
+      authId = created.data.user.id;
+    }
     await db.insert(users).values({
-      id,
+      id: authId,
       name: 'Administrator',
       email: adminEmail,
-      passwordHash,
       initials: adminEmail.slice(0, 2).toUpperCase(),
       status: 'active',
     });
     await db
       .insert(userGroups)
-      .values({ userId: id, groupId: groupIdByName.Owner!, tenantId: defaultTenantId })
+      .values({ userId: authId, groupId: groupIdByName.Owner!, tenantId: defaultTenantId })
       .onConflictDoNothing();
     adminCreated = true;
   }

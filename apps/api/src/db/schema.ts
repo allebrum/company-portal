@@ -180,12 +180,31 @@ export const oauthTokens = pgTable('oauth_tokens', {
   tenantIdx: index('oauth_tokens_tenant_idx').on(t.tenantId),
 }));
 
-// ---- 2FA, passkeys, auth tokens ----
-// REMOVED — owned by Supabase Auth now:
-//   - TOTP + WebAuthn factors  → Supabase Auth MFA (factors live in auth schema)
-//   - invite / password-reset  → Supabase Auth (admin invite + reset email)
-//   - client-portal magic-link → to be re-added on a Supabase-native flow
-// (Greenfield migration. See plan: Phases 1–2.)
+// ---- 2FA / passkeys ----
+// REMOVED — Supabase Auth MFA owns TOTP + WebAuthn factors now (they live in
+// the auth schema). Staff password reset + invite also move to Supabase Auth.
+
+// ---- Auth tokens (client-portal magic-link + marketing→portal handoff) ----
+//
+// Opaque random tokens, SHA-256-hashed at rest. Staff invite/reset moved to
+// Supabase Auth; this table now backs the external client-portal magic-link
+// ('portal-magic', keyed to a clientContact) and the optional marketing→portal
+// auto-login handoff ('portal-login'). The DB only ever holds the hash.
+export const authTokens = pgTable('auth_tokens', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  // Subject is exactly one of userId (staff) or contactId (client portal).
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  contactId: uuid('contact_id').references(() => clientContacts.id, { onDelete: 'cascade' }),
+  kind: text('kind').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'string' }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true, mode: 'string' }),
+  createdAt: ts(),
+}, (t) => ({
+  hashIdx: uniqueIndex('auth_tokens_token_hash_idx').on(t.tokenHash),
+  userKindIdx: index('auth_tokens_user_kind_idx').on(t.userId, t.kind, t.usedAt),
+  contactKindIdx: index('auth_tokens_contact_kind_idx').on(t.contactId, t.kind, t.usedAt),
+}));
 
 // ---- RBAC: permissions catalog, groups, membership, overrides ----
 export const permissions = pgTable('permissions', {
@@ -772,6 +791,7 @@ export type ActivityRow = typeof activityLog.$inferSelect;
 export type Integration = typeof integrations.$inferSelect;
 export type DriveFolder = typeof driveLinkedFolders.$inferSelect;
 export type DriveItem = typeof driveItems.$inferSelect;
+export type AuthToken = typeof authTokens.$inferSelect;
 export type QrCode = typeof qrCodes.$inferSelect;
 export type QrScan = typeof qrScans.$inferSelect;
 export type UploadQrSession = typeof uploadQrSessions.$inferSelect;

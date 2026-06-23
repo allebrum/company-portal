@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import argon2 from 'argon2';
 import { sql } from 'drizzle-orm';
 import { db, sqlClient } from './client.js';
+import { getServiceSupabase } from '../lib/supabase.js';
 import {
   users,
   tenants,
@@ -33,7 +33,7 @@ import {
   SYSTEM_GROUP_PERMISSIONS,
 } from '@modernzen/shared';
 
-const DEFAULT_PASSWORD = 'Allebrum2026!';
+const DEFAULT_PASSWORD = 'ModernZen2026!';
 
 // Helpers ported from data.jsx
 function isoDayOffset(offset: number): string {
@@ -79,10 +79,6 @@ async function clearAll(): Promise<void> {
 
 async function main(): Promise<void> {
   // eslint-disable-next-line no-console
-  console.log('[seed] hashing password...');
-  const passwordHash = await argon2.hash(DEFAULT_PASSWORD);
-
-  // eslint-disable-next-line no-console
   console.log('[seed] clearing existing data...');
   await clearAll();
 
@@ -94,23 +90,42 @@ async function main(): Promise<void> {
   const TENANT_ID = tenant!.id;
 
   // ---- Users ----
+  // Identities live in Supabase Auth; the `users` profile row is keyed to the
+  // auth uid (FK). Create each via the Admin API, then mirror the profile.
   const userSeeds = [
-    { key: 'senica', name: 'Senica Gonzalez', initials: 'SG', group: 'Owner' as const, color: '#9333ea', email: 'senica@allebrum.com', billable: '225' },
-    { key: 'marcus', name: 'Marcus Lee', initials: 'ML', group: 'Member' as const, color: '#2563eb', email: 'marcus@allebrum.com', billable: '185' },
-    { key: 'priya', name: 'Priya Patel', initials: 'PP', group: 'Member' as const, color: '#0d9488', email: 'priya@allebrum.com', billable: '165' },
-    { key: 'jordan', name: 'Jordan Reyes', initials: 'JR', group: 'Member' as const, color: '#db2777', email: 'jordan@allebrum.com', billable: '145' },
-    { key: 'avery', name: 'Avery Chen', initials: 'AC', group: 'Member' as const, color: '#f97316', email: 'avery@allebrum.com', billable: '155' },
-    { key: 'sam', name: 'Sam Okafor', initials: 'SO', group: 'Member' as const, color: '#22c55e', email: 'sam@allebrum.com', billable: '175' },
+    { key: 'senica', name: 'Senica Gonzalez', initials: 'SG', group: 'Owner' as const, color: '#9333ea', email: 'senica@modernzen.com', billable: '225' },
+    { key: 'marcus', name: 'Marcus Lee', initials: 'ML', group: 'Member' as const, color: '#2563eb', email: 'marcus@modernzen.com', billable: '185' },
+    { key: 'priya', name: 'Priya Patel', initials: 'PP', group: 'Member' as const, color: '#0d9488', email: 'priya@modernzen.com', billable: '165' },
+    { key: 'jordan', name: 'Jordan Reyes', initials: 'JR', group: 'Member' as const, color: '#db2777', email: 'jordan@modernzen.com', billable: '145' },
+    { key: 'avery', name: 'Avery Chen', initials: 'AC', group: 'Member' as const, color: '#f97316', email: 'avery@modernzen.com', billable: '155' },
+    { key: 'sam', name: 'Sam Okafor', initials: 'SO', group: 'Member' as const, color: '#22c55e', email: 'sam@modernzen.com', billable: '175' },
   ];
+  const admin = getServiceSupabase().auth.admin;
+
+  // Idempotent re-seed: drop any existing auth users for the seed emails first.
+  const seedEmails = new Set(userSeeds.map((u) => u.email.toLowerCase()));
+  const existingAuth = await admin.listUsers({ perPage: 1000 });
+  for (const au of existingAuth.data?.users ?? []) {
+    if (au.email && seedEmails.has(au.email.toLowerCase())) await admin.deleteUser(au.id);
+  }
+
   const userIds: Record<string, string> = {};
   for (const u of userSeeds) {
-    const id = randomUUID();
+    const created = await admin.createUser({
+      email: u.email,
+      password: DEFAULT_PASSWORD,
+      email_confirm: true,
+      user_metadata: { name: u.name },
+    });
+    if (created.error || !created.data.user) {
+      throw new Error(`[seed] failed to create auth user ${u.email}: ${created.error?.message ?? 'unknown'}`);
+    }
+    const id = created.data.user.id;
     userIds[u.key] = id;
     await db.insert(users).values({
       id,
       name: u.name,
       email: u.email,
-      passwordHash,
       initials: u.initials,
       color: u.color,
       billable: u.billable,

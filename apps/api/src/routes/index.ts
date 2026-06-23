@@ -21,7 +21,6 @@ import { bootstrapRouter } from './bootstrap.js';
 import { onboardingRouter } from './onboarding.js';
 import { rbacRouter } from './rbac.js';
 import { settingsRouter } from './settings.js';
-import { twofaRouter } from './twofa.js';
 import { tenantContext } from '../middleware/tenantContext.js';
 import { requireActiveSubscription } from '../middleware/requireActiveSubscription.js';
 import { provisioningRouter } from './provisioning.js';
@@ -45,7 +44,6 @@ apiRouter.use(tenantContext);
 apiRouter.use(requireActiveSubscription);
 
 apiRouter.use('/auth', authRouter);
-apiRouter.use('/auth', twofaRouter);
 apiRouter.use('/users', usersRouter);
 apiRouter.use('/clients', clientsRouter);
 apiRouter.use('/projects', projectsRouter);

@@ -10,8 +10,11 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   API_PORT: z.coerce.number().int().min(1).max(65535).default(8080),
   DATABASE_URL: z.string().url(),
-  REDIS_URL: z.string().url(),
-  SESSION_SECRET: z.string().min(16, 'SESSION_SECRET must be at least 16 characters'),
+  // Redis + express-session were removed in the Supabase/Netlify migration
+  // (auth is stateless Supabase JWT; rate-limit + geo cache are in-process).
+  // Kept optional so old .env files don't fail validation.
+  REDIS_URL: z.string().url().optional(),
+  SESSION_SECRET: z.string().optional(),
   WEB_ORIGIN: z.string().url().default('http://localhost:3000'),
   COOKIE_DOMAIN: z.string().optional(),
   // Google OAuth (optional — the feature stays dormant until all three are set)

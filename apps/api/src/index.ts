@@ -8,7 +8,7 @@ import helmet from 'helmet';
 import compression from 'compression';
 import pinoHttp from 'pino-http';
 import { env, isProd } from './env.js';
-import { sessionMiddleware } from './session.js';
+import { supabaseAuth } from './auth/supabaseAuth.js';
 import { apiRouter } from './routes/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { initIO } from './realtime/io.js';
@@ -41,7 +41,8 @@ app.use(
   }),
 );
 app.use(cookieParser());
-app.use(sessionMiddleware);
+// Stateless auth: verify the Supabase JWT (Bearer) and populate req.session.user.
+app.use(supabaseAuth);
 app.use(
   pinoHttp({
     transport: isProd ? undefined : { target: 'pino-pretty', options: { colorize: true, singleLine: true } },
@@ -85,7 +86,7 @@ if (env.SERVE_WEB) {
 app.use(errorHandler);
 
 const httpServer = createServer(app);
-initIO(httpServer, sessionMiddleware);
+initIO(httpServer);
 
 httpServer.listen(env.API_PORT, () => {
   // eslint-disable-next-line no-console
