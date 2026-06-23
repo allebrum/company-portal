@@ -7,7 +7,7 @@ import { Field, Input, Checkbox } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/hooks/useAuth';
 import { useProjects, useUpdateClient, type ClientRow } from '@/hooks/useResources';
-import type { StructuredAddress, StructuredContact } from '@allebrum/shared';
+import type { StructuredAddress, StructuredContact } from '@modernzen/shared';
 
 const STATUS_ORDER = ['pipeline', 'won', 'lost', 'on-hold'] as const;
 const STATUS_LABEL: Record<(typeof STATUS_ORDER)[number], string> = {

@@ -13,7 +13,7 @@ import type {
   QrCodeRow,
   QrScanRow,
   QrScanSummary,
-} from '@allebrum/shared';
+} from '@modernzen/shared';
 
 /**
  * F24 — QR code generator service. Owns CRUD + scan recording +

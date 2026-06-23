@@ -19,7 +19,7 @@ import {
 } from '../db/schema.js';
 import { getUser } from './users.js';
 import { webauthnOrigin, webauthnRpId } from '../env.js';
-import type { TwoFactorStatus } from '@allebrum/shared';
+import type { TwoFactorStatus } from '@modernzen/shared';
 
 // ---- requirement / status ----
 export async function groupRequires2fa(userId: string): Promise<boolean> {

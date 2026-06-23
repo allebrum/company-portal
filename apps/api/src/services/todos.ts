@@ -1,8 +1,8 @@
 import { eq, or, and, desc, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { todos, type Todo } from '../db/schema.js';
-import type { CreateTodoInput, UpdateTodoInput } from '@allebrum/shared';
-import { EV } from '@allebrum/shared';
+import type { CreateTodoInput, UpdateTodoInput } from '@modernzen/shared';
+import { EV } from '@modernzen/shared';
 import { emit } from '../realtime/emit.js';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';

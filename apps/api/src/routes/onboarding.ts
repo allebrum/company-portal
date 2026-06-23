@@ -5,7 +5,7 @@ import {
   CreateProjectSchema,
   CreateGoalSchema,
   CreateTodoSchema,
-} from '@allebrum/shared';
+} from '@modernzen/shared';
 import { db } from '../db/client.js';
 import { clients, projects, goals, todos, timeEntries, activeTimers } from '../db/schema.js';
 import { requireAuth } from '../middleware/requireAuth.js';

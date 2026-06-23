@@ -12,7 +12,7 @@ import {
   users,
   type Tenant,
 } from '../db/schema.js';
-import { SYSTEM_GROUPS, SYSTEM_GROUP_PERMISSIONS } from '@allebrum/shared';
+import { SYSTEM_GROUPS, SYSTEM_GROUP_PERMISSIONS } from '@modernzen/shared';
 
 /**
  * A drizzle executor — the base `db` or a transaction handle. Lets the

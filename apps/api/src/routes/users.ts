@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { InviteUserSchema, UpdateUserSchema } from '@allebrum/shared';
+import { InviteUserSchema, UpdateUserSchema } from '@modernzen/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requirePermission, userCan } from '../auth/permissions.js';
 import { validate, getValidated } from '../middleware/validate.js';

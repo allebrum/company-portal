@@ -1,7 +1,7 @@
 import { getIO } from './io.js';
 import { ORG_ROOM, APPROVERS_ROOM, roomForUser, roomForTenant } from './rooms.js';
 import { currentTenantIdOrNull } from '../tenancy/context.js';
-import type { EventName } from '@allebrum/shared';
+import type { EventName } from '@modernzen/shared';
 
 export const emit = {
   // Hoppa: "org" broadcasts are tenant-scoped. We derive the tenant from the

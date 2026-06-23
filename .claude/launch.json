@@ -4,7 +4,7 @@
     {
       "name": "web",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@allebrum/web", "dev"],
+      "runtimeArgs": ["--filter", "@modernzen/web", "dev"],
       "port": 3000
     },
     {

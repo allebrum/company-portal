@@ -1,7 +1,7 @@
 'use client';
 
 import { io, type Socket } from 'socket.io-client';
-import type { ClientToServerEvents, ServerToClientEvents } from '@allebrum/shared';
+import type { ClientToServerEvents, ServerToClientEvents } from '@modernzen/shared';
 import { API_URL } from './env';
 
 let socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null;

@@ -40,7 +40,7 @@ import type {
   SpaceFile,
   ClientOverview,
   ProjectOverview,
-} from '@allebrum/shared';
+} from '@modernzen/shared';
 
 // ---- Types (matching API row shapes; permissive to avoid double-maintaining schema) ----
 export type UserRow = {

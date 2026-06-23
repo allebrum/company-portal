@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { todos } from '../db/schema.js';
-import type { SpaceFile } from '@allebrum/shared';
+import type { SpaceFile } from '@modernzen/shared';
 import { HttpError } from '../middleware/errorHandler.js';
 import {
   isConnected as driveIsConnected,
@@ -12,7 +12,7 @@ import {
   deleteEntry,
 } from './drive.js';
 import { emit } from '../realtime/emit.js';
-import { EV } from '@allebrum/shared';
+import { EV } from '@modernzen/shared';
 import { appendActivity } from './activity.js';
 import { tenantEq } from '../tenancy/scope.js';
 

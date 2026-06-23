@@ -6,7 +6,7 @@ import {
   PortalExchangeSchema,
   CreateTicketSchema,
   TicketMessageSchema,
-} from '@allebrum/shared';
+} from '@modernzen/shared';
 import { db } from '../db/client.js';
 import {
   clients,

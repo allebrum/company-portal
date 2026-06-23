@@ -1,7 +1,7 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { epics, type Epic } from '../db/schema.js';
-import type { CreateEpicInput, UpdateEpicInput } from '@allebrum/shared';
+import type { CreateEpicInput, UpdateEpicInput } from '@modernzen/shared';
 import { HttpError } from '../middleware/errorHandler.js';
 import { tenantEq, stampTenant } from '../tenancy/scope.js';
 

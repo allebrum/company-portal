@@ -3,10 +3,10 @@ import { db } from '../db/client.js';
 import {
   payPeriods, payConfig, timeEntries, users, projects, type PayPeriod,
 } from '../db/schema.js';
-import type { PayConfigInput, PayDateRef } from '@allebrum/shared';
+import type { PayConfigInput, PayDateRef } from '@modernzen/shared';
 import { appendActivity } from './activity.js';
 import { emit } from '../realtime/emit.js';
-import { EV } from '@allebrum/shared';
+import { EV } from '@modernzen/shared';
 import { getSettings } from './settings.js';
 import { sendPayrollReportEmail } from './mail.js';
 import { HttpError } from '../middleware/errorHandler.js';

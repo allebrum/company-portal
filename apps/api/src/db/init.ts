@@ -21,7 +21,7 @@ import {
   PERMISSION_CATEGORIES,
   SYSTEM_GROUPS,
   SYSTEM_GROUP_PERMISSIONS,
-} from '@allebrum/shared';
+} from '@modernzen/shared';
 import { env } from '../env.js';
 
 function categoryOf(perm: string): string {
@@ -71,7 +71,7 @@ async function main(): Promise<void> {
   await db.update(tenants).set({ billingExempt: true }).where(eq(tenants.id, defaultTenantId));
 
   // 1. Permission catalog — insert missing, then refresh labels/category so
-  //    the catalog always matches @allebrum/shared.
+  //    the catalog always matches @modernzen/shared.
   await db
     .insert(permissions)
     .values(PERMISSIONS.map((p) => ({ key: p, label: PERMISSION_LABELS[p], category: categoryOf(p) })))

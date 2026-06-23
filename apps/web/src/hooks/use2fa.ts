@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { startRegistration, startAuthentication } from '@simplewebauthn/browser';
 import { api } from '@/lib/api';
-import type { TwoFactorStatus, TwoFactorChallenge } from '@allebrum/shared';
+import type { TwoFactorStatus, TwoFactorChallenge } from '@modernzen/shared';
 
 // ---- Login second-step (uses the pending session) ----
 export function useTwoFactorChallenge(enabled: boolean) {

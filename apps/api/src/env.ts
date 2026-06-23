@@ -62,6 +62,11 @@ const EnvSchema = z.object({
   // policy (app_settings.passwordLoginEnabled) is enforced separately, against
   // the user's resolved tenant at login (see routes/auth.ts).
   PASSWORD_LOGIN_ENABLED: z.string().optional(),
+  // Supabase platform (Auth/DB/Realtime/Storage). Optional during the migration
+  // so the legacy server still boots; required once the relevant phase lands.
+  SUPABASE_URL: z.string().url().optional(),
+  SUPABASE_ANON_KEY: z.string().optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
 });
 
 export const env = EnvSchema.parse(process.env);

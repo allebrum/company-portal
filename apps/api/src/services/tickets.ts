@@ -12,8 +12,8 @@ import {
 } from '../db/schema.js';
 import { env } from '../env.js';
 import { sendTicketUpdateEmail } from './mail.js';
-import type { CreateTicketInput, UpdateTicketInput, TicketRow, TicketMessageRow, TicketDetail, TicketStatus } from '@allebrum/shared';
-import { EV } from '@allebrum/shared';
+import type { CreateTicketInput, UpdateTicketInput, TicketRow, TicketMessageRow, TicketDetail, TicketStatus } from '@modernzen/shared';
+import { EV } from '@modernzen/shared';
 import { emit } from '../realtime/emit.js';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';

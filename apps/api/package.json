@@ -1,5 +1,5 @@
 {
-  "name": "@allebrum/api",
+  "name": "@modernzen/api",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -18,9 +18,10 @@
     "test": "node --import tsx --test"
   },
   "dependencies": {
-    "@allebrum/shared": "workspace:*",
+    "@modernzen/shared": "workspace:*",
     "@simplewebauthn/server": "^13.3.0",
     "@socket.io/redis-adapter": "8.3.0",
+    "@supabase/supabase-js": "^2.108.2",
     "argon2": "0.41.1",
     "compression": "1.7.5",
     "connect-redis": "7.1.1",

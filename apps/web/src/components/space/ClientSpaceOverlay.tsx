@@ -32,7 +32,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { AssigneeCell } from '@/components/ui/AssigneeCell';
 import { fmtTimer, parseLocalDate, PRIORITY_DOT } from '@/lib/formatters';
 import { rollupProgress, HEALTH_TONE } from '@/lib/roadmap';
-import type { SpaceFile } from '@allebrum/shared';
+import type { SpaceFile } from '@modernzen/shared';
 import type { Scope } from '@/lib/roadmap';
 import { Input } from '@/components/ui/Field';
 import { NotesTab } from './NotesTab';

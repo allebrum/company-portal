@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Home, Briefcase, Clock, CheckSquare, Target, Shield, BarChart3, Settings, FolderOpen, Wrench } from 'lucide-react';
-import type { Permission } from '@allebrum/shared';
+import type { Permission } from '@modernzen/shared';
 import { useEntries, useAuthConfig } from '@/hooks/useResources';
 import { useAuth } from '@/hooks/useAuth';
 import { Avatar } from '../ui/Avatar';

@@ -20,7 +20,7 @@ import {
   type TodoRow, type GoalRow, type ChecklistItemRow, type GoalHealth,
 } from '@/hooks/useResources';
 import { useUploadManager } from '@/contexts/UploadManagerContext';
-import type { SpaceFile } from '@allebrum/shared';
+import type { SpaceFile } from '@modernzen/shared';
 import { useMyTimer } from '@/hooks/useTimer';
 import { fmtTimer, PRIORITY_DOT } from '@/lib/formatters';
 import { QuickAddTodo } from '@/components/features/QuickAddTodo';
@@ -44,7 +44,7 @@ import { EstimateChip } from '@/components/composer/chips/EstimateChip';
 import { CategoryChip } from '@/components/composer/chips/CategoryChip';
 import { TagsChip } from '@/components/composer/chips/TagsChip';
 import { VisibilityChip } from '@/components/composer/chips/VisibilityChip';
-import type { ResourceKind } from '@allebrum/shared';
+import type { ResourceKind } from '@modernzen/shared';
 
 // ---------- types ----------
 

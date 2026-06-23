@@ -8,8 +8,8 @@ import {
   type DriveFolder,
   type DriveItem,
 } from '../db/schema.js';
-import type { ConnectIntegrationInput, LinkFolderInput, IntegrationKind } from '@allebrum/shared';
-import { EV } from '@allebrum/shared';
+import type { ConnectIntegrationInput, LinkFolderInput, IntegrationKind } from '@modernzen/shared';
+import { EV } from '@modernzen/shared';
 import { emit } from '../realtime/emit.js';
 import { appendActivity } from './activity.js';
 import { disconnectDrive } from './drive.js';

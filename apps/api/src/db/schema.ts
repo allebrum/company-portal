@@ -26,7 +26,7 @@ import {
   WEEKEND_RULES,
   TICKET_STATUSES,
   TICKET_AUTHOR_KINDS,
-} from '@allebrum/shared';
+} from '@modernzen/shared';
 
 // ---- Enums ----
 export const entryStatusEnum = pgEnum('entry_status', ENTRY_STATUSES);

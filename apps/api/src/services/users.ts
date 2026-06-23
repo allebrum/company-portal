@@ -5,7 +5,7 @@ import { users, groups, userGroups, userPermissionOverrides, tenantMembers, type
 import { HttpError } from '../middleware/errorHandler.js';
 import { appendActivity } from './activity.js';
 import { emit } from '../realtime/emit.js';
-import { EV } from '@allebrum/shared';
+import { EV } from '@modernzen/shared';
 import { env } from '../env.js';
 import { issueToken, invalidateTokensFor, INVITE_TTL_MS } from '../auth/tokens.js';
 import { sendInviteEmail } from './mail.js';

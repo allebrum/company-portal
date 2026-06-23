@@ -7,8 +7,8 @@ import {
   ForgotPasswordSchema,
   ResetPasswordSchema,
   AcceptInviteSchema,
-} from '@allebrum/shared';
-import type { AuthConfig, AuthMethods } from '@allebrum/shared';
+} from '@modernzen/shared';
+import type { AuthConfig, AuthMethods } from '@modernzen/shared';
 import { validate, getValidated } from '../middleware/validate.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { rateLimit } from '../middleware/rateLimit.js';

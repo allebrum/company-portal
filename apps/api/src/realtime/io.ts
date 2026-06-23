@@ -6,7 +6,7 @@ import { redisPub, redisSub } from '../redis.js';
 import { env } from '../env.js';
 import { ORG_ROOM, APPROVERS_ROOM, roomForUser, roomForTenant } from './rooms.js';
 import { getEffectivePermissions } from '../auth/permissions.js';
-import type { ServerToClientEvents, ClientToServerEvents } from '@allebrum/shared';
+import type { ServerToClientEvents, ClientToServerEvents } from '@modernzen/shared';
 
 let _io: Server<ClientToServerEvents, ServerToClientEvents> | null = null;
 

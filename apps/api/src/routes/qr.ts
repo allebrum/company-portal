@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import QRCode from 'qrcode';
-import { CreateQrSchema, UpdateQrSchema } from '@allebrum/shared';
+import { CreateQrSchema, UpdateQrSchema } from '@modernzen/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { validate, getValidated } from '../middleware/validate.js';

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { UpdateAppSettingsSchema } from '@allebrum/shared';
+import { UpdateAppSettingsSchema } from '@modernzen/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requirePermission } from '../auth/permissions.js';
 import { validate, getValidated } from '../middleware/validate.js';

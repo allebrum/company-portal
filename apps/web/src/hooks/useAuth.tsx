@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
-import type { Permission } from '@allebrum/shared';
+import type { Permission } from '@modernzen/shared';
 
 /** Hoppa: one workspace the user belongs to (for the switcher). */
 export type Workspace = { id: string; name: string; slug: string; isOwner: boolean };

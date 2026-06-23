@@ -1,8 +1,8 @@
 import { eq, and } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { appSettings, oauthTokens, type AppSettingsRow } from '../db/schema.js';
-import type { UpdateAppSettingsInput } from '@allebrum/shared';
-import { EV } from '@allebrum/shared';
+import type { UpdateAppSettingsInput } from '@modernzen/shared';
+import { EV } from '@modernzen/shared';
 import { emit } from '../realtime/emit.js';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';

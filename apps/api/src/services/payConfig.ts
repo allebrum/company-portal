@@ -1,10 +1,10 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { payConfig, type PayConfig } from '../db/schema.js';
-import type { PayConfigInput } from '@allebrum/shared';
+import type { PayConfigInput } from '@modernzen/shared';
 import { appendActivity } from './activity.js';
 import { emit } from '../realtime/emit.js';
-import { EV } from '@allebrum/shared';
+import { EV } from '@modernzen/shared';
 import { regenerateFuturePeriods } from './payPeriods.js';
 import { currentTenantId } from '../tenancy/context.js';
 

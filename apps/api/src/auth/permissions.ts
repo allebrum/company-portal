@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { userGroups, groupPermissions, userPermissionOverrides } from '../db/schema.js';
-import type { Permission } from '@allebrum/shared';
+import type { Permission } from '@modernzen/shared';
 
 /**
  * Effective permissions = union of all permissions from every group the user

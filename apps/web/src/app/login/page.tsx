@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { KeyRound, ArrowLeft } from 'lucide-react';
-import type { AuthMethods } from '@allebrum/shared';
+import type { AuthMethods } from '@modernzen/shared';
 import { Button } from '@/components/ui/Button';
 import { Field, Input } from '@/components/ui/Field';
 import { Card } from '@/components/ui/Card';

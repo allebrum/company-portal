@@ -5,8 +5,8 @@ import {
   TotpEnableSchema,
   WebAuthnResponseSchema,
   RenameCredentialSchema,
-} from '@allebrum/shared';
-import type { TwoFactorChallenge } from '@allebrum/shared';
+} from '@modernzen/shared';
+import type { TwoFactorChallenge } from '@modernzen/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { validate, getValidated } from '../middleware/validate.js';

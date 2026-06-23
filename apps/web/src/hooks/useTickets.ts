@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { TicketRow, TicketDetail, TicketMessageRow, UpdateTicketInput } from '@allebrum/shared';
+import type { TicketRow, TicketDetail, TicketMessageRow, UpdateTicketInput } from '@modernzen/shared';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
 

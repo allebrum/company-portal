@@ -5,7 +5,7 @@ import {
   SetGroupPermissionsSchema,
   SetUserGroupsSchema,
   SetUserOverridesSchema,
-} from '@allebrum/shared';
+} from '@modernzen/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requirePermission } from '../auth/permissions.js';
 import { validate, getValidated } from '../middleware/validate.js';

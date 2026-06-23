@@ -8,7 +8,7 @@ import type {
   UpdateQrInput,
   QrCodeRow,
   QrScanSummary,
-} from '@allebrum/shared';
+} from '@modernzen/shared';
 
 /** F24 — hooks for the QR Code Generator tool. */
 

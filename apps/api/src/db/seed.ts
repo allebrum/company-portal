@@ -31,7 +31,7 @@ import {
   PERMISSION_CATEGORIES,
   SYSTEM_GROUPS,
   SYSTEM_GROUP_PERMISSIONS,
-} from '@allebrum/shared';
+} from '@modernzen/shared';
 
 const DEFAULT_PASSWORD = 'Allebrum2026!';
 

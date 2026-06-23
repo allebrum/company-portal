@@ -16,8 +16,8 @@ import type {
   StartTimerInput,
   ManualEntryInput,
   EntryListQuery,
-} from '@allebrum/shared';
-import { EV } from '@allebrum/shared';
+} from '@modernzen/shared';
+import { EV } from '@modernzen/shared';
 import { emit } from '../realtime/emit.js';
 import { appendActivity } from './activity.js';
 import { getTodo, logTimeToTodo } from './todos.js';

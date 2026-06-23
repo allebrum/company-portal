@@ -64,7 +64,7 @@ import {
 } from '@/hooks/useResources';
 import { useAuth } from '@/hooks/useAuth';
 import { PAY_PERIOD_STATUS_LABEL, PAY_PERIOD_STATUS_PILL } from '@/lib/formatters';
-import type { Permission } from '@allebrum/shared';
+import type { Permission } from '@modernzen/shared';
 
 type Tab = 'users' | 'groups' | 'auth' | 'workspace' | 'pay' | 'integrations' | 'branding';
 const ADMIN_TAB_PARAM = 'adminTab';

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { getSocket, disconnectSocket } from '@/lib/socket';
 import { qk } from '@/lib/queryKeys';
-import { EV, type ActivityPayload, type TimerPayload } from '@allebrum/shared';
+import { EV, type ActivityPayload, type TimerPayload } from '@modernzen/shared';
 import { AuthProvider } from '@/hooks/useAuth';
 import { ToastProvider } from '@/components/ui/Toast';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';

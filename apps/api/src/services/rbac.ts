@@ -13,9 +13,9 @@ import type {
   CreateGroupInput,
   UpdateGroupInput,
   Permission,
-} from '@allebrum/shared';
+} from '@modernzen/shared';
 import { emit } from '../realtime/emit.js';
-import { EV } from '@allebrum/shared';
+import { EV } from '@modernzen/shared';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';
 

@@ -25,7 +25,7 @@ import { Button } from '@/components/ui/Button';
 import { API_URL } from '@/lib/env';
 import { fmtTimer, PRIORITY_DOT } from '@/lib/formatters';
 import { rollupProgress } from '@/lib/roadmap';
-import type { SpaceBlock, SpaceFile } from '@allebrum/shared';
+import type { SpaceBlock, SpaceFile } from '@modernzen/shared';
 import type { Scope } from '@/lib/roadmap';
 
 // ============================================================================
