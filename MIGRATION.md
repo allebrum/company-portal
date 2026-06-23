@@ -1,6 +1,6 @@
 # Modern Zen Portal — Supabase + Netlify migration
 
-This branch (`refactor/modernzen`) re-platforms the company portal — a fork of
+This branch (`supabase-migration`) re-platforms the company portal — a fork of
 [`allebrum/company-portal`](https://github.com/allebrum/company-portal) — onto
 **Supabase + Netlify** and rebrands it for Modern Zen. It is a **greenfield**
 migration: no production data is preserved, so the schema and auth model are
