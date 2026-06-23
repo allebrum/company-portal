@@ -60,14 +60,15 @@ const tenantRef = () => uuid('tenant_id').references(() => tenants.id, { onDelet
 // 0017 SET NOT NULL after the 0016 backfill.
 const tenantRefNN = () => uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' });
 
-// ---- Users ----
+// ---- Users (profile) ----
+// One row per global identity, keyed to Supabase Auth's `auth.users.id`.
+// Credentials (password, OAuth identities, MFA factors) live in Supabase Auth
+// — NOT here. `id` is set to the auth uid on creation (the FK to auth.users is
+// added in the platform migration `0001_supabase_platform.sql`).
 export const users = pgTable('users', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').primaryKey(),
   name: text('name').notNull(),
   email: text('email').notNull(),
-  passwordHash: text('password_hash'),
-  googleSub: text('google_sub'),
-  authProvider: text('auth_provider').notNull().default('password'),
   initials: text('initials').notNull().default(''),
   color: text('color').notNull().default('#6b7280'),
   billable: numeric('billable', { precision: 10, scale: 2 }).notNull().default('150'),
@@ -76,7 +77,6 @@ export const users = pgTable('users', {
   updatedAt: updTs(),
 }, (t) => ({
   emailIdx: uniqueIndex('users_email_lower_idx').on(sql`lower(${t.email})`),
-  googleSubIdx: uniqueIndex('users_google_sub_idx').on(t.googleSub),
 }));
 
 // ---- Tenants (workspaces) — Hoppa multi-tenancy ----
@@ -180,64 +180,12 @@ export const oauthTokens = pgTable('oauth_tokens', {
   tenantIdx: index('oauth_tokens_tenant_idx').on(t.tenantId),
 }));
 
-// ---- 2FA: TOTP, recovery codes, WebAuthn passkeys ----
-export const userTotp = pgTable('user_totp', {
-  userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
-  secret: text('secret').notNull(),
-  enabled: boolean('enabled').notNull().default(false),
-  verifiedAt: timestamp('verified_at', { withTimezone: true, mode: 'string' }),
-  createdAt: ts(),
-});
-
-export const userRecoveryCodes = pgTable('user_recovery_codes', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  codeHash: text('code_hash').notNull(),
-  usedAt: timestamp('used_at', { withTimezone: true, mode: 'string' }),
-  createdAt: ts(),
-}, (t) => ({
-  userIdx: index('recovery_codes_user_idx').on(t.userId),
-}));
-
-export const webauthnCredentials = pgTable('webauthn_credentials', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  credentialId: text('credential_id').notNull(),
-  publicKey: text('public_key').notNull(),
-  counter: integer('counter').notNull().default(0),
-  transports: text('transports').array().notNull().default(sql`'{}'::text[]`),
-  name: text('name').notNull().default('Passkey'),
-  createdAt: ts(),
-}, (t) => ({
-  credIdx: uniqueIndex('webauthn_cred_id_idx').on(t.credentialId),
-  userIdx: index('webauthn_user_idx').on(t.userId),
-}));
-
-// ---- Auth tokens (invite + password-reset) ----
-//
-// Opaque random tokens, SHA-256-hashed at rest. The raw token is only ever
-// in the outbound email and the user's browser URL; the DB only ever holds
-// the hash, the kind (`invite` or `reset`), an absolute expiry, and a
-// `usedAt` marker for single-use revocation.
-export const authTokens = pgTable('auth_tokens', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  // Subject is exactly one of userId (internal staff) or contactId
-  // (external client portal contact). Enforced by a CHECK constraint in
-  // the migration; both columns are nullable at the schema level so the
-  // discriminated subject can live in one table.
-  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
-  contactId: uuid('contact_id').references(() => clientContacts.id, { onDelete: 'cascade' }),
-  // 'invite' | 'reset' (staff, F1) | 'portal-magic' (client portal, F23).
-  kind: text('kind').notNull(),
-  tokenHash: text('token_hash').notNull(),
-  expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'string' }).notNull(),
-  usedAt: timestamp('used_at', { withTimezone: true, mode: 'string' }),
-  createdAt: ts(),
-}, (t) => ({
-  hashIdx: uniqueIndex('auth_tokens_token_hash_idx').on(t.tokenHash),
-  userKindIdx: index('auth_tokens_user_kind_idx').on(t.userId, t.kind, t.usedAt),
-  contactKindIdx: index('auth_tokens_contact_kind_idx').on(t.contactId, t.kind, t.usedAt),
-}));
+// ---- 2FA, passkeys, auth tokens ----
+// REMOVED — owned by Supabase Auth now:
+//   - TOTP + WebAuthn factors  → Supabase Auth MFA (factors live in auth schema)
+//   - invite / password-reset  → Supabase Auth (admin invite + reset email)
+//   - client-portal magic-link → to be re-added on a Supabase-native flow
+// (Greenfield migration. See plan: Phases 1–2.)
 
 // ---- RBAC: permissions catalog, groups, membership, overrides ----
 export const permissions = pgTable('permissions', {
@@ -804,8 +752,6 @@ export type Tenant = typeof tenants.$inferSelect;
 export type TenantMember = typeof tenantMembers.$inferSelect;
 export type AppSettingsRow = typeof appSettings.$inferSelect;
 export type OAuthToken = typeof oauthTokens.$inferSelect;
-export type UserTotp = typeof userTotp.$inferSelect;
-export type WebauthnCredential = typeof webauthnCredentials.$inferSelect;
 export type Group = typeof groups.$inferSelect;
 export type Permission = typeof permissions.$inferSelect;
 export type Client = typeof clients.$inferSelect;
@@ -826,7 +772,6 @@ export type ActivityRow = typeof activityLog.$inferSelect;
 export type Integration = typeof integrations.$inferSelect;
 export type DriveFolder = typeof driveLinkedFolders.$inferSelect;
 export type DriveItem = typeof driveItems.$inferSelect;
-export type AuthToken = typeof authTokens.$inferSelect;
 export type QrCode = typeof qrCodes.$inferSelect;
 export type QrScan = typeof qrScans.$inferSelect;
 export type UploadQrSession = typeof uploadQrSessions.$inferSelect;

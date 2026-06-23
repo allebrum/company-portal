@@ -1,1 +1,0 @@
-ALTER TABLE "pay_config" DROP COLUMN IF EXISTS "pay_delay_days";
