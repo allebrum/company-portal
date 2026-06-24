@@ -79,10 +79,23 @@ function Inner() {
   const status = new Map<string, string>();
   for (const c of conns.data?.connections ?? []) status.set(`${c.provider}:${c.integration}`, c.status);
 
-  const connectComposio = (toolkit: string) =>
-    composio.mutate(toolkit, { onSuccess: (r) => { window.location.href = r.redirectUrl; } });
-  const connectZernio = (platform: string) =>
-    zernio.mutate(platform, { onSuccess: (r) => { window.location.href = r.authUrl; } });
+  const connectComposio = (toolkit: string) => {
+    if (busy) return; // guard double-clicks while a redirect is being prepared
+    composio.mutate(toolkit, {
+      onSuccess: (r) => {
+        if (r?.redirectUrl) window.location.href = r.redirectUrl;
+      },
+    });
+  };
+  const connectZernio = (platform: string) => {
+    if (busy) return;
+    zernio.mutate(platform, {
+      onSuccess: (r) => {
+        if (r?.authUrl) window.location.href = r.authUrl;
+      },
+    });
+  };
+  const startError = composio.isError || zernio.isError;
 
   const Row = ({ provider, it, onConnect }: { provider: 'composio' | 'zernio'; it: Item; onConnect: (k: string) => void }) => {
     const s = status.get(`${provider}:${it.key}`);
@@ -137,6 +150,11 @@ function Inner() {
         {errorParam && (
           <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
             That connection didn’t complete ({errorParam}). Please try again.
+          </div>
+        )}
+        {startError && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">
+            Couldn’t start the connection. Please try again in a moment.
           </div>
         )}
 

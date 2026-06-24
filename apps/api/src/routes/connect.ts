@@ -140,16 +140,20 @@ connectRouter.get('/composio/callback/:state', async (req, res, next) => {
     if (!client) return res.redirect(`${appUrl()}/portal/login?error=client_not_found`);
     const composioUserId = client.composioUserId ?? client.id;
 
-    // Re-read the source of truth from Composio and refresh our cache.
+    // Re-read the source of truth from Composio (scoped to this client's user
+    // id) and refresh our cache — but only for the toolkit this round-trip
+    // initiated, so a stray/other-toolkit account can't be linked here.
     const accounts = await composioListConnected(composioUserId);
     for (const a of accounts) {
       if (a.status.toUpperCase() !== 'ACTIVE') continue;
+      const toolkit = a.toolkit || state.ref;
+      if (toolkit.toLowerCase() !== state.ref.toLowerCase()) continue;
       await upsertConnection({
         clientId: client.id,
         tenantId: client.tenantId,
         provider: 'composio',
         externalId: a.id,
-        integration: a.toolkit || state.ref,
+        integration: toolkit,
       });
     }
     return done('');

@@ -6,6 +6,7 @@ import {
   UpdateContactSchema,
 } from '@modernzen/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { requireClientInTenant } from '../middleware/requireClientInTenant.js';
 import { requirePermission } from '../auth/permissions.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import { listClients, createClient, updateClient } from '../services/clients.js';
@@ -53,7 +54,7 @@ clientsRouter.patch('/:id', requirePermission('clients.manage'), validate(Update
 
 // ---- F23 client portal contacts (staff side) -------------------------
 
-clientsRouter.get('/:id/contacts', requirePermission('portal.manage'), async (req, res, next) => {
+clientsRouter.get('/:id/contacts', requirePermission('portal.manage'), requireClientInTenant, async (req, res, next) => {
   try {
     res.json(await listContacts(req.params.id!));
   } catch (e) {
@@ -64,6 +65,7 @@ clientsRouter.get('/:id/contacts', requirePermission('portal.manage'), async (re
 clientsRouter.post(
   '/:id/contacts',
   requirePermission('portal.manage'),
+  requireClientInTenant,
   validate(InviteContactSchema),
   async (req, res, next) => {
     try {
@@ -83,6 +85,7 @@ clientsRouter.post(
 clientsRouter.patch(
   '/:id/contacts/:contactId',
   requirePermission('portal.manage'),
+  requireClientInTenant,
   validate(UpdateContactSchema),
   async (req, res, next) => {
     try {
@@ -102,6 +105,7 @@ clientsRouter.patch(
 clientsRouter.delete(
   '/:id/contacts/:contactId',
   requirePermission('portal.manage'),
+  requireClientInTenant,
   async (req, res, next) => {
     try {
       const me = req.session.user!;
@@ -116,6 +120,7 @@ clientsRouter.delete(
 clientsRouter.post(
   '/:id/contacts/:contactId/resend',
   requirePermission('portal.manage'),
+  requireClientInTenant,
   async (req, res, next) => {
     try {
       const me = req.session.user!;

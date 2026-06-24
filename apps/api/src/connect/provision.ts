@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { clients } from '../db/schema.js';
 import { env } from '../env.js';
@@ -32,23 +32,40 @@ export async function ensureProvisioned(clientId: string): Promise<Provisioned> 
     .limit(1);
   if (!client) throw new Error('client_not_found');
 
-  const updates: Partial<{ composioUserId: string; zernioProfileId: string; updatedAt: string }> = {};
-
-  // Composio user id is simply the client id (stable, server-derived).
   const composioUserId = client.composioUserId ?? client.id;
-  if (!client.composioUserId) updates.composioUserId = composioUserId;
+  const needsComposio = !client.composioUserId;
+  const needsZernio = !client.zernioProfileId && !!env.ZERNIO_API_KEY;
 
-  // Create the Zernio profile lazily, only when Zernio is configured.
-  let zernioProfileId = client.zernioProfileId;
-  if (!zernioProfileId && env.ZERNIO_API_KEY) {
-    zernioProfileId = await createProfile(client.name, `Modern Zen client portal: ${client.name}`);
-    updates.zernioProfileId = zernioProfileId;
+  // Fast path — already provisioned (no write, no lock).
+  if (!needsComposio && !needsZernio) {
+    return { clientId: client.id, tenantId: client.tenantId, composioUserId, zernioProfileId: client.zernioProfileId };
   }
 
-  if (Object.keys(updates).length > 0) {
-    updates.updatedAt = new Date().toISOString();
-    await db.update(clients).set(updates).where(eq(clients.id, client.id));
-  }
+  // Serialize provisioning PER CLIENT so two concurrent connects can't each
+  // create a Zernio profile (TOCTOU → orphaned profile). A per-client advisory
+  // lock (xact-scoped) + re-read inside the transaction makes it exactly-once.
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'connect:provision:' + clientId}))`);
+    const [fresh] = await tx
+      .select({ composioUserId: clients.composioUserId, zernioProfileId: clients.zernioProfileId })
+      .from(clients)
+      .where(eq(clients.id, clientId))
+      .limit(1);
 
-  return { clientId: client.id, tenantId: client.tenantId, composioUserId, zernioProfileId };
+    const updates: Partial<{ composioUserId: string; zernioProfileId: string; updatedAt: string }> = {};
+    const cuid = fresh?.composioUserId ?? client.id;
+    if (!fresh?.composioUserId) updates.composioUserId = cuid;
+
+    let zpid = fresh?.zernioProfileId ?? null;
+    if (!zpid && env.ZERNIO_API_KEY) {
+      zpid = await createProfile(client.name, `Modern Zen client portal: ${client.name}`);
+      updates.zernioProfileId = zpid;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      updates.updatedAt = new Date().toISOString();
+      await tx.update(clients).set(updates).where(eq(clients.id, clientId));
+    }
+    return { clientId: client.id, tenantId: client.tenantId, composioUserId: cuid, zernioProfileId: zpid };
+  });
 }

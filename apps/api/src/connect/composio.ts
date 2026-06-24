@@ -20,12 +20,27 @@ export function getComposio(): Composio {
 
 // One Composio-managed auth config per toolkit, reused across all clients.
 const authConfigCache = new Map<string, string>();
+// Coalesce concurrent first-time lookups for the same toolkit so two requests
+// don't each create a duplicate auth config (TOCTOU). Per-process; the list()
+// reuse below also dedupes across processes/restarts.
+const authConfigInflight = new Map<string, Promise<string>>();
 
 export async function ensureAuthConfig(toolkit: string): Promise<string> {
   const key = toolkit.toLowerCase();
   const cached = authConfigCache.get(key);
   if (cached) return cached;
+  const inflight = authConfigInflight.get(key);
+  if (inflight) return inflight;
+  const p = resolveAuthConfig(key, toolkit);
+  authConfigInflight.set(key, p);
+  try {
+    return await p;
+  } finally {
+    authConfigInflight.delete(key);
+  }
+}
 
+async function resolveAuthConfig(key: string, toolkit: string): Promise<string> {
   const composio: any = getComposio();
   // Reuse an existing managed auth config for this toolkit if present.
   try {
