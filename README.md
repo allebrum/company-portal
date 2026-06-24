@@ -9,6 +9,10 @@ Re-platformed onto **Supabase + Netlify**. Static Next.js frontend on the
 Netlify CDN, an Express API running as a Netlify Function, and Supabase for
 Auth, Postgres, Realtime, and Storage.
 
+> **Want to run your own?** Follow [`DEPLOY.md`](DEPLOY.md) — a step-by-step
+> fork-and-deploy guide (Supabase project, env vars, migrations, Netlify,
+> Resend), including the gotchas we hit.
+
 ## Stack
 
 | Layer | Tech |
@@ -68,8 +72,52 @@ netlify deploy --prod --dir apps/web/out --functions netlify/functions --no-buil
 hangs). See `CLAUDE.md` for the operational details and `MIGRATION.md` for the
 phased migration history.
 
+## The re-platform (how this was built)
+
+This codebase started as a **stateful Node monolith**: Express + Socket.IO on a
+single long-running server, self-hosted Postgres, Redis for sessions and pub/sub,
+argon2 + `express-session` auth, and Google Drive for file storage — packaged as
+one Docker container on DigitalOcean.
+
+The constraint that drove everything: **Netlify can't run a persistent
+WebSocket/Socket.IO server** — it hosts static frontends and *stateless*
+functions. So "deploy on Netlify" meant retiring every stateful piece and
+swapping in Supabase's managed primitives. The migration ran in phases, each one
+shippable and green in CI:
+
+| Phase | What changed |
+|---|---|
+| 0 | Package rename → `@modernzen/*`, CI, scaffolding |
+| 1 | Postgres → **Supabase Postgres**; identity reshaped onto `auth.users` |
+| 2 | Auth → **Supabase Auth** (stateless JWT); dropped Redis sessions + argon2 |
+| 3 | Express → a **Netlify Function** (`serverless-http`) |
+| 4 | Socket.IO → **Supabase Realtime** Broadcast (private channels + RLS) |
+| 5 | Google Drive uploads → **Supabase Storage** |
+| 6 | Transactional email → **Resend** |
+| 7 | Cloud deploy on **Netlify + Supabase** |
+| 8 | Rebrand + remove legacy infra |
+| 9 | Tests for the riskiest pure logic |
+
+**Design decisions worth knowing:**
+
+- **The API logic was preserved, not dissolved into RLS.** Rather than delete the
+  server and have the browser talk to Supabase directly, the proven Express
+  route/service layer was re-homed to a Netlify Function. RLS is defense-in-depth,
+  not the only authorization layer. This kept genuinely procedural logic
+  (pay-period generation, the approval state machine, HMAC webhooks) intact.
+- **Three chokepoints made it tractable.** `lib/api.ts` (cookies → Bearer),
+  `realtime/emit.ts` (6 helpers → Supabase Broadcast; every call site unchanged),
+  and the client event→query-invalidation map (kept verbatim across the
+  Socket.IO → Supabase Realtime swap).
+- **Two auth tracks.** Staff use a Supabase JWT; client-portal contacts use a
+  stateless HMAC token (`X-Portal-Token`) and are not Supabase users.
+
+See `MIGRATION.md` for the blow-by-blow and `CLAUDE.md` for the current
+architecture.
+
 ## Docs
 
+- [`DEPLOY.md`](DEPLOY.md) — **fork-and-deploy guide** (start here to run your own).
 - `CLAUDE.md` — architecture, auth model, deploy notes, and guardrails.
 - `MIGRATION.md` — the Supabase + Netlify migration log.
 - `CONNECT.md` — the Composio/Zernio client-connections feature.
