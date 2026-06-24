@@ -70,12 +70,14 @@ clientsRouter.post(
   async (req, res, next) => {
     try {
       const me = req.session.user!;
-      const { contact } = await inviteContact({
+      const { contact, inviteUrl } = await inviteContact({
         clientId: req.params.id!,
         input: getValidated<typeof InviteContactSchema._type>(req),
         whoId: me.userId,
       });
-      res.status(201).json(contact);
+      // Return the magic link so staff can copy it directly (e.g. to hand off
+      // out-of-band, or when email delivery is unconfigured). It's single-use.
+      res.status(201).json({ ...contact, inviteUrl });
     } catch (e) {
       next(e);
     }
@@ -124,8 +126,8 @@ clientsRouter.post(
   async (req, res, next) => {
     try {
       const me = req.session.user!;
-      await resendContactInvite({ contactId: req.params.contactId!, whoId: me.userId });
-      res.json({ ok: true });
+      const { inviteUrl } = await resendContactInvite({ contactId: req.params.contactId!, whoId: me.userId });
+      res.json({ ok: true, inviteUrl });
     } catch (e) {
       next(e);
     }

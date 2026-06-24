@@ -13,9 +13,10 @@ import { errorHandler } from './middleware/errorHandler.js';
 
 /**
  * Build the Express app (middleware + routes + error handler) with NO transport
- * concerns — no HTTP server, no Socket.IO, no cron. The standalone server
- * (index.ts) wraps this with an http.Server + Socket.IO; the Netlify Function
- * (netlify/functions/api.ts) wraps it with serverless-http. Same app both ways.
+ * concerns — no HTTP server, no cron. The standalone server (index.ts) wraps
+ * this with an http.Server; the Netlify Function (netlify/functions/api.ts)
+ * wraps it with serverless-http. Realtime is Supabase Realtime Broadcast
+ * (emit.ts), so there's no Socket.IO endpoint either way.
  */
 export function buildApp(): Express {
   const app = express();
@@ -59,7 +60,7 @@ export function buildApp(): Express {
     const webRoot = path.resolve(webDir);
     app.use(express.static(webRoot, { index: false }));
     app.get('*', (req, res, next) => {
-      if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
+      if (req.path.startsWith('/api')) {
         next();
         return;
       }

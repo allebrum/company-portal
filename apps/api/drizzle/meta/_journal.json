@@ -29,6 +29,13 @@
       "when": 1782319377801,
       "tag": "0003_brand_portalname_default",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1782319400000,
+      "tag": "0004_realtime_rls",
+      "breakpoints": true
     }
   ]
 }

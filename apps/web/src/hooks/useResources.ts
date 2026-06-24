@@ -386,7 +386,7 @@ export function useInviteClientContact() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ clientId, input }: { clientId: string; input: { name: string; email: string; role?: 'primary' | 'viewer' } }) =>
-      api.post<ClientContactRow>(`/clients/${clientId}/contacts`, input),
+      api.post<ClientContactRow & { inviteUrl: string }>(`/clients/${clientId}/contacts`, input),
     onSuccess: (_data, vars) =>
       qc.invalidateQueries({ queryKey: ['clientContacts', vars.clientId] }),
   });
@@ -403,7 +403,7 @@ export function useUpdateClientContact() {
 export function useResendClientInvite() {
   return useMutation({
     mutationFn: ({ clientId, contactId }: { clientId: string; contactId: string }) =>
-      api.post<{ ok: true }>(`/clients/${clientId}/contacts/${contactId}/resend`),
+      api.post<{ ok: true; inviteUrl: string }>(`/clients/${clientId}/contacts/${contactId}/resend`),
   });
 }
 export function useRemoveClientContact() {

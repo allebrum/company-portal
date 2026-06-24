@@ -1,17 +1,15 @@
 import { createServer } from 'node:http';
 import { env } from './env.js';
 import { buildApp } from './app.js';
-import { initIO } from './realtime/io.js';
 import { startPayPeriodSweep } from './jobs/payPeriodSweep.js';
 
 // Standalone server (local dev / single-container self-host): the same Express
-// app as the Netlify Function, plus an http.Server for Socket.IO and the
-// in-process pay-period cron. On Netlify the function serves /api and these
-// transport concerns don't apply (realtime → Supabase Realtime; cron →
-// scheduled function — both later phases).
+// app as the Netlify Function, plus the in-process pay-period cron. Realtime is
+// now Supabase Realtime Broadcast (emit.ts publishes over REST), so there's no
+// Socket.IO server to attach — both the function and this server fan out the
+// same way. (Cron → a scheduled function is a later phase.)
 const app = buildApp();
 const httpServer = createServer(app);
-initIO(httpServer);
 
 httpServer.listen(env.API_PORT, () => {
   // eslint-disable-next-line no-console

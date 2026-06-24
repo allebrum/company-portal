@@ -1,50 +1,69 @@
-import { getIOOrNull } from './io.js';
-import { ORG_ROOM, APPROVERS_ROOM, roomForUser, roomForTenant } from './rooms.js';
+import { ORG_ROOM, roomForUser, roomForTenant, roomForApprovers } from './rooms.js';
 import { currentTenantIdOrNull } from '../tenancy/context.js';
+import { env } from '../env.js';
 import type { EventName } from '@modernzen/shared';
 
-// Realtime is best-effort. When Socket.IO isn't running (the Netlify Function
-// runtime — see io.ts/app.ts), every helper no-ops via `getIOOrNull()` instead
-// of throwing, so write handlers that emit after a successful DB write don't
-// 500. Local/self-host (index.ts calls initIO) still emits for real. Live
-// updates in serverless are restored by the Supabase Realtime phase.
+/**
+ * Realtime fan-out via Supabase Realtime Broadcast.
+ *
+ * The Express app runs in a short-lived Netlify Function, so we publish over
+ * the stateless Broadcast REST endpoint with the service-role key (no websocket
+ * to open/await/tear-down). Browsers subscribe to PRIVATE channels named by the
+ * same topic helpers; RLS on `realtime.messages` (migration 0004) enforces that
+ * a subscriber only receives its own user / tenant / approvers topics.
+ *
+ * Best-effort: when Supabase isn't configured (self-host without it), every
+ * helper no-ops. Sends are fire-and-forget and never throw into the caller, so a
+ * realtime hiccup can never fail the DB write that triggered it. Every emit.*
+ * call site is unchanged from the Socket.IO era.
+ */
+type BroadcastMsg = { topic: string; event: string; payload: unknown };
+
+function broadcastMany(messages: BroadcastMsg[]): void {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return; // realtime disabled
+  if (messages.length === 0) return;
+  const body = JSON.stringify({
+    messages: messages.map((m) => ({ topic: m.topic, event: m.event, payload: m.payload, private: true })),
+  });
+  void fetch(`${env.SUPABASE_URL}/realtime/v1/api/broadcast`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+    },
+    body,
+  }).catch(() => undefined);
+}
+
+function broadcast(topic: string, event: EventName, payload: unknown): void {
+  broadcastMany([{ topic, event: event as string, payload }]);
+}
+
 export const emit = {
-  // Hoppa: "org" broadcasts are tenant-scoped. We derive the tenant from the
-  // request's AsyncLocalStorage context so callers don't change. When there's
-  // no context (background jobs), fall back to ORG_ROOM (single-tenant safe).
+  // "org" broadcasts are tenant-scoped: derive the tenant from the request's
+  // AsyncLocalStorage context. No context (background jobs) → ORG_ROOM fallback.
   toOrg(event: EventName, payload: unknown): void {
-    const io = getIOOrNull();
-    if (!io) return;
     const tenantId = currentTenantIdOrNull();
-    const room = tenantId ? roomForTenant(tenantId) : ORG_ROOM;
-    io.to(room).emit(event as any, payload as any);
+    broadcast(tenantId ? roomForTenant(tenantId) : ORG_ROOM, event, payload);
   },
   /** Explicit-tenant variant for emits outside a request context. */
   toTenant(tenantId: string, event: EventName, payload: unknown): void {
-    const io = getIOOrNull();
-    if (!io) return;
-    io.to(roomForTenant(tenantId)).emit(event as any, payload as any);
+    broadcast(roomForTenant(tenantId), event, payload);
   },
   toUser(userId: string, event: EventName, payload: unknown): void {
-    const io = getIOOrNull();
-    if (!io) return;
-    io.to(roomForUser(userId)).emit(event as any, payload as any);
+    broadcast(roomForUser(userId), event, payload);
   },
   toApprovers(event: EventName, payload: unknown): void {
-    const io = getIOOrNull();
-    if (!io) return;
-    io.to(APPROVERS_ROOM).emit(event as any, payload as any);
+    broadcast(roomForApprovers(currentTenantIdOrNull()), event, payload);
   },
   toUsers(userIds: string[], event: EventName, payload: unknown): void {
-    const io = getIOOrNull();
-    if (!io) return;
-    const rooms = userIds.map(roomForUser);
-    if (rooms.length === 0) return;
-    io.to(rooms).emit(event as any, payload as any);
+    broadcastMany(userIds.map((id) => ({ topic: roomForUser(id), event: event as string, payload })));
   },
   toUserAndApprovers(userId: string, event: EventName, payload: unknown): void {
-    const io = getIOOrNull();
-    if (!io) return;
-    io.to([roomForUser(userId), APPROVERS_ROOM]).emit(event as any, payload as any);
+    broadcastMany([
+      { topic: roomForUser(userId), event: event as string, payload },
+      { topic: roomForApprovers(currentTenantIdOrNull()), event: event as string, payload },
+    ]);
   },
 };

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ExternalLink, Mail, MailCheck, RefreshCw, Send, Trash2 } from 'lucide-react';
+import { Check, Copy, ExternalLink, Link2, Mail, MailCheck, RefreshCw, Send, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Field, Input, Select } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
@@ -235,15 +235,30 @@ function ContactsCard({ clientId }: { clientId: string }) {
   const [addName, setAddName] = useState('');
   const [addEmail, setAddEmail] = useState('');
   const [addRole, setAddRole] = useState<'primary' | 'viewer'>('viewer');
+  // The most recently issued magic link, surfaced so staff can copy it
+  // directly (single-use) — handy for hand-off or if email delivery is off.
+  const [lastLink, setLastLink] = useState<{ email: string; url: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const copyLink = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error('Could not copy — select and copy the link manually.');
+    }
+  };
 
   const onInvite = async () => {
     if (!addName.trim() || !addEmail.trim()) return;
     try {
-      await invite.mutateAsync({
+      const res = await invite.mutateAsync({
         clientId,
         input: { name: addName.trim(), email: addEmail.trim(), role: addRole },
       });
-      toast.success(`Invite emailed to ${addEmail}`);
+      setLastLink({ email: addEmail.trim(), url: res.inviteUrl });
+      toast.success(`Invite sent to ${addEmail}`);
       setAddName('');
       setAddEmail('');
       setAddRole('viewer');
@@ -298,6 +313,39 @@ function ContactsCard({ clientId }: { clientId: string }) {
         </div>
       )}
 
+      {lastLink && (
+        <div className="rounded-xl border border-brand-200 bg-brand-50 px-3 py-2.5 space-y-2">
+          <div className="flex items-center gap-2">
+            <Link2 className="w-3.5 h-3.5 text-brand-700 shrink-0" />
+            <span className="text-[12px] font-semibold text-brand-900">
+              Sign-in link for {lastLink.email}
+            </span>
+            <button
+              type="button"
+              onClick={() => setLastLink(null)}
+              className="ml-auto text-[11px] text-gray-400 hover:text-gray-600"
+            >
+              Dismiss
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              readOnly
+              value={lastLink.url}
+              onFocus={(e) => e.currentTarget.select()}
+              className="flex-1 min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[11px] text-gray-600 font-mono"
+            />
+            <Button variant="secondary" size="sm" onClick={() => copyLink(lastLink.url)}>
+              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              {copied ? 'Copied' : 'Copy'}
+            </Button>
+          </div>
+          <div className="text-[11px] text-brand-700/80">
+            Single-use, expires in 30 days. Share it directly if the email doesn&apos;t arrive.
+          </div>
+        </div>
+      )}
+
       {contacts.length === 0 ? (
         <div className="text-[12px] text-gray-400 italic px-1">No contacts invited yet.</div>
       ) : (
@@ -323,7 +371,8 @@ function ContactsCard({ clientId }: { clientId: string }) {
                   type="button"
                   onClick={async () => {
                     try {
-                      await resend.mutateAsync({ clientId, contactId: c.id });
+                      const res = await resend.mutateAsync({ clientId, contactId: c.id });
+                      setLastLink({ email: c.email, url: res.inviteUrl });
                       toast.success(`Invite resent to ${c.email}`);
                     } catch (e) {
                       toast.error(e instanceof Error ? e.message : 'Resend failed');
