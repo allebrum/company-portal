@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { eq, and, isNotNull, inArray, gte, asc } from 'drizzle-orm';
+import { eq, and, isNotNull, inArray, gte, asc, desc } from 'drizzle-orm';
 import {
   PortalRequestAccessSchema,
   PortalExchangeSchema,
@@ -15,12 +15,15 @@ import {
   goals,
   milestones,
   todos,
+  workflowRuns,
 } from '../db/schema.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { findContactByEmail, resendContactInvite } from '../services/clientContacts.js';
 import { consumeToken, type TokenSubject } from '../auth/tokens.js';
 import { requireClientPortalAuth } from '../middleware/requireClientPortalAuth.js';
+import { requirePrimaryContact } from '../middleware/requirePrimaryContact.js';
+import { listConnections } from '../connect/connections.js';
 import { signPortalSession } from '../auth/portalSession.js';
 import { getSettings } from '../services/settings.js';
 import { withTenant } from '../tenancy/context.js';
@@ -229,6 +232,43 @@ portalRouter.post('/logout', (_req, res) => {
   // Stateless: the client simply discards its portal token. (No auth gate —
   // there is no server-side session to destroy.)
   res.json({ ok: true });
+});
+
+// ---- Connections hub (primary contact only) ---------------------------
+// The connecting of third-party accounts is a higher-trust action than the
+// read-only portal surfaces, so it is restricted to the client's `primary`
+// contact (UI hides it for viewers; this gate enforces it server-side).
+portalRouter.get('/connections', requireClientPortalAuth, requirePrimaryContact, async (req, res, next) => {
+  try {
+    const sess = req.session.clientPortalSession!;
+    const [rows, runs] = await Promise.all([
+      listConnections(sess.clientId),
+      db
+        .select({
+          id: workflowRuns.id,
+          kind: workflowRuns.kind,
+          result: workflowRuns.result,
+          createdAt: workflowRuns.createdAt,
+        })
+        .from(workflowRuns)
+        .where(eq(workflowRuns.clientId, sess.clientId))
+        .orderBy(desc(workflowRuns.createdAt))
+        .limit(20),
+    ]);
+    res.json({
+      connections: rows.map((c) => ({
+        id: c.id,
+        provider: c.provider,
+        integration: c.integration,
+        displayName: c.displayName,
+        status: c.status,
+        connectedAt: c.connectedAt,
+      })),
+      runs,
+    });
+  } catch (e) {
+    next(e);
+  }
 });
 
 // ---- Session-gated read endpoints (curated portal view) ---------------

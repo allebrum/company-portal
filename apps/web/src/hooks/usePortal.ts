@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, PORTAL_TOKEN_KEY } from '@/lib/api';
 
 /**
  * F23 — hooks for the public client portal. Mirrors the shape of the
@@ -63,8 +63,13 @@ export function useExchangePortalToken() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ slug, token }: { slug: string; token: string }) =>
-      api.post<{ ok: true; slug: string }>(`/portal/exchange`, { slug, token }),
-    onSuccess: () => {
+      api.post<{ ok: true; slug: string; token: string }>(`/portal/exchange`, { slug, token }),
+    onSuccess: (res) => {
+      // Persist the stateless portal-session token; lib/api.ts sends it as
+      // X-Portal-Token on every subsequent portal call.
+      if (typeof window !== 'undefined' && res?.token) {
+        window.localStorage.setItem(PORTAL_TOKEN_KEY, res.token);
+      }
       qc.invalidateQueries({ queryKey: ['portal', 'me'] });
     },
   });
@@ -75,6 +80,7 @@ export function useLogoutPortal() {
   return useMutation({
     mutationFn: () => api.post<{ ok: true }>(`/portal/logout`),
     onSuccess: () => {
+      if (typeof window !== 'undefined') window.localStorage.removeItem(PORTAL_TOKEN_KEY);
       qc.setQueryData(['portal', 'me'], null);
       qc.invalidateQueries({ queryKey: ['portal'] });
     },
@@ -248,6 +254,53 @@ export function useReplyPortalTicket() {
       qc.invalidateQueries({ queryKey: ['portal', 'tickets'] });
       qc.invalidateQueries({ queryKey: ['portal', 'tickets', id] });
     },
+  });
+}
+
+// ---- Connections hub (Connect feature; primary contact only) ----------
+
+export type PortalConnection = {
+  id: string;
+  provider: 'composio' | 'zernio';
+  integration: string;
+  displayName: string | null;
+  status: string;
+  connectedAt: string;
+};
+
+export type PortalWorkflowRun = {
+  id: string;
+  kind: string;
+  result: unknown;
+  createdAt: string;
+};
+
+export type PortalConnectionsData = {
+  connections: PortalConnection[];
+  runs: PortalWorkflowRun[];
+};
+
+/** This client's connected provider accounts + recent on-behalf runs (403 for viewers). */
+export function usePortalConnections(enabled = true) {
+  return useQuery({
+    queryKey: ['portal', 'connections'],
+    queryFn: () => api.get<PortalConnectionsData>('/portal/connections'),
+    enabled,
+    retry: false,
+  });
+}
+
+/** Start a Composio (apps & tools) connect; returns the URL to redirect to. */
+export function useConnectComposio() {
+  return useMutation({
+    mutationFn: (toolkit: string) => api.post<{ redirectUrl: string }>('/connect/composio', { toolkit }),
+  });
+}
+
+/** Start a Zernio (social channel) connect; returns the URL to redirect to. */
+export function useConnectZernio() {
+  return useMutation({
+    mutationFn: (platform: string) => api.post<{ authUrl: string }>('/connect/zernio', { platform }),
   });
 }
 

@@ -20,7 +20,7 @@ export function PortalHeader({
 }: {
   slug: string;
   me: PortalMe | null;
-  active: 'overview' | 'projects' | 'files' | 'tickets' | null;
+  active: 'overview' | 'projects' | 'files' | 'tickets' | 'connections' | null;
 }) {
   const { data: cfg } = useAuthConfig();
   const logout = useLogoutPortal();
@@ -38,6 +38,10 @@ export function PortalHeader({
     { id: 'files', label: 'Files', href: `/portal/files${q}` },
     { id: 'tickets', label: 'Tickets', href: `/portal/tickets${q}` },
   ];
+  // Connecting third-party accounts is a primary-contact-only capability.
+  if (me?.contact.role === 'primary') {
+    nav.push({ id: 'connections', label: 'Connections', href: `/portal/connections${q}` });
+  }
 
   return (
     <header className="bg-white border-b border-gray-200">

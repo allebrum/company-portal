@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { eq } from 'drizzle-orm';
 import { requireClientPortalAuth } from '../middleware/requireClientPortalAuth.js';
+import { requirePrimaryContact } from '../middleware/requirePrimaryContact.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { ensureProvisioned } from '../connect/provision.js';
 import { getConnectUrl } from '../connect/zernio.js';
@@ -25,6 +26,7 @@ const appUrl = (): string => (env.APP_URL ?? env.WEB_ORIGIN).replace(/\/$/, '');
 connectRouter.post(
   '/zernio',
   requireClientPortalAuth,
+  requirePrimaryContact,
   rateLimit({ key: 'connect-zernio', max: 20, windowSec: 60 }),
   async (req, res, next) => {
     try {
@@ -53,27 +55,30 @@ connectRouter.post(
 // authenticated by the signed state, NOT a portal token). Zernio appends
 // ?connected={platform}&profileId&accountId&username.
 connectRouter.get('/zernio/callback/:state', async (req, res, next) => {
-  const fail = (reason: string): void => {
-    res.redirect(`${appUrl()}/connections?error=${encodeURIComponent(reason)}`);
-  };
   try {
     const state = verifyState(req.params.state);
-    if (!state || state.provider !== 'zernio') return fail('bad_state');
+    if (!state || state.provider !== 'zernio') {
+      return res.redirect(`${appUrl()}/portal/login?error=bad_state`);
+    }
+
+    // The returned profile must belong to the client we signed state for —
+    // blocks linking an account to a different client.
+    const [client] = await db
+      .select({ id: clients.id, tenantId: clients.tenantId, zernioProfileId: clients.zernioProfileId, portalSlug: clients.portalSlug })
+      .from(clients)
+      .where(eq(clients.id, state.clientId))
+      .limit(1);
+    const slug = client?.portalSlug ?? '';
+    const done = (qs: string): void => res.redirect(`${appUrl()}/portal/connections?slug=${encodeURIComponent(slug)}${qs}`);
+    const fail = (reason: string): void => done(`&error=${encodeURIComponent(reason)}`);
+    if (!client) return res.redirect(`${appUrl()}/portal/login?error=client_not_found`);
 
     const profileId = typeof req.query.profileId === 'string' ? req.query.profileId : '';
     const accountId = typeof req.query.accountId === 'string' ? req.query.accountId : '';
     const platform = typeof req.query.connected === 'string' ? req.query.connected : state.ref;
     const username = typeof req.query.username === 'string' ? req.query.username : null;
     if (!profileId || !accountId) return fail('missing_params');
-
-    // The returned profile must belong to the client we signed state for —
-    // blocks linking an account to a different client.
-    const [client] = await db
-      .select({ id: clients.id, tenantId: clients.tenantId, zernioProfileId: clients.zernioProfileId })
-      .from(clients)
-      .where(eq(clients.id, state.clientId))
-      .limit(1);
-    if (!client || client.zernioProfileId !== profileId) return fail('profile_mismatch');
+    if (client.zernioProfileId !== profileId) return fail('profile_mismatch');
 
     await upsertConnection({
       clientId: client.id,
@@ -83,7 +88,7 @@ connectRouter.get('/zernio/callback/:state', async (req, res, next) => {
       integration: platform,
       displayName: username,
     });
-    res.redirect(`${appUrl()}/connections`);
+    return done('');
   } catch (e) {
     next(e);
   }
@@ -95,6 +100,7 @@ connectRouter.get('/zernio/callback/:state', async (req, res, next) => {
 connectRouter.post(
   '/composio',
   requireClientPortalAuth,
+  requirePrimaryContact,
   rateLimit({ key: 'connect-composio', max: 20, windowSec: 60 }),
   async (req, res, next) => {
     try {
@@ -118,19 +124,20 @@ connectRouter.post(
 // GET /api/connect/composio/callback/:state  (public; Composio redirects here
 // after managed OAuth). We re-read the user's connected accounts and upsert.
 connectRouter.get('/composio/callback/:state', async (req, res, next) => {
-  const fail = (reason: string): void => {
-    res.redirect(`${appUrl()}/connections?error=${encodeURIComponent(reason)}`);
-  };
   try {
     const state = verifyState(req.params.state);
-    if (!state || state.provider !== 'composio') return fail('bad_state');
+    if (!state || state.provider !== 'composio') {
+      return res.redirect(`${appUrl()}/portal/login?error=bad_state`);
+    }
 
     const [client] = await db
-      .select({ id: clients.id, tenantId: clients.tenantId, composioUserId: clients.composioUserId })
+      .select({ id: clients.id, tenantId: clients.tenantId, composioUserId: clients.composioUserId, portalSlug: clients.portalSlug })
       .from(clients)
       .where(eq(clients.id, state.clientId))
       .limit(1);
-    if (!client) return fail('client_not_found');
+    const slug = client?.portalSlug ?? '';
+    const done = (qs: string): void => res.redirect(`${appUrl()}/portal/connections?slug=${encodeURIComponent(slug)}${qs}`);
+    if (!client) return res.redirect(`${appUrl()}/portal/login?error=client_not_found`);
     const composioUserId = client.composioUserId ?? client.id;
 
     // Re-read the source of truth from Composio and refresh our cache.
@@ -145,7 +152,7 @@ connectRouter.get('/composio/callback/:state', async (req, res, next) => {
         integration: a.toolkit || state.ref,
       });
     }
-    res.redirect(`${appUrl()}/connections`);
+    return done('');
   } catch (e) {
     next(e);
   }
