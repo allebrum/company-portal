@@ -1,0 +1,23 @@
+# Netlify deploy: static Next.js export (CDN) + the Express API as a function.
+[build]
+  command = "pnpm build"
+  publish = "apps/web/out"
+
+[build.environment]
+  NODE_VERSION = "20"
+  # apps/api must be built (dist/) before the function bundles — `pnpm build`
+  # builds shared → api → web in order.
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# Route the API to the function. The static export owns everything else.
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+
+# Next static export emits per-route /index.html with trailingSlash:true; the
+# CDN serves those directly. (No SPA catch-all needed.)

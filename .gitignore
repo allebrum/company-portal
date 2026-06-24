@@ -13,3 +13,6 @@ env/
 coverage/
 *.tsbuildinfo
 apps/api/drizzle/meta/_journal.json.bak
+
+# Netlify CLI state
+.netlify/
