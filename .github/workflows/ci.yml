@@ -38,4 +38,5 @@ jobs:
         env:
           DATABASE_URL: postgresql://test:test@localhost:5432/test
           PORTAL_SESSION_SECRET: ci-dummy-portal-session-secret
+          SESSION_SECRET: ci-dummy-session-secret
         run: pnpm --filter @modernzen/api test
