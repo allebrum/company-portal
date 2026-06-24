@@ -16,6 +16,9 @@ function LiveEventBindings(): null {
   const qc = useQueryClient();
   useEffect(() => {
     const s = getSocket();
+    // Realtime disabled (serverless deploy with no Socket.IO server) — skip all
+    // live bindings; data stays fresh via TanStack Query refetching.
+    if (!s) return;
 
     const invalidate = (keys: ReadonlyArray<readonly unknown[]>) => {
       for (const k of keys) qc.invalidateQueries({ queryKey: k as unknown[] });
