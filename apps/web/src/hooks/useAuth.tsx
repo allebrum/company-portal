@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
@@ -61,15 +61,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Initial load + react to Supabase auth changes (sign-in, sign-out, token
-  // refresh) so the app identity stays in sync.
+  // Track whether we currently hold an identity, read inside the auth-change
+  // handler without making it an effect dependency.
+  const hasIdentityRef = useRef(false);
+  useEffect(() => {
+    hasIdentityRef.current = me !== null;
+  }, [me]);
+
+  // Initial load + a DELIBERATELY MINIMAL reaction to Supabase auth changes.
+  // We do NOT refresh on TOKEN_REFRESHED or INITIAL_SESSION, and only on a
+  // genuinely new SIGNED_IN (when no identity is held yet). Reason: api.ts calls
+  // getSession() on every request, which re-emits these events; refreshing on
+  // them re-enters /auth/me and loops — pathologically so when a same-origin
+  // iframe (the staff Portal-tab preview) runs a second Supabase client over the
+  // shared session. The mount refresh() + login() cover initial/explicit loads.
   useEffect(() => {
     void refresh();
     const { data: sub } = getSupabase().auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
         setMe(null);
         setLoading(false);
-      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
+      } else if (event === 'SIGNED_IN' && !hasIdentityRef.current) {
         void refresh();
       }
     });

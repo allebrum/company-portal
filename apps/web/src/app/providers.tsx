@@ -23,8 +23,11 @@ function LiveEventBindings(): null {
 
   useEffect(() => {
     // Realtime requires a Supabase session (staff). The client portal has no
-    // Supabase JWT, so it stays refetch-only. Off entirely when the flag is unset.
-    if (!REALTIME_ENABLED || !tenantId || !userId) return;
+    // Supabase JWT, so it stays refetch-only. Off entirely when the flag is
+    // unset, and never inside an iframe (the staff Portal-tab preview embeds the
+    // app — a second subscription there is pointless).
+    const inIframe = typeof window !== 'undefined' && window.self !== window.top;
+    if (!REALTIME_ENABLED || !tenantId || !userId || inIframe) return;
 
     const invalidate = (keys: ReadonlyArray<readonly unknown[]>) => {
       for (const k of keys) qc.invalidateQueries({ queryKey: k as unknown[] });
