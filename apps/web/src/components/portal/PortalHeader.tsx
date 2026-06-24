@@ -20,7 +20,7 @@ export function PortalHeader({
 }: {
   slug: string;
   me: PortalMe | null;
-  active: 'overview' | 'projects' | 'files' | 'tickets' | 'connections' | null;
+  active: 'overview' | 'projects' | 'files' | 'tickets' | 'connections' | 'activity' | null;
 }) {
   const { data: cfg } = useAuthConfig();
   const logout = useLogoutPortal();
@@ -38,9 +38,10 @@ export function PortalHeader({
     { id: 'files', label: 'Files', href: `/portal/files${q}` },
     { id: 'tickets', label: 'Tickets', href: `/portal/tickets${q}` },
   ];
-  // Connecting third-party accounts is a primary-contact-only capability.
+  // Connecting accounts + the on-behalf activity log are primary-contact-only.
   if (me?.contact.role === 'primary') {
     nav.push({ id: 'connections', label: 'Connections', href: `/portal/connections${q}` });
+    nav.push({ id: 'activity', label: 'Activity', href: `/portal/activity${q}` });
   }
 
   return (

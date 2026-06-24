@@ -24,6 +24,7 @@ import { consumeToken, type TokenSubject } from '../auth/tokens.js';
 import { requireClientPortalAuth } from '../middleware/requireClientPortalAuth.js';
 import { requirePrimaryContact } from '../middleware/requirePrimaryContact.js';
 import { listConnections } from '../connect/connections.js';
+import { runSocialPost, runComposioTool } from '../connect/workflows.js';
 import { signPortalSession } from '../auth/portalSession.js';
 import { getSettings } from '../services/settings.js';
 import { withTenant } from '../tenancy/context.js';
@@ -270,6 +271,78 @@ portalRouter.get('/connections', requireClientPortalAuth, requirePrimaryContact,
     next(e);
   }
 });
+
+// Activity — the audit trail of on-behalf workflow runs (primary contact only).
+portalRouter.get('/activity', requireClientPortalAuth, requirePrimaryContact, async (req, res, next) => {
+  try {
+    const sess = req.session.clientPortalSession!;
+    const runs = await db
+      .select({
+        id: workflowRuns.id,
+        kind: workflowRuns.kind,
+        payload: workflowRuns.payload,
+        result: workflowRuns.result,
+        createdAt: workflowRuns.createdAt,
+      })
+      .from(workflowRuns)
+      .where(eq(workflowRuns.clientId, sess.clientId))
+      .orderBy(desc(workflowRuns.createdAt))
+      .limit(50);
+    res.json(runs);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Workflow 1 — publish a post to the client's connected social accounts (Zernio).
+portalRouter.post(
+  '/workflows/social-post',
+  requireClientPortalAuth,
+  requirePrimaryContact,
+  rateLimit({ key: 'wf-social', max: 30, windowSec: 60 }),
+  async (req, res, next) => {
+    try {
+      const sess = req.session.clientPortalSession!;
+      const [client] = await db.select({ tenantId: clients.tenantId }).from(clients).where(eq(clients.id, sess.clientId)).limit(1);
+      const body = req.body as { content?: string; accountIds?: string[]; publishNow?: boolean };
+      const out = await runSocialPost(sess.clientId, client?.tenantId ?? null, {
+        content: String(body?.content ?? ''),
+        accountIds: Array.isArray(body?.accountIds) ? body.accountIds : [],
+        publishNow: body?.publishNow !== false,
+      });
+      res.json(out);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+// Workflow 2 — run a Composio tool on behalf of the client. Fixed safe demo
+// (list Gmail labels); not a general arbitrary-tool runner from the browser.
+portalRouter.post(
+  '/workflows/composio-tool',
+  requireClientPortalAuth,
+  requirePrimaryContact,
+  rateLimit({ key: 'wf-composio', max: 30, windowSec: 60 }),
+  async (req, res, next) => {
+    try {
+      const sess = req.session.clientPortalSession!;
+      const [client] = await db
+        .select({ tenantId: clients.tenantId, composioUserId: clients.composioUserId })
+        .from(clients)
+        .where(eq(clients.id, sess.clientId))
+        .limit(1);
+      const composioUserId = client?.composioUserId ?? sess.clientId;
+      const out = await runComposioTool(sess.clientId, client?.tenantId ?? null, composioUserId, {
+        slug: 'GMAIL_LIST_LABELS',
+        toolkit: 'gmail',
+      });
+      res.json(out);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
 
 // ---- Session-gated read endpoints (curated portal view) ---------------
 //

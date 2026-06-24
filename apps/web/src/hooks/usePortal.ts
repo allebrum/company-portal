@@ -304,6 +304,47 @@ export function useConnectZernio() {
   });
 }
 
+// ---- Workflows + Activity (Connect feature; primary contact only) ------
+
+export type PortalActivityRun = {
+  id: string;
+  kind: string;
+  payload: unknown;
+  result: { ok?: boolean; error?: string } & Record<string, unknown>;
+  createdAt: string;
+};
+
+/** The on-behalf workflow run history (403 for viewers). */
+export function usePortalActivity(enabled = true) {
+  return useQuery({
+    queryKey: ['portal', 'activity'],
+    queryFn: () => api.get<PortalActivityRun[]>('/portal/activity'),
+    enabled,
+    retry: false,
+  });
+}
+
+type RunResult = { runId: string; ok: boolean; result: unknown };
+
+/** Publish a post to the client's connected social accounts. */
+export function useRunSocialPost() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { content: string; accountIds: string[]; publishNow?: boolean }) =>
+      api.post<RunResult>('/portal/workflows/social-post', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['portal', 'activity'] }),
+  });
+}
+
+/** Run the demo Composio tool (list Gmail labels) on behalf of the client. */
+export function useRunComposioTool() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<RunResult>('/portal/workflows/composio-tool', {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['portal', 'activity'] }),
+  });
+}
+
 /** S3.2: approve a milestone (optional comment). 409 = already signed. */
 export function useSignOffMilestone() {
   const qc = useQueryClient();

@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Mail,
@@ -19,6 +19,8 @@ import {
   RefreshCw,
   Plug,
   Share2,
+  Send,
+  Loader2,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -26,6 +28,8 @@ import {
   usePortalConnections,
   useConnectComposio,
   useConnectZernio,
+  useRunSocialPost,
+  useRunComposioTool,
 } from '@/hooks/usePortal';
 import { PortalHeader } from '@/components/portal/PortalHeader';
 
@@ -64,6 +68,13 @@ function Inner() {
   const composio = useConnectComposio();
   const zernio = useConnectZernio();
   const busy = composio.isPending || zernio.isPending;
+
+  const socialPost = useRunSocialPost();
+  const gmailTool = useRunComposioTool();
+  const [postText, setPostText] = useState('');
+  const active = (conns.data?.connections ?? []).filter((c) => c.status.toLowerCase() === 'active');
+  const hasSocial = active.some((c) => c.provider === 'zernio');
+  const hasGmail = active.some((c) => c.provider === 'composio' && c.integration === 'gmail');
 
   useEffect(() => {
     if (meQuery.isLoading) return;
@@ -179,6 +190,67 @@ function Inner() {
             ))}
           </ul>
         </section>
+
+        {(hasSocial || hasGmail) && (
+          <section className="mt-8 border-t border-gray-100 pt-6">
+            <h2 className="text-sm font-semibold text-gray-700 mb-1">Run a test</h2>
+            <p className="text-xs text-gray-500 mb-4">
+              These run on your connected accounts and are logged to Activity.
+            </p>
+
+            {hasSocial && (
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 mb-4">
+                <label className="text-sm font-semibold text-gray-900">Post an update to your connected channels</label>
+                <textarea
+                  value={postText}
+                  onChange={(e) => setPostText(e.target.value)}
+                  rows={3}
+                  className="mt-2 w-full rounded-lg border border-gray-200 p-2 text-sm"
+                  placeholder="What should we post?"
+                />
+                <div className="mt-2 flex items-center gap-3">
+                  <button
+                    type="button"
+                    disabled={!postText.trim() || socialPost.isPending}
+                    onClick={() => socialPost.mutate({ content: postText.trim(), accountIds: [] }, { onSuccess: () => setPostText('') })}
+                    className="text-sm font-semibold px-3 py-1.5 rounded-lg bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    {socialPost.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    Post now
+                  </button>
+                  {socialPost.data && (
+                    <span className={`text-xs ${socialPost.data.ok ? 'text-green-600' : 'text-red-600'}`}>
+                      {socialPost.data.ok ? 'Posted — see Activity' : 'Failed — see Activity'}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {hasGmail && (
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-gray-900">List Gmail labels</div>
+                  <div className="text-xs text-gray-500">A read-only check that the Gmail connection works.</div>
+                </div>
+                {gmailTool.data && (
+                  <span className={`text-xs ${gmailTool.data.ok ? 'text-green-600' : 'text-red-600'}`}>
+                    {gmailTool.data.ok ? 'Done' : 'Failed'}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  disabled={gmailTool.isPending}
+                  onClick={() => gmailTool.mutate()}
+                  className="text-sm font-semibold px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {gmailTool.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Run
+                </button>
+              </div>
+            )}
+          </section>
+        )}
       </div>
     </>
   );
