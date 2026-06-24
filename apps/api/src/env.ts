@@ -70,6 +70,13 @@ const EnvSchema = z.object({
   SUPABASE_URL: z.string().url().optional(),
   SUPABASE_ANON_KEY: z.string().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  // Client portal — HMAC secret for the stateless portal-session token.
+  // Required for the magic-link portal to function (guarded at use).
+  PORTAL_SESSION_SECRET: z.string().optional(),
+  // Connect feature — provider keys (server-only). Dormant until set.
+  COMPOSIO_API_KEY: z.string().optional(),
+  ZERNIO_API_KEY: z.string().optional(),
+  APP_URL: z.string().url().optional(),
 });
 
 export const env = EnvSchema.parse(process.env);

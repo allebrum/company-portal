@@ -21,6 +21,7 @@ import { rateLimit } from '../middleware/rateLimit.js';
 import { findContactByEmail, resendContactInvite } from '../services/clientContacts.js';
 import { consumeToken, type TokenSubject } from '../auth/tokens.js';
 import { requireClientPortalAuth } from '../middleware/requireClientPortalAuth.js';
+import { signPortalSession } from '../auth/portalSession.js';
 import { getSettings } from '../services/settings.js';
 import { withTenant } from '../tenancy/context.js';
 import { appendActivity } from '../services/activity.js';
@@ -172,12 +173,14 @@ portalRouter.post(
         })
         .where(eq(clientContacts.id, contact.id));
 
-      req.session.clientPortalSession = {
+      // Stateless: mint a signed portal-session token for the browser to send
+      // back as X-Portal-Token on subsequent portal calls (no server session).
+      const sessionToken = signPortalSession({
         contactId: contact.id,
         clientId: contact.clientId,
         slug: client.slug!,
-      };
-      res.json({ ok: true, slug: client.slug });
+      });
+      res.json({ ok: true, slug: client.slug, token: sessionToken });
     } catch (e) {
       next(e);
     }
@@ -200,8 +203,8 @@ portalRouter.get('/me', requireClientPortalAuth, async (req, res, next) => {
       .where(eq(clients.id, sess.clientId))
       .limit(1);
     if (!contact || !client) {
-      // Session points at a row that's been deleted under us. Clear it.
-      req.session.clientPortalSession = undefined;
+      // Token points at a row that's been deleted under us — the client
+      // discards the token on a 401.
       res.status(401).json({ error: 'session_invalidated' });
       return;
     }
@@ -222,8 +225,9 @@ portalRouter.get('/me', requireClientPortalAuth, async (req, res, next) => {
   }
 });
 
-portalRouter.post('/logout', requireClientPortalAuth, (req, res) => {
-  req.session.clientPortalSession = undefined;
+portalRouter.post('/logout', (_req, res) => {
+  // Stateless: the client simply discards its portal token. (No auth gate —
+  // there is no server-side session to destroy.)
   res.json({ ok: true });
 });
 

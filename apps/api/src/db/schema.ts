@@ -286,6 +286,12 @@ export const clients = pgTable('clients', {
   // non-null = published.
   portalSlug: text('portal_slug').unique(),
   portalPublishedAt: timestamp('portal_published_at', { withTimezone: true, mode: 'string' }),
+  // Connect feature — one stable client → one Composio user → one Zernio profile.
+  // `composioUserId` is the client's own id (Composio users exist implicitly);
+  // `zernioProfileId` is created on first provisioning. Both stored for clarity
+  // and uniqueness. See lib/provision.ts.
+  composioUserId: text('composio_user_id').unique(),
+  zernioProfileId: text('zernio_profile_id').unique(),
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
@@ -311,6 +317,45 @@ export const clientContacts = pgTable('client_contacts', {
 }, (t) => ({
   clientEmailUnique: uniqueIndex('client_contacts_client_email_unique').on(t.clientId, t.email),
   emailIdx: index('client_contacts_email_idx').on(t.email),
+}));
+
+// ---- Connect feature: third-party connections + on-behalf workflow runs ----
+// A client's connected accounts are managed by two providers (Composio for
+// SaaS/productivity tools, Zernio for social channels). We never store raw
+// provider credentials — only the provider's external account id + metadata.
+export const connectionProviderEnum = pgEnum('connection_provider', ['composio', 'zernio']);
+
+export const connections = pgTable('connections', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'cascade' }),
+  tenantId: tenantRef(),
+  provider: connectionProviderEnum('provider').notNull(),
+  // Provider's account id: Composio connected-account id, or Zernio account id.
+  externalId: text('external_id').notNull(),
+  // Toolkit (Composio, e.g. 'gmail') or platform (Zernio, e.g. 'linkedin').
+  integration: text('integration').notNull(),
+  displayName: text('display_name'),
+  status: text('status').notNull().default('active'),
+  connectedAt: timestamp('connected_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
+  createdAt: ts(),
+}, (t) => ({
+  clientProviderExtUnique: uniqueIndex('connections_client_provider_ext_unique').on(t.clientId, t.provider, t.externalId),
+  clientIdx: index('connections_client_idx').on(t.clientId),
+  tenantIdx: index('connections_tenant_idx').on(t.tenantId),
+}));
+
+// Audit trail: one row per on-behalf action taken for a client.
+export const workflowRuns = pgTable('workflow_runs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'cascade' }),
+  tenantId: tenantRef(),
+  kind: text('kind').notNull(),
+  payload: jsonb('payload').notNull().default(sql`'{}'::jsonb`),
+  result: jsonb('result').notNull().default(sql`'{}'::jsonb`),
+  createdAt: ts(),
+}, (t) => ({
+  clientTimeIdx: index('workflow_runs_client_time_idx').on(t.clientId, t.createdAt),
+  tenantIdx: index('workflow_runs_tenant_idx').on(t.tenantId),
 }));
 
 // ---- Projects ----
@@ -775,6 +820,8 @@ export type Group = typeof groups.$inferSelect;
 export type Permission = typeof permissions.$inferSelect;
 export type Client = typeof clients.$inferSelect;
 export type ClientContact = typeof clientContacts.$inferSelect;
+export type Connection = typeof connections.$inferSelect;
+export type WorkflowRun = typeof workflowRuns.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export type Goal = typeof goals.$inferSelect;
 export type GoalResource = typeof goalResources.$inferSelect;

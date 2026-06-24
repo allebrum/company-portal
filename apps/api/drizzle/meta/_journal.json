@@ -15,6 +15,13 @@
       "when": 1782247707750,
       "tag": "0001_supabase_platform",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782279181397,
+      "tag": "0002_connect_feature",
+      "breakpoints": true
     }
   ]
 }
