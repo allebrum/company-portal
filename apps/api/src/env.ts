@@ -77,6 +77,14 @@ const EnvSchema = z.object({
   COMPOSIO_API_KEY: z.string().optional(),
   ZERNIO_API_KEY: z.string().optional(),
   APP_URL: z.string().url().optional(),
+  // Transactional email via Resend (HTTP API). When RESEND_API_KEY + MAIL_FROM
+  // are set, all app-sent mail (invites, ticket + payroll notifications) goes
+  // through Resend; otherwise it falls back to the legacy Gmail path / log-only.
+  // MAIL_FROM must be on a domain verified in Resend, e.g.
+  // "Modern Zen <no-reply@modernzen.co>". MAIL_REPLY_TO is optional.
+  RESEND_API_KEY: z.string().optional(),
+  MAIL_FROM: z.string().optional(),
+  MAIL_REPLY_TO: z.string().optional(),
 });
 
 export const env = EnvSchema.parse(process.env);
@@ -121,6 +129,10 @@ export const provisioningConfigured = !!env.PROVISIONING_SECRET;
 // Subscription gate enforcement. False (self-host / pre-billing) → every
 // workspace is treated active; SaaS sets BILLING_ENFORCED=true to gate.
 export const billingEnforced = env.BILLING_ENFORCED;
+
+// Transactional email via Resend. Both the API key and a verified From address
+// must be set for the Resend transport to engage.
+export const resendConfigured = !!(env.RESEND_API_KEY && env.MAIL_FROM);
 
 // Instance-level password-login switch. Default ON; only an explicit
 // PASSWORD_LOGIN_ENABLED=false (or 0) turns the password surface off entirely

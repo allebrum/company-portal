@@ -1,20 +1,20 @@
 import { sendAsUser } from './gmail.js';
+import { sendViaResend } from './resend.js';
+import { resendConfigured } from '../env.js';
 import { HttpError } from '../middleware/errorHandler.js';
 
 /**
- * Thin transactional-mail layer on top of the Gmail OAuth integration.
- * Every call requires a `senderUserId` — the teammate whose Gmail account
- * will deliver the message:
+ * Thin transactional-mail layer. Two transports, preferred in order:
  *
- *  - Invite + resend-invite use the inviter (the admin who clicked Invite).
- *  - Password-reset uses the workspace's designated "system sender"
- *    (`app_settings.system_sender_user_id`).
+ *  1. Resend (HTTP API) — used whenever RESEND_API_KEY + MAIL_FROM are set.
+ *     A single verified org From address; works on the serverless runtime and
+ *     needs no per-teammate Gmail connection. This is the production path.
+ *  2. Legacy Gmail OAuth "send as a teammate" — the fallback when Resend isn't
+ *     configured. `senderUserId` is the teammate whose Gmail delivers it.
  *
- * If `senderUserId` is null OR that user hasn't connected Gmail yet, we
- * log the would-be message + the action URL and no-op. Routes never throw
- * on a missing sender — the invite still creates the user row, the reset
- * token still gets issued — so the surrounding feature degrades to "the
- * admin needs to connect Gmail" instead of a hard failure.
+ * Delivery never throws: if Resend errors (e.g. unverified domain) or no
+ * sender is connected, we log the would-be message + action URL and no-op, so
+ * the surrounding feature (invite row created, token issued) still succeeds.
  */
 async function send(
   senderUserId: string | null | undefined,
@@ -25,8 +25,22 @@ async function send(
   cc?: string | null,
 ): Promise<void> {
   const rcpt = cc ? `to=${to} cc=${cc}` : `to=${to}`;
+
+  // Preferred transport: Resend.
+  if (resendConfigured) {
+    try {
+      await sendViaResend({ to, cc, subject, html, text });
+    } catch (e) {
+      // Log loudly (with the URL-bearing text body) but never propagate.
+      console.error(`[mail] resend send failed — would send ${rcpt} subject=${JSON.stringify(subject)}`, e);
+      console.log(text);
+    }
+    return;
+  }
+
+  // Fallback transport: Gmail OAuth send-as, else log-only.
   if (!senderUserId) {
-    console.log(`[mail] no sender configured — would send ${rcpt} subject=${JSON.stringify(subject)}`);
+    console.log(`[mail] no transport configured — would send ${rcpt} subject=${JSON.stringify(subject)}`);
     console.log(text);
     return;
   }
@@ -55,22 +69,22 @@ export async function sendInviteEmail(args: {
   acceptUrl: string;
   expiresAt: Date;
 }): Promise<void> {
-  const subject = "You've been invited to Allebrum";
+  const subject = "You've been invited to Modern Zen";
   const expiresStr = args.expiresAt.toUTCString();
   const text = [
-    `${args.inviterName} added you to the Allebrum portal.`,
+    `${args.inviterName} added you to the Modern Zen portal.`,
     '',
     'Click the link below to set your password and finish signing in:',
     args.acceptUrl,
     '',
     `This invite link expires on ${expiresStr}. If it's expired, ask ${args.inviterName} to resend it.`,
     '',
-    '— The Allebrum team',
+    '— The Modern Zen team',
   ].join('\n');
   const html = wrap(`
-    <h2 style="margin:0 0 12px 0;font-size:20px;color:#111;">You've been invited to Allebrum</h2>
+    <h2 style="margin:0 0 12px 0;font-size:20px;color:#111;">You've been invited to Modern Zen</h2>
     <p style="margin:0 0 16px 0;color:#374151;">
-      <strong>${esc(args.inviterName)}</strong> added you to the Allebrum portal. Click below to set your password and finish signing in.
+      <strong>${esc(args.inviterName)}</strong> added you to the Modern Zen portal. Click below to set your password and finish signing in.
     </p>
     ${button(args.acceptUrl, 'Accept invite & set password')}
     <p style="margin:24px 0 0 0;font-size:13px;color:#6b7280;">
@@ -113,7 +127,7 @@ export async function sendClientPortalInviteEmail(args: {
     `This sign-in link expires on ${expiresStr}. If it expires, request a new one`,
     "from the portal's sign-in page.",
     '',
-    `— The ${args.clientName} team at Allebrum`,
+    `— The ${args.clientName} team at Modern Zen`,
   ].join('\n');
   const html = wrap(`
     <h2 style="margin:0 0 12px 0;font-size:20px;color:#111;">
@@ -222,7 +236,7 @@ export async function sendPayrollReportEmail(args: {
       ),
     ]),
     '',
-    '— Sent from the Allebrum portal',
+    '— Sent from the Modern Zen portal',
   ].join('\n');
 
   const rowsHtml = summaries
@@ -341,24 +355,24 @@ export async function sendResetEmail(args: {
   resetUrl: string;
   expiresAt: Date;
 }): Promise<void> {
-  const subject = 'Reset your Allebrum password';
+  const subject = 'Reset your Modern Zen password';
   const expiresStr = args.expiresAt.toUTCString();
   const text = [
     `Hi ${args.name},`,
     '',
-    'Someone (hopefully you) asked to reset the password for your Allebrum account.',
+    'Someone (hopefully you) asked to reset the password for your Modern Zen account.',
     'Click the link below to choose a new password:',
     args.resetUrl,
     '',
     `This link expires on ${expiresStr}.`,
     "If you didn't request this, you can ignore this email — your password stays the same.",
     '',
-    '— The Allebrum team',
+    '— The Modern Zen team',
   ].join('\n');
   const html = wrap(`
-    <h2 style="margin:0 0 12px 0;font-size:20px;color:#111;">Reset your Allebrum password</h2>
+    <h2 style="margin:0 0 12px 0;font-size:20px;color:#111;">Reset your Modern Zen password</h2>
     <p style="margin:0 0 16px 0;color:#374151;">
-      Hi ${esc(args.name)}, someone (hopefully you) asked to reset the password for your Allebrum account. Click below to choose a new one.
+      Hi ${esc(args.name)}, someone (hopefully you) asked to reset the password for your Modern Zen account. Click below to choose a new one.
     </p>
     ${button(args.resetUrl, 'Choose a new password')}
     <p style="margin:24px 0 0 0;font-size:13px;color:#6b7280;">
@@ -444,7 +458,7 @@ function wrap(body: string): string {
     <div style="max-width:560px;margin:32px auto;background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:32px;">
       ${body}
       <hr style="border:none;border-top:1px solid #f3f4f6;margin:32px 0 16px 0;">
-      <p style="margin:0;font-size:11px;color:#9ca3af;">Allebrum portal · Sent on behalf of a teammate's connected Gmail account.</p>
+      <p style="margin:0;font-size:11px;color:#9ca3af;">Modern Zen · This is an automated message from the Modern Zen portal.</p>
     </div>
   </body></html>`;
 }

@@ -13,6 +13,17 @@ export function getIO(): Server<ClientToServerEvents, ServerToClientEvents> {
   return _io;
 }
 
+/**
+ * Non-throwing accessor: returns the Socket.IO server, or null when it was
+ * never initialized. The Netlify Function entrypoint (buildApp) deliberately
+ * doesn't start Socket.IO, so realtime emits must degrade to a no-op there
+ * rather than crash the request. See emit.ts. Realtime is restored properly by
+ * the Supabase Realtime phase.
+ */
+export function getIOOrNull(): Server<ClientToServerEvents, ServerToClientEvents> | null {
+  return _io;
+}
+
 // NOTE: this stays on Socket.IO's default in-memory adapter (no Redis) during
 // the migration. Realtime is replaced by Supabase Realtime in a later phase;
 // until then this serves a single API instance. Auth is the Supabase JWT,
