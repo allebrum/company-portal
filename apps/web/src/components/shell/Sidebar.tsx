@@ -84,7 +84,7 @@ export function Sidebar() {
   // Branding from the public auth config — cached + auto-invalidated on
   // settings changes, so the sidebar updates within a query refresh after
   // an admin edits Branding settings.
-  const portalName = cfg?.portalName ?? 'Hoppa';
+  const portalName = cfg?.portalName ?? 'Modern Zen';
   const brandColor = cfg?.brandPrimaryColor ?? '#9333ea';
   const logoDataUrl = cfg?.brandLogoDataUrl ?? null;
 

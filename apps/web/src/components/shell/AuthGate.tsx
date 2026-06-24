@@ -163,13 +163,13 @@ function ShellWithBootstrap({ children }: { children: ReactNode }) {
               {cfg?.brandLogoDataUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={cfg.brandLogoDataUrl} alt="" className="w-full h-full object-contain" />
-              ) : (cfg?.portalName ?? 'Hoppa') === 'Hoppa' ? (
+              ) : (cfg?.portalName ?? 'Modern Zen') === 'Hoppa' ? (
                 <HoppaMark className="w-[18px] h-[18px]" />
               ) : (
-                (cfg?.portalName ?? 'Hoppa').charAt(0).toUpperCase()
+                (cfg?.portalName ?? 'Modern Zen').charAt(0).toUpperCase()
               )}
             </div>
-            <span className="font-bold text-gray-900">{cfg?.portalName ?? 'Hoppa'}</span>
+            <span className="font-bold text-gray-900">{cfg?.portalName ?? 'Modern Zen'}</span>
           </div>
         </div>
 

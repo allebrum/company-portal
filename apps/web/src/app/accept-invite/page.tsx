@@ -54,7 +54,7 @@ export default function AcceptInvitePage() {
   const missingToken = !token;
 
   // Workspace branding — same resolution + fallbacks as the login page.
-  const portalName = cfg?.portalName ?? 'Hoppa';
+  const portalName = cfg?.portalName ?? 'Modern Zen';
   const brandColor = cfg?.brandPrimaryColor ?? '#9333ea';
   const logoDataUrl = cfg?.brandLogoDataUrl ?? null;
 

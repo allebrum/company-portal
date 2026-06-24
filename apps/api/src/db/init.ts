@@ -58,7 +58,7 @@ async function main(): Promise<void> {
     } else {
       const [created] = await db
         .insert(tenants)
-        .values({ name: 'Modern Zen Portal', slug: 'modern-zen', status: 'active' })
+        .values({ name: 'Modern Zen', slug: 'modern-zen', status: 'active' })
         .returning({ id: tenants.id });
       defaultTenantId = created!.id;
     }
@@ -118,7 +118,7 @@ async function main(): Promise<void> {
   //    admin-customised settings on later deploys).
   await db
     .insert(appSettings)
-    .values({ tenantId: defaultTenantId, allowedEmailDomains: allowedDomains })
+    .values({ tenantId: defaultTenantId, allowedEmailDomains: allowedDomains, portalName: 'Modern Zen' })
     .onConflictDoNothing();
 
   // 4. Break-glass admin — only if that email does not already exist.

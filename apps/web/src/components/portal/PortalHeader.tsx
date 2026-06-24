@@ -27,7 +27,7 @@ export function PortalHeader({
   // Prefer the signed-in contact's WORKSPACE branding (their agency) — the
   // instance config is product-branded on SaaS, so it's only the fallback
   // for the logged-out state.
-  const workspaceName = me?.workspace?.name ?? cfg?.portalName ?? 'Hoppa';
+  const workspaceName = me?.workspace?.name ?? cfg?.portalName ?? 'Modern Zen';
   const brandColor = me?.workspace?.color ?? cfg?.brandPrimaryColor ?? '#9333ea';
   const logo = me?.workspace ? me.workspace.logo : cfg?.brandLogoDataUrl;
   const q = `?slug=${encodeURIComponent(slug)}`;

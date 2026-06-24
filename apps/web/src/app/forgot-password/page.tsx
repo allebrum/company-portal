@@ -4,9 +4,8 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Field, Input } from '@/components/ui/Field';
 import { Card } from '@/components/ui/Card';
-import { HoppaMark } from '@/components/ui/HoppaMark';
 import { useAuthConfig } from '@/hooks/useResources';
-import { api, ApiError } from '@/lib/api';
+import { getSupabase } from '@/lib/supabase';
 
 export default function ForgotPasswordPage() {
   const { data: cfg } = useAuthConfig();
@@ -20,25 +19,21 @@ export default function ForgotPasswordPage() {
     setError(null);
     setSubmitting(true);
     try {
-      // The endpoint deliberately 200s regardless of whether the email is
-      // registered, so the user always sees the same confirmation screen
-      // (anti-enumeration). 403 only fires when the workspace has disabled
-      // password login entirely.
-      await api.post('/auth/forgot-password', { email });
-      setDone(true);
+      // Supabase sends the reset email + handles the token; the link returns to
+      // /reset-password where the user sets a new password.
+      const { error: err } = await getSupabase().auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (err) throw new Error(err.message);
+      setDone(true); // always show the same screen (anti-enumeration)
     } catch (err) {
-      if (err instanceof ApiError && err.status === 403) {
-        setError('Password sign-in is disabled for this workspace. Ask an admin for help.');
-      } else {
-        setError(err instanceof Error ? err.message : 'Could not send the email. Try again.');
-      }
+      setError(err instanceof Error ? err.message : 'Could not send the email. Try again.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Workspace branding — same resolution + fallbacks as the login page.
-  const portalName = cfg?.portalName ?? 'Hoppa';
+  const portalName = cfg?.portalName ?? 'Modern Zen';
   const brandColor = cfg?.brandPrimaryColor ?? '#9333ea';
   const logoDataUrl = cfg?.brandLogoDataUrl ?? null;
 
@@ -53,10 +48,8 @@ export default function ForgotPasswordPage() {
             {logoDataUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={logoDataUrl} alt={`${portalName} logo`} className="w-full h-full object-contain" />
-            ) : portalName === 'Hoppa' ? (
-              <HoppaMark className="w-7 h-7" />
             ) : (
-              portalName.charAt(0).toUpperCase() || 'H'
+              portalName.charAt(0).toUpperCase() || 'M'
             )}
           </div>
           <h1 className="mt-3 text-xl font-bold text-gray-900">Reset your password</h1>
@@ -68,7 +61,7 @@ export default function ForgotPasswordPage() {
         {done ? (
           <div className="space-y-4">
             <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
-              If <span className="font-semibold">{email}</span> belongs to a {portalName} account, a reset link is on its way. It expires in 1 hour.
+              If <span className="font-semibold">{email}</span> belongs to a {portalName} account, a reset link is on its way.
             </div>
             <a href="/login" className="block">
               <Button type="button" variant="primary" size="lg" className="w-full">

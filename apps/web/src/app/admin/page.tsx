@@ -889,7 +889,7 @@ function BrandingTab() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               onBlur={saveName}
-              placeholder="Hoppa"
+              placeholder="Modern Zen"
               maxLength={60}
               className="max-w-sm"
             />
