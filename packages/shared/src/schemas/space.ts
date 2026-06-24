@@ -38,9 +38,10 @@ export type SpaceBlock = z.infer<typeof SpaceBlockSchema>;
  * those. `source = 'files'` is for direct uploads / pastes from the Files
  * tab itself.
  *
- * For real uploads via Drive, `url` is the Drive `webViewLink` and we leave
- * the Drive file id in `meta` so the row can be deleted from the Drive
- * folder later if we choose.
+ * For uploads via Supabase Storage, `url` is the object's public URL and
+ * `storageKey` is the object path (used to delete it later). Legacy rows from
+ * the Drive era instead have a Drive `webViewLink` in `url` and `Drive · <id>`
+ * in `meta`; both shapes coexist.
  */
 export const SpaceFileSchema = z.object({
   id: z.string().min(1).max(80),
@@ -51,6 +52,11 @@ export const SpaceFileSchema = z.object({
   source: z.enum(['notes', 'files']).default('files'),
   addedBy: z.string().uuid(),
   addedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  // Supabase Storage object path (present on uploads from the Storage era;
+  // absent on legacy Drive rows + external/notes links).
+  storageKey: z.string().max(1024).optional(),
+  mimeType: z.string().max(255).optional(),
+  sizeBytes: z.number().int().nonnegative().optional(),
   // Portal sharing (0029): only files with this flag appear in the client
   // portal (Files tab + project view). Optional — rows written before the
   // flag existed lack it; the 0029 migration backfills client-level files

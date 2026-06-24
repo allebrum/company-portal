@@ -17,7 +17,6 @@ import {
   type GoalRow, type TodoRow, type ProjectRow, type ClientRow,
 } from '@/hooks/useResources';
 import {
-  useDriveStatus,
   useRenameSpaceFile,
   useRefreshSpaceFileNames,
 } from '@/hooks/useDrive';
@@ -916,7 +915,6 @@ function FilesTab({
   scope: { kind: 'client' | 'project'; id: string };
   data: ReturnType<typeof useSpaceData>;
 }) {
-  const { data: driveStatus } = useDriveStatus();
   const gate = useIntegrationGate();
   const { data: goals = [] } = useGoals();
   const { data: projects = [] } = useProjects();
@@ -944,7 +942,9 @@ function FilesTab({
   // via `ensureClientFolder` / `ensureProjectFolder` if it's still null,
   // so we no longer need it for the upload call itself.
   const folderId = data.project?.driveFolderId ?? data.client?.driveFolderId ?? null;
-  const driveConnected = !!driveStatus?.connected;
+  // Uploads go to Supabase Storage now — always available, no Drive connection
+  // required. (The variable name is kept to avoid churning the dropzone JSX.)
+  const driveConnected = true;
 
   // Files registered directly in this Space.
   const inSpace = data.spaceFiles;

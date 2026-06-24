@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { sql, eq } from 'drizzle-orm';
 import { db, sqlClient } from './client.js';
 import { getServiceSupabase } from '../lib/supabase.js';
+import { ensureSpacesBucket } from '../services/storage.js';
 import { users, groups, permissions, groupPermissions, userGroups, appSettings, tenants, tenantMembers } from './schema.js';
 import { asc } from 'drizzle-orm';
 import {
@@ -69,6 +70,10 @@ async function main(): Promise<void> {
   // 402'd once SaaS gating is enabled. Provisioned customer tenants stay
   // billing_exempt = false and resolve via the marketing subscription API.
   await db.update(tenants).set({ billingExempt: true }).where(eq(tenants.id, defaultTenantId));
+
+  // Supabase Storage bucket for Client/Project/Todo/Goal file uploads. Idempotent
+  // and a no-op without Supabase creds, so safe on every deploy.
+  await ensureSpacesBucket();
 
   // 1. Permission catalog — insert missing, then refresh labels/category so
   //    the catalog always matches @modernzen/shared.

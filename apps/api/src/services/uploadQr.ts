@@ -7,7 +7,7 @@ import { currentTenantId, withTenant } from '../tenancy/context.js';
 import { tenantEq } from '../tenancy/scope.js';
 import { uploadSpaceFile } from './spaceFiles.js';
 import { uploadTodoFile } from './todoFiles.js';
-import { uploadFile } from './drive.js';
+import { uploadObject } from './storage.js';
 import { uploadGoalResource } from './goals.js';
 
 export type UploadQrTarget =
@@ -280,12 +280,17 @@ export async function uploadViaQrSession(
         continue;
       }
 
-      const driveEntry = await uploadFile(target.folderId, f.originalname, f.mimetype, f.buffer);
-      uploaded.push({
-        name: driveEntry.name,
-        id: driveEntry.id,
-        url: driveEntry.webViewLink ?? `https://drive.google.com/file/d/${driveEntry.id}/view`,
+      // Legacy 'drive' QR target — there are no Drive folders anymore, so route
+      // the bytes into Supabase Storage under a generic qr/ prefix.
+      const stored = await uploadObject({
+        tenantId: session.tenantId,
+        scopeKind: 'qr',
+        scopeId: target.folderId,
+        filename: f.originalname,
+        mimeType: f.mimetype,
+        buffer: f.buffer,
       });
+      uploaded.push({ name: f.originalname, id: stored.key, url: stored.url });
       await db.insert(uploadQrSessionFiles).values({
         tenantId: session.tenantId,
         sessionId: session.id,
@@ -296,8 +301,8 @@ export async function uploadViaQrSession(
         sizeBytes: f.size,
         destinationKind: 'drive_folder',
         destinationId: target.folderId,
-        storedFileId: driveEntry.id,
-        storedFileUrl: driveEntry.webViewLink ?? `https://drive.google.com/file/d/${driveEntry.id}/view`,
+        storedFileId: stored.key,
+        storedFileUrl: stored.url,
       });
     } catch (e) {
       const message = e instanceof Error ? e.message : 'upload_failed';

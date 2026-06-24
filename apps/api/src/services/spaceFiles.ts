@@ -4,39 +4,24 @@ import { db } from '../db/client.js';
 import { clients, projects } from '../db/schema.js';
 import type { SpaceFile } from '@modernzen/shared';
 import { HttpError } from '../middleware/errorHandler.js';
-import {
-  isConnected as driveIsConnected,
-  ensureClientFolder,
-  ensureProjectFolder,
-  uploadFile,
-  deleteEntry,
-  getFileMeta,
-  renameEntry,
-} from './drive.js';
+import { uploadObject, deleteObject } from './storage.js';
 import { emit } from '../realtime/emit.js';
 import { EV } from '@modernzen/shared';
 import { appendActivity } from './activity.js';
 import { tenantEq } from '../tenancy/scope.js';
+import { currentTenantId } from '../tenancy/context.js';
 
 export type SpaceScopeKind = 'client' | 'project';
 
 /**
- * Upload a file into a Client or Project Space's Drive folder AND append
- * the resulting `SpaceFile` to the row's `space_files` JSONB column —
- * atomically per-step so half-writes can't leak orphaned Drive files into
- * the bucket and persisted `space_files` always references a live Drive
- * resource.
+ * Upload a file into a Client or Project Space (Supabase Storage) AND append
+ * the resulting `SpaceFile` to the row's `space_files` JSONB column — atomically
+ * per-step so a half-write can't leave an orphaned Storage object, and persisted
+ * `space_files` always references a live object.
  *
- * Why this exists: the previous flow was two browser-side API calls
- * (`POST /drive/upload` + `PATCH /clients/:id`), each with a different
- * permission gate. An admin with `media.manage` but not `clients.manage`
- * would see the Drive upload succeed and the spaceFiles append silently
- * 403, leaving the file visible in the Media dashboard but invisible in
- * the Client Space Files tab. Even with matching permissions, a tab
- * close or network blip between the two calls produced the same drift.
- *
- * One endpoint with one permission gate, two server-side steps in a
- * try/catch that trashes the just-uploaded Drive file on append failure.
+ * One endpoint, one permission gate, two server-side steps in a try/catch that
+ * deletes the just-uploaded Storage object on append failure. (No Google Drive
+ * connection required — uploads work as soon as Supabase Storage is configured.)
  */
 export async function uploadSpaceFile(args: {
   scopeKind: SpaceScopeKind;
@@ -46,36 +31,32 @@ export async function uploadSpaceFile(args: {
   mimeType: string;
   buffer: Buffer;
 }): Promise<{ file: SpaceFile; spaceFiles: SpaceFile[] }> {
-  if (!(await driveIsConnected())) {
-    throw new HttpError(412, 'drive_not_connected');
-  }
+  // 1. Upload the bytes to the tenant/scope-keyed Storage path.
+  const stored = await uploadObject({
+    tenantId: currentTenantId(),
+    scopeKind: args.scopeKind,
+    scopeId: args.scopeId,
+    filename: args.filename,
+    mimeType: args.mimeType,
+    buffer: args.buffer,
+  });
 
-  // 1. Resolve the target Drive folder, lazily creating if missing.
-  //    `ensureClientFolder` / `ensureProjectFolder` are race-safe (F17B).
-  let folderId: string;
-  if (args.scopeKind === 'client') {
-    folderId = await ensureClientFolder(args.scopeId);
-  } else {
-    folderId = await ensureProjectFolder(args.scopeId);
-  }
-
-  // 2. Upload to Drive.
-  const driveEntry = await uploadFile(folderId, args.filename, args.mimeType, args.buffer);
-
-  // 3. Build the SpaceFile and atomically append to the row's JSONB
-  //    column. The SQL `||` append eliminates the lost-update race that
-  //    a read-modify-write at the application layer would have — two
-  //    concurrent uploads to the same scope land cleanly side-by-side.
+  // 2. Build the SpaceFile and atomically append to the row's JSONB column.
+  //    The SQL `||` append eliminates the lost-update race of an app-layer
+  //    read-modify-write — concurrent uploads land cleanly side-by-side.
   const today = new Date().toISOString().slice(0, 10);
   const newFile: SpaceFile = {
     id: randomUUID(),
     kind: 'drive-doc',
-    title: driveEntry.name,
-    url: driveEntry.webViewLink ?? `https://drive.google.com/file/d/${driveEntry.id}/view`,
-    meta: `Drive · ${driveEntry.id}`,
+    title: args.filename,
+    url: stored.url,
+    meta: `Storage · ${args.filename}`,
     source: 'files',
     addedBy: args.whoId,
     addedAt: today,
+    storageKey: stored.key,
+    mimeType: args.mimeType || undefined,
+    sizeBytes: stored.size,
   };
 
   try {
@@ -88,15 +69,13 @@ export async function uploadSpaceFile(args: {
     await appendActivity({
       whoId: args.whoId,
       kind: 'space.file_uploaded',
-      target: `${driveEntry.name} → ${args.scopeKind} space`,
+      target: `${args.filename} → ${args.scopeKind} space`,
     });
     return { file: newFile, spaceFiles: result };
   } catch (e) {
-    // Append failed (scope was deleted, JSON ill-formed, etc). Trash
-    // the Drive file we just created so we don't leave an orphan
-    // behind that the user can't see in the Files tab and that
-    // matches nothing in the DB.
-    try { await deleteEntry(driveEntry.id); } catch { /* best-effort */ }
+    // Append failed (scope deleted, JSON ill-formed, etc). Delete the object
+    // we just stored so we don't leave an orphan with no DB reference.
+    await deleteObject(stored.key);
     throw e;
   }
 }
@@ -166,19 +145,12 @@ async function replaceScopeFiles(scopeKind: SpaceScopeKind, scopeId: string, fil
   return (row.spaceFiles as SpaceFile[]) ?? [];
 }
 
-function extractDriveFileId(file: SpaceFile): string | null {
-  const urlMatch = /\/d\/([a-zA-Z0-9_-]+)/.exec(file.url ?? '');
-  if (urlMatch?.[1]) return urlMatch[1];
-  const metaMatch = /^Drive\s*[.-]\s*([a-zA-Z0-9_-]+)$/i.exec((file.meta ?? '').trim());
-  if (metaMatch?.[1]) return metaMatch[1];
-  return null;
-}
-
 export async function renameSpaceFile(args: {
   scopeKind: SpaceScopeKind;
   scopeId: string;
   fileId: string;
   title: string;
+  /** Legacy flag (Drive era); ignored now — Storage objects aren't renamed in place. */
   renameInDrive?: boolean;
   whoId: string;
 }): Promise<{ file: SpaceFile; spaceFiles: SpaceFile[] }> {
@@ -190,16 +162,8 @@ export async function renameSpaceFile(args: {
   if (idx < 0) throw new HttpError(404, 'file_not_found');
 
   const current = files[idx]!;
-  let resolvedTitle = nextTitle;
-  if (args.renameInDrive !== false) {
-    const driveId = extractDriveFileId(current);
-    if (driveId) {
-      const renamed = await renameEntry(driveId, nextTitle);
-      resolvedTitle = renamed.name;
-    }
-  }
-
-  const updatedFile: SpaceFile = { ...current, title: resolvedTitle };
+  // The Storage object key is immutable; renaming only updates the display title.
+  const updatedFile: SpaceFile = { ...current, title: nextTitle };
   const next = files.slice();
   next[idx] = updatedFile;
   const spaceFiles = await replaceScopeFiles(args.scopeKind, args.scopeId, next);
@@ -218,35 +182,9 @@ export async function refreshSpaceFileNamesFromDrive(args: {
   scopeId: string;
   whoId: string;
 }): Promise<{ updated: number; spaceFiles: SpaceFile[] }> {
-  if (!(await driveIsConnected())) {
-    throw new HttpError(412, 'drive_not_connected');
-  }
-
+  // Supabase Storage has no external rename source — file names are owned in-app.
+  // Kept as a no-op so the existing route/UI "refresh names" button degrades
+  // gracefully instead of 404-ing.
   const files = await getScopeFiles(args.scopeKind, args.scopeId);
-  let updated = 0;
-  const next = await Promise.all(files.map(async (file) => {
-    const driveId = extractDriveFileId(file);
-    if (!driveId) return file;
-    try {
-      const meta = await getFileMeta(driveId);
-      const driveName = (meta.name ?? '').trim();
-      if (!driveName || driveName === file.title) return file;
-      updated += 1;
-      return { ...file, title: driveName };
-    } catch {
-      return file;
-    }
-  }));
-
-  if (updated === 0) {
-    return { updated: 0, spaceFiles: files };
-  }
-
-  const spaceFiles = await replaceScopeFiles(args.scopeKind, args.scopeId, next);
-  if (args.scopeKind === 'client') {
-    emit.toOrg(EV.CLIENT_UPDATED, { id: args.scopeId, by: args.whoId, at: new Date().toISOString() });
-  } else {
-    emit.toOrg(EV.PROJECT_UPDATED, { id: args.scopeId, by: args.whoId, at: new Date().toISOString() });
-  }
-  return { updated, spaceFiles };
+  return { updated: 0, spaceFiles: files };
 }
