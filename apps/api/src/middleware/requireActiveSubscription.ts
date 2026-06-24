@@ -15,7 +15,7 @@ import { tenantIsActive } from '../services/subscriptions.js';
  *    trialing-no-card → 402. billing_exempt and self-host (BILLING_ENFORCED
  *    false) always pass — see `tenantIsActive`.
  */
-const EXEMPT_PREFIXES = ['/auth', '/billing', '/provisioning', '/health', '/q', '/portal'];
+const EXEMPT_PREFIXES = ['/auth', '/billing', '/provisioning', '/health', '/q', '/portal', '/connect'];
 
 function isExempt(path: string): boolean {
   return EXEMPT_PREFIXES.some((p) => path === p || path.startsWith(p + '/'));

@@ -25,6 +25,7 @@ import { tenantContext } from '../middleware/tenantContext.js';
 import { requireActiveSubscription } from '../middleware/requireActiveSubscription.js';
 import { provisioningRouter } from './provisioning.js';
 import { billingRouter } from './billing.js';
+import { connectRouter } from './connect.js';
 import { provisioningConfigured } from '../env.js';
 
 export const apiRouter = Router();
@@ -59,6 +60,7 @@ apiRouter.use('/activity', activityRouter);
 apiRouter.use('/integrations', integrationsRouter);
 apiRouter.use('/spaces', spacesRouter);
 apiRouter.use('/portal', portalRouter);
+apiRouter.use('/connect', connectRouter);
 apiRouter.use('/qr', qrRouter);
 apiRouter.use('/q', qrPublicRouter);
 apiRouter.use('/upload/qr', uploadQrRouter);
