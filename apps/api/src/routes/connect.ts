@@ -4,6 +4,7 @@ import { requireClientPortalAuth } from '../middleware/requireClientPortalAuth.j
 import { rateLimit } from '../middleware/rateLimit.js';
 import { ensureProvisioned } from '../connect/provision.js';
 import { getConnectUrl } from '../connect/zernio.js';
+import { startConnect as composioStartConnect, listConnected as composioListConnected } from '../connect/composio.js';
 import { upsertConnection } from '../connect/connections.js';
 import { signState, verifyState } from '../connect/oauthState.js';
 import { db } from '../db/client.js';
@@ -82,6 +83,68 @@ connectRouter.get('/zernio/callback/:state', async (req, res, next) => {
       integration: platform,
       displayName: username,
     });
+    res.redirect(`${appUrl()}/connections`);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ---- Composio (apps & tools) ------------------------------------------------
+
+// POST /api/connect/composio { toolkit } → { redirectUrl }  (portal-session gated)
+connectRouter.post(
+  '/composio',
+  requireClientPortalAuth,
+  rateLimit({ key: 'connect-composio', max: 20, windowSec: 60 }),
+  async (req, res, next) => {
+    try {
+      const sess = req.session.clientPortalSession!;
+      const toolkit = String(req.body?.toolkit ?? '').trim().toLowerCase();
+      if (!toolkit) {
+        res.status(400).json({ error: 'toolkit_required' });
+        return;
+      }
+      const prov = await ensureProvisioned(sess.clientId);
+      const state = signState({ clientId: sess.clientId, provider: 'composio', ref: toolkit });
+      const callbackUrl = `${appUrl()}/api/connect/composio/callback/${state}`;
+      const redirectUrl = await composioStartConnect(prov.composioUserId, toolkit, callbackUrl);
+      res.json({ redirectUrl });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+// GET /api/connect/composio/callback/:state  (public; Composio redirects here
+// after managed OAuth). We re-read the user's connected accounts and upsert.
+connectRouter.get('/composio/callback/:state', async (req, res, next) => {
+  const fail = (reason: string): void => {
+    res.redirect(`${appUrl()}/connections?error=${encodeURIComponent(reason)}`);
+  };
+  try {
+    const state = verifyState(req.params.state);
+    if (!state || state.provider !== 'composio') return fail('bad_state');
+
+    const [client] = await db
+      .select({ id: clients.id, tenantId: clients.tenantId, composioUserId: clients.composioUserId })
+      .from(clients)
+      .where(eq(clients.id, state.clientId))
+      .limit(1);
+    if (!client) return fail('client_not_found');
+    const composioUserId = client.composioUserId ?? client.id;
+
+    // Re-read the source of truth from Composio and refresh our cache.
+    const accounts = await composioListConnected(composioUserId);
+    for (const a of accounts) {
+      if (a.status.toUpperCase() !== 'ACTIVE') continue;
+      await upsertConnection({
+        clientId: client.id,
+        tenantId: client.tenantId,
+        provider: 'composio',
+        externalId: a.id,
+        integration: a.toolkit || state.ref,
+      });
+    }
     res.redirect(`${appUrl()}/connections`);
   } catch (e) {
     next(e);

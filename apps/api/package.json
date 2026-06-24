@@ -18,6 +18,7 @@
     "test": "node --import tsx --test"
   },
   "dependencies": {
+    "@composio/core": "^0.11.0",
     "@modernzen/shared": "workspace:*",
     "@simplewebauthn/server": "^13.3.0",
     "@socket.io/redis-adapter": "8.3.0",
@@ -43,7 +44,7 @@
     "qrcode": "^1.5.4",
     "socket.io": "4.8.0",
     "ua-parser-js": "^2.0.10",
-    "zod": "3.23.8"
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "@types/compression": "1.7.5",
