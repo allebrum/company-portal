@@ -62,10 +62,9 @@ export async function ensureSpacesBucket(): Promise<void> {
   const supa = getServiceSupabase();
   const { data } = await supa.storage.getBucket(SPACES_BUCKET);
   if (data) return;
-  const { error } = await supa.storage.createBucket(SPACES_BUCKET, {
-    public: true,
-    fileSizeLimit: '100MB',
-  });
+  // No explicit fileSizeLimit — the project's global upload cap applies (some
+  // plans reject a per-bucket limit above it with a 413).
+  const { error } = await supa.storage.createBucket(SPACES_BUCKET, { public: true });
   // Ignore "already exists" races; surface anything else.
   if (error && !/exist/i.test(error.message)) {
     throw new Error(`create_bucket_failed: ${error.message}`);
