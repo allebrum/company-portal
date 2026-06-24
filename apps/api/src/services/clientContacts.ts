@@ -12,7 +12,7 @@ import { env } from '../env.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { appendActivity } from './activity.js';
 import { getUser } from './users.js';
-import type { ContactRole, InviteContactInput, UpdateContactInput } from '@allebrum/shared';
+import type { ContactRole, InviteContactInput, UpdateContactInput } from '@modernzen/shared';
 
 /**
  * F23 client portal contacts service. Mirrors the staff invite pattern

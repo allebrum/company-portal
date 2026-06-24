@@ -4,12 +4,11 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Home, Briefcase, Clock, CheckSquare, Target, Shield, BarChart3, Settings, FolderOpen, Wrench } from 'lucide-react';
-import type { Permission } from '@allebrum/shared';
+import type { Permission } from '@modernzen/shared';
 import { useEntries, useAuthConfig } from '@/hooks/useResources';
 import { useAuth } from '@/hooks/useAuth';
 import { Avatar } from '../ui/Avatar';
 import { Button } from '../ui/Button';
-import { HoppaMark } from '../ui/HoppaMark';
 import { useToast } from '../ui/Toast';
 import { cn } from '@/lib/utils';
 
@@ -27,7 +26,7 @@ const NAV: { id: string; href: string; label: string; Icon: typeof Home; anyPerm
 ];
 
 /**
- * Hoppa: workspace switcher. Renders only when the user belongs to more than
+ * Modern Zen: workspace switcher. Renders only when the user belongs to more than
  * one workspace; switching clears caches + refetches everything via the auth
  * context so no other workspace's data lingers.
  */
@@ -84,7 +83,7 @@ export function Sidebar() {
   // Branding from the public auth config — cached + auto-invalidated on
   // settings changes, so the sidebar updates within a query refresh after
   // an admin edits Branding settings.
-  const portalName = cfg?.portalName ?? 'Hoppa';
+  const portalName = cfg?.portalName ?? 'Modern Zen';
   const brandColor = cfg?.brandPrimaryColor ?? '#9333ea';
   const logoDataUrl = cfg?.brandLogoDataUrl ?? null;
 
@@ -98,10 +97,8 @@ export function Sidebar() {
           {logoDataUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={logoDataUrl} alt={`${portalName} logo`} className="w-full h-full object-contain" />
-          ) : portalName === 'Hoppa' ? (
-            <HoppaMark className="w-5 h-5 text-white" />
           ) : (
-            <span className="text-white text-base font-bold">{portalName.charAt(0).toUpperCase() || 'H'}</span>
+            <span className="text-white text-base font-bold">{portalName.charAt(0).toUpperCase() || 'M'}</span>
           )}
         </div>
         <div className="leading-tight">

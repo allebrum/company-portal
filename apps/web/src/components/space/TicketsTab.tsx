@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { ArrowLeft, MessageSquare, Send } from 'lucide-react';
-import type { TicketStatus } from '@allebrum/shared';
+import type { TicketStatus } from '@modernzen/shared';
 import { useTickets, useTicket, useUpdateTicket, useReplyTicket } from '@/hooks/useTickets';
 import { useProjects, type ClientRow } from '@/hooks/useResources';
 import { useAuth } from '@/hooks/useAuth';

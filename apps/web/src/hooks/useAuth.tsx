@@ -1,11 +1,12 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
-import type { Permission } from '@allebrum/shared';
+import { getSupabase } from '@/lib/supabase';
+import type { Permission } from '@modernzen/shared';
 
-/** Hoppa: one workspace the user belongs to (for the switcher). */
+/** One workspace the user belongs to (for the switcher). */
 export type Workspace = { id: string; name: string; slug: string; isOwner: boolean };
 
 export type Me = {
@@ -17,7 +18,7 @@ export type Me = {
   billable: number;
   permissions: Permission[];
   groupIds: string[];
-  // Hoppa: the active workspace + the user's full membership list.
+  // The active workspace + the user's full membership list.
   tenantId: string;
   workspaces: Workspace[];
 };
@@ -27,10 +28,9 @@ type AuthState = {
   loading: boolean;
   error: string | null;
   can: (perm: Permission) => boolean;
-  login: (email: string, password: string) => Promise<{ mfaRequired: boolean }>;
+  login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
-  /** Hoppa: switch the active workspace, clear caches, refetch everything. */
   switchWorkspace: (tenantId: string) => Promise<void>;
 };
 
@@ -42,6 +42,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
+  // Load the app identity from /auth/me. api.ts attaches the Supabase JWT as a
+  // Bearer token; no session → 401 → not signed in.
   const refresh = useCallback(async (): Promise<void> => {
     setLoading(true);
     try {
@@ -59,41 +61,60 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Track whether we currently hold an identity, read inside the auth-change
+  // handler without making it an effect dependency.
+  const hasIdentityRef = useRef(false);
+  useEffect(() => {
+    hasIdentityRef.current = me !== null;
+  }, [me]);
+
+  // Initial load + a DELIBERATELY MINIMAL reaction to Supabase auth changes.
+  // We do NOT refresh on TOKEN_REFRESHED or INITIAL_SESSION, and only on a
+  // genuinely new SIGNED_IN (when no identity is held yet). Reason: api.ts calls
+  // getSession() on every request, which re-emits these events; refreshing on
+  // them re-enters /auth/me and loops — pathologically so when a same-origin
+  // iframe (the staff Portal-tab preview) runs a second Supabase client over the
+  // shared session. The mount refresh() + login() cover initial/explicit loads.
   useEffect(() => {
     void refresh();
+    const { data: sub } = getSupabase().auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        setMe(null);
+        setLoading(false);
+      } else if (event === 'SIGNED_IN' && !hasIdentityRef.current) {
+        void refresh();
+      }
+    });
+    return () => sub.subscription.unsubscribe();
   }, [refresh]);
 
   const login = useCallback(
-    async (email: string, password: string): Promise<{ mfaRequired: boolean }> => {
-      const res = await api.post<{ user?: Me; mfaRequired?: boolean }>('/auth/login', { email, password });
-      if (res.mfaRequired) return { mfaRequired: true };
-      // The login response carries permissions but not the workspace fields;
-      // refresh from /auth/me to load the full Me (tenantId + workspaces).
+    async (email: string, password: string): Promise<void> => {
+      const { error: err } = await getSupabase().auth.signInWithPassword({ email, password });
+      if (err) throw new ApiError(401, err.message);
       await refresh();
       setError(null);
-      return { mfaRequired: false };
     },
     [refresh],
   );
 
   const logout = useCallback(async (): Promise<void> => {
     try {
-      await api.post('/auth/logout');
+      await getSupabase().auth.signOut();
     } finally {
       setMe(null);
+      queryClient.clear();
     }
-  }, []);
+  }, [queryClient]);
 
-  const can = useCallback(
-    (perm: Permission) => !!me?.permissions?.includes(perm),
-    [me],
-  );
+  const can = useCallback((perm: Permission) => !!me?.permissions?.includes(perm), [me]);
 
   const switchWorkspace = useCallback(
     async (tenantId: string): Promise<void> => {
+      // The active workspace travels as an `x-tenant-id` header the API derives
+      // tenant context from; persist it so api.ts can attach it.
+      if (typeof window !== 'undefined') window.localStorage.setItem('active-tenant', tenantId);
       await api.post('/auth/switch-workspace', { tenantId });
-      // Drop every cached query so no prior workspace's data lingers, then
-      // refetch identity (new permissions/branding) + everything else.
       queryClient.clear();
       await refresh();
     },

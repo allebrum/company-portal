@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { CreateEpicSchema, UpdateEpicSchema } from '@allebrum/shared';
+import { CreateEpicSchema, UpdateEpicSchema } from '@modernzen/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import { listEpics, createEpic, updateEpic, deleteEpic } from '../services/epics.js';

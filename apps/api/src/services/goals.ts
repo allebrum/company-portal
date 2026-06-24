@@ -12,17 +12,13 @@ import type {
   UpdateGoalInput,
   MoveGoalInput,
   AddResourceInput,
-} from '@allebrum/shared';
-import { EV } from '@allebrum/shared';
+} from '@modernzen/shared';
+import { EV } from '@modernzen/shared';
 import { emit } from '../realtime/emit.js';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';
-import {
-  isConnected as driveIsConnected,
-  uploadFile as driveUploadFile,
-  ensureProjectFolder,
-  renameEntry as renameDriveEntry,
-} from './drive.js';
+import { uploadObject } from './storage.js';
+import { currentTenantId } from '../tenancy/context.js';
 
 export async function listGoals(): Promise<(Goal & { resources: GoalResource[] })[]> {
   const allGoals = await db.select().from(goals).where(tenantEq(goals.tenantId)).orderBy(asc(goals.createdAt));
@@ -159,33 +155,25 @@ export async function renameGoalResource(
     .limit(1);
   if (!existing || existing.goalId !== goalId) throw new HttpError(404, 'resource_not_found');
 
-  let resolvedTitle = nextTitle;
-  if (existing.driveFileId) {
-    try {
-      const renamed = await renameDriveEntry(existing.driveFileId, nextTitle);
-      resolvedTitle = renamed.name;
-    } catch {
-      // Keep local rename behavior even if Drive rename fails.
-    }
-  }
-
+  // Storage objects (and external links) aren't renamed in place — only the
+  // display title changes.
   const [row] = await db
     .update(goalResources)
-    .set({ title: resolvedTitle })
+    .set({ title: nextTitle })
     .where(eq(goalResources.id, resourceId))
     .returning();
   if (!row) throw new HttpError(404, 'resource_not_found');
 
   emit.toOrg(EV.GOAL_RESOURCE_ADDED, { id: goalId, by: whoId, at: new Date().toISOString() });
-  await appendActivity({ whoId, kind: 'resource.rename', target: `${existing.title} → ${resolvedTitle}` });
+  await appendActivity({ whoId, kind: 'resource.rename', target: `${existing.title} → ${nextTitle}` });
   return row;
 }
 
 /**
- * Upload a user-provided file (drag-drop / file-picker in the goal modal)
- * straight to Google Drive, into the project folder that this goal belongs
- * to, and record the upload as a goal_resources row. Folders are lazily
- * backfilled if the goal's client/project don't already have one.
+ * Upload a user-provided file (drag-drop / file-picker in the goal modal) to
+ * Supabase Storage and record it as a goal_resources row. Works for any goal
+ * (no parent-project requirement) and needs no Google Drive connection. The
+ * Storage object key is stored in `driveFileId` (legacy column name).
  */
 export async function uploadGoalResource(
   goalId: string,
@@ -195,22 +183,17 @@ export async function uploadGoalResource(
   const [goal] = await db.select().from(goals).where(and(eq(goals.id, goalId), tenantEq(goals.tenantId))).limit(1);
   if (!goal) throw new HttpError(404, 'goal_not_found');
 
-  if (!(await driveIsConnected())) {
-    throw new HttpError(503, 'drive_not_connected');
-  }
-  // Workspace-level goals (no project) have no Drive folder to upload into.
-  if (!goal.projectId) {
-    throw new HttpError(400, 'goal_has_no_project');
-  }
+  const stored = await uploadObject({
+    tenantId: currentTenantId(),
+    scopeKind: 'goal',
+    scopeId: goalId,
+    filename: file.originalname,
+    mimeType: file.mimetype,
+    buffer: file.buffer,
+  });
 
-  // Lazy-backfills client + project folders as needed, returns project folder id.
-  const folderId = await ensureProjectFolder(goal.projectId);
-
-  // Push the file into the project folder.
-  const driveEntry = await driveUploadFile(folderId, file.originalname, file.mimetype, file.buffer);
-
-  // Use 'drive-sheet' for spreadsheets, otherwise 'drive-doc' — both are
-  // valid existing resource kinds so the icon picker keeps working.
+  // Use 'drive-sheet' for spreadsheets, otherwise 'drive-doc' — both are valid
+  // existing resource kinds so the icon picker keeps working.
   const kind = file.mimetype.includes('spreadsheet') ? 'drive-sheet' : 'drive-doc';
 
   const [row] = await db
@@ -219,9 +202,9 @@ export async function uploadGoalResource(
       goalId,
       kind,
       title: file.originalname,
-      url: driveEntry.webViewLink ?? '',
+      url: stored.url,
       meta: humanFileSize(file.size),
-      driveFileId: driveEntry.id,
+      driveFileId: stored.key,
       mimeType: file.mimetype,
       sizeBytes: file.size,
       addedBy: whoId,

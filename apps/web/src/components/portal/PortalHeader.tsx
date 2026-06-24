@@ -20,14 +20,14 @@ export function PortalHeader({
 }: {
   slug: string;
   me: PortalMe | null;
-  active: 'overview' | 'projects' | 'files' | 'tickets' | null;
+  active: 'overview' | 'projects' | 'files' | 'tickets' | 'connections' | 'activity' | null;
 }) {
   const { data: cfg } = useAuthConfig();
   const logout = useLogoutPortal();
   // Prefer the signed-in contact's WORKSPACE branding (their agency) — the
   // instance config is product-branded on SaaS, so it's only the fallback
   // for the logged-out state.
-  const workspaceName = me?.workspace?.name ?? cfg?.portalName ?? 'Hoppa';
+  const workspaceName = me?.workspace?.name ?? cfg?.portalName ?? 'Modern Zen';
   const brandColor = me?.workspace?.color ?? cfg?.brandPrimaryColor ?? '#9333ea';
   const logo = me?.workspace ? me.workspace.logo : cfg?.brandLogoDataUrl;
   const q = `?slug=${encodeURIComponent(slug)}`;
@@ -38,6 +38,11 @@ export function PortalHeader({
     { id: 'files', label: 'Files', href: `/portal/files${q}` },
     { id: 'tickets', label: 'Tickets', href: `/portal/tickets${q}` },
   ];
+  // Connecting accounts + the on-behalf activity log are primary-contact-only.
+  if (me?.contact.role === 'primary') {
+    nav.push({ id: 'connections', label: 'Connections', href: `/portal/connections${q}` });
+    nav.push({ id: 'activity', label: 'Activity', href: `/portal/activity${q}` });
+  }
 
   return (
     <header className="bg-white border-b border-gray-200">

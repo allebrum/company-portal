@@ -6,7 +6,7 @@ import {
   UpdateGoalSchema,
   MoveGoalSchema,
   AddResourceSchema,
-} from '@allebrum/shared';
+} from '@modernzen/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import {

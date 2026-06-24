@@ -10,9 +10,10 @@
  * Run after `drizzle-kit migrate` (see the PRE_DEPLOY job in app.spec.yaml).
  */
 import { randomUUID } from 'node:crypto';
-import argon2 from 'argon2';
 import { sql, eq } from 'drizzle-orm';
 import { db, sqlClient } from './client.js';
+import { getServiceSupabase } from '../lib/supabase.js';
+import { ensureSpacesBucket } from '../services/storage.js';
 import { users, groups, permissions, groupPermissions, userGroups, appSettings, tenants, tenantMembers } from './schema.js';
 import { asc } from 'drizzle-orm';
 import {
@@ -21,7 +22,7 @@ import {
   PERMISSION_CATEGORIES,
   SYSTEM_GROUPS,
   SYSTEM_GROUP_PERMISSIONS,
-} from '@allebrum/shared';
+} from '@modernzen/shared';
 import { env } from '../env.js';
 
 function categoryOf(perm: string): string {
@@ -47,7 +48,7 @@ async function main(): Promise<void> {
     .map((d) => d.trim().toLowerCase())
     .filter(Boolean);
 
-  // 0. Hoppa: ensure the default workspace exists (migration 0016 creates it,
+  // 0. Modern Zen: ensure the default workspace exists (migration 0016 creates it,
   //    but on any path where it's missing, create it). Everything init seeds
   //    is attached to this tenant so the bootstrap workspace is coherent.
   let defaultTenantId: string;
@@ -58,7 +59,7 @@ async function main(): Promise<void> {
     } else {
       const [created] = await db
         .insert(tenants)
-        .values({ name: 'Hoppa', slug: 'hoppa', status: 'active' })
+        .values({ name: 'Modern Zen', slug: 'modern-zen', status: 'active' })
         .returning({ id: tenants.id });
       defaultTenantId = created!.id;
     }
@@ -70,8 +71,12 @@ async function main(): Promise<void> {
   // billing_exempt = false and resolve via the marketing subscription API.
   await db.update(tenants).set({ billingExempt: true }).where(eq(tenants.id, defaultTenantId));
 
+  // Supabase Storage bucket for Client/Project/Todo/Goal file uploads. Idempotent
+  // and a no-op without Supabase creds, so safe on every deploy.
+  await ensureSpacesBucket();
+
   // 1. Permission catalog — insert missing, then refresh labels/category so
-  //    the catalog always matches @allebrum/shared.
+  //    the catalog always matches @modernzen/shared.
   await db
     .insert(permissions)
     .values(PERMISSIONS.map((p) => ({ key: p, label: PERMISSION_LABELS[p], category: categoryOf(p) })))
@@ -118,7 +123,7 @@ async function main(): Promise<void> {
   //    admin-customised settings on later deploys).
   await db
     .insert(appSettings)
-    .values({ tenantId: defaultTenantId, allowedEmailDomains: allowedDomains })
+    .values({ tenantId: defaultTenantId, allowedEmailDomains: allowedDomains, portalName: 'Modern Zen' })
     .onConflictDoNothing();
 
   // 4. Break-glass admin — only if that email does not already exist.
@@ -129,24 +134,38 @@ async function main(): Promise<void> {
     .limit(1);
   let adminCreated = false;
   if (!existingAdmin[0]) {
-    const id = randomUUID();
-    const passwordHash = await argon2.hash(adminPassword);
+    // Identity lives in Supabase Auth; reuse an existing auth user with this
+    // email (prior partial run) or create one, then mirror the profile (FK).
+    const admin = getServiceSupabase().auth.admin;
+    const list = await admin.listUsers({ perPage: 1000 });
+    let authId = list.data?.users.find((u) => u.email?.toLowerCase() === adminEmail)?.id;
+    if (!authId) {
+      const created = await admin.createUser({
+        email: adminEmail,
+        password: adminPassword,
+        email_confirm: true,
+        user_metadata: { name: 'Administrator' },
+      });
+      if (created.error || !created.data.user) {
+        throw new Error(`[init] failed to create admin auth user: ${created.error?.message ?? 'unknown'}`);
+      }
+      authId = created.data.user.id;
+    }
     await db.insert(users).values({
-      id,
+      id: authId,
       name: 'Administrator',
       email: adminEmail,
-      passwordHash,
       initials: adminEmail.slice(0, 2).toUpperCase(),
       status: 'active',
     });
     await db
       .insert(userGroups)
-      .values({ userId: id, groupId: groupIdByName.Owner!, tenantId: defaultTenantId })
+      .values({ userId: authId, groupId: groupIdByName.Owner!, tenantId: defaultTenantId })
       .onConflictDoNothing();
     adminCreated = true;
   }
 
-  // 5. Hoppa: ensure the admin is a member of the default workspace so login
+  // 5. Modern Zen: ensure the admin is a member of the default workspace so login
   //    can resolve their tenant. Idempotent across re-runs.
   {
     const [admin] = await db

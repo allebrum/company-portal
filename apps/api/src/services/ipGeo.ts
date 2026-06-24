@@ -1,14 +1,13 @@
-import { redisSession } from '../redis.js';
-
 /**
  * F24 — best-effort IP → geo lookup for QR scan logging.
  *
  * Uses the free `ip-api.com` JSON endpoint (no API key, 45 req/min rate
- * limit on their side). Results are cached in Redis for 7 days keyed by
- * `ipgeo:{ip}` so the same IP scanning ten codes in a row only hits the
- * upstream once. Failures (rate limit, network, malformed response) are
- * also cached briefly (60s) so a bad-batch IP doesn't get repeatedly
- * retried in a hot loop.
+ * limit on their side). Results are cached in-process for 7 days keyed by
+ * IP so the same IP scanning ten codes in a row only hits the upstream once.
+ * Failures (rate limit, network, malformed response) are also cached briefly
+ * (60s) so a bad-batch IP doesn't get repeatedly retried in a hot loop.
+ * (Redis was removed in the Supabase/Netlify migration; this per-instance
+ * cache is sufficient for best-effort scan enrichment.)
  *
  * Returns `null` on any failure path; the caller (`recordScan`) keeps
  * the row's geo columns null. The scan row is still written either way.
@@ -30,6 +29,10 @@ const HIT_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
 const MISS_TTL_SECONDS = 60;
 const FETCH_TIMEOUT_MS = 1500;
 
+// In-process cache: ip -> { value, expiresAt }. value === 'MISS' is a negative
+// cache entry. Bounded by natural IP churn + short MISS TTL.
+const geoCache = new Map<string, { value: GeoFields | 'MISS'; expiresAt: number }>();
+
 /** RFC 1918 / RFC 4193 / loopback / link-local — never sends to upstream. */
 function isPrivateIp(ip: string): boolean {
   if (!ip) return true;
@@ -49,22 +52,11 @@ function isPrivateIp(ip: string): boolean {
 
 export async function lookupGeo(ip: string | null | undefined): Promise<GeoFields | null> {
   if (!ip || isPrivateIp(ip)) return null;
-  const cacheKey = `ipgeo:${ip}`;
 
-  // Cache hit fast path. The cached body is either a stringified GeoFields
-  // (cache hit) or the literal "MISS" (negative cache).
-  try {
-    const cached = await redisSession.get(cacheKey);
-    if (cached === 'MISS') return null;
-    if (cached) {
-      try {
-        return JSON.parse(cached) as GeoFields;
-      } catch {
-        // Corrupted cache row — fall through to a fresh fetch.
-      }
-    }
-  } catch {
-    // Redis blip — fall through and try the upstream.
+  // Cache hit fast path (negative cache uses the 'MISS' sentinel).
+  const hit = geoCache.get(ip);
+  if (hit && Date.now() < hit.expiresAt) {
+    return hit.value === 'MISS' ? null : hit.value;
   }
 
   // Fetch with a tight timeout. ip-api.com's free tier is HTTP-only;
@@ -101,15 +93,10 @@ export async function lookupGeo(ip: string | null | undefined): Promise<GeoField
     // Network / timeout / parse failure — fall through to negative cache.
   }
 
-  try {
-    if (geo) {
-      await redisSession.set(cacheKey, JSON.stringify(geo), 'EX', HIT_TTL_SECONDS);
-    } else {
-      await redisSession.set(cacheKey, 'MISS', 'EX', MISS_TTL_SECONDS);
-    }
-  } catch {
-    /* cache write best-effort */
-  }
+  geoCache.set(ip, {
+    value: geo ?? 'MISS',
+    expiresAt: Date.now() + (geo ? HIT_TTL_SECONDS : MISS_TTL_SECONDS) * 1000,
+  });
 
   return geo;
 }

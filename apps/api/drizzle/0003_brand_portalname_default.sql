@@ -1,0 +1,1 @@
+ALTER TABLE "app_settings" ALTER COLUMN "portal_name" SET DEFAULT 'Modern Zen';

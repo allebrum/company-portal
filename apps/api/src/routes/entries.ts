@@ -6,7 +6,7 @@ import {
   BulkIdsSchema,
   RejectEntriesSchema,
   EntryListQuerySchema,
-} from '@allebrum/shared';
+} from '@modernzen/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requirePermission, userCan } from '../auth/permissions.js';
 import { validate, getValidated } from '../middleware/validate.js';

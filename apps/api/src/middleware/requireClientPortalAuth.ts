@@ -1,19 +1,21 @@
 import type { Request, Response, NextFunction } from 'express';
+import { verifyPortalSession } from '../auth/portalSession.js';
 
 /**
- * Gate for the public client portal API (F23). Mirrors `requireAuth` but
- * checks the sibling `clientPortalSession` field on the session — set
- * after a successful magic-link exchange. Internal staff routes stay on
- * `requireAuth` and the staff `user` field; the two tracks never share.
- *
- * Returns 401 `unauthorized` when no portal session is set. Downstream
- * handlers can trust `req.session.clientPortalSession.{contactId,
- * clientId, slug}` to be present.
+ * Gate for the public client portal API. The portal is stateless: the browser
+ * sends the signed portal-session token (minted at `/portal/exchange`) in the
+ * `X-Portal-Token` header. We verify it and populate
+ * `req.session.clientPortalSession.{contactId, clientId, slug}` for downstream
+ * handlers, which scope every query to that `clientId`. Internal staff routes
+ * use `requireAuth` + the Supabase `user` field instead; the two tracks never
+ * share.
  */
 export function requireClientPortalAuth(req: Request, res: Response, next: NextFunction): void {
-  if (!req.session?.clientPortalSession?.contactId) {
+  const sess = verifyPortalSession(req.header('x-portal-token') ?? undefined);
+  if (!sess) {
     res.status(401).json({ error: 'unauthorized' });
     return;
   }
+  req.session.clientPortalSession = sess;
   next();
 }

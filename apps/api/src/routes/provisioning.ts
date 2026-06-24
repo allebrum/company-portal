@@ -1,6 +1,5 @@
 import { Router, type Request } from 'express';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import argon2 from 'argon2';
 import { env, provisioningConfigured } from '../env.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { provisionAccount, getOwnerUserId, getTenant } from '../services/tenants.js';
@@ -74,13 +73,12 @@ provisioningRouter.post('/account', rateLimit({ key: 'provision', max: 30, windo
       res.status(400).json({ error: 'missing_fields' });
       return;
     }
-    const passwordHash = await argon2.hash(body.password);
     const result = await provisionAccount({
       email: body.email,
       ownerName: body.ownerName?.trim() || body.email,
       workspaceName: body.workspaceName,
       slug: slugify(body.workspaceName),
-      passwordHash,
+      password: body.password,
       billingExternalId: body.billingExternalId,
     });
     if (result.kind === 'account_exists') {

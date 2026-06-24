@@ -64,7 +64,7 @@ import {
 } from '@/hooks/useResources';
 import { useAuth } from '@/hooks/useAuth';
 import { PAY_PERIOD_STATUS_LABEL, PAY_PERIOD_STATUS_PILL } from '@/lib/formatters';
-import type { Permission } from '@allebrum/shared';
+import type { Permission } from '@modernzen/shared';
 
 type Tab = 'users' | 'groups' | 'auth' | 'workspace' | 'pay' | 'integrations' | 'branding';
 const ADMIN_TAB_PARAM = 'adminTab';
@@ -695,12 +695,12 @@ function AuthSettingsTab() {
         <div className="border-t border-gray-100 pt-4">
           <Field
             label="Allowed Google email domains"
-            hint="Comma-separated (e.g. allebrum.com). Empty = any verified Google account."
+            hint="Comma-separated (e.g. Modern Zen.com). Empty = any verified Google account."
           >
             <Input
               defaultValue={settings.allowedEmailDomains.join(', ')}
               onChange={(e) => setDomains(e.target.value)}
-              placeholder="allebrum.com"
+              placeholder="Modern Zen.com"
             />
           </Field>
           <div className="mt-2">
@@ -889,7 +889,7 @@ function BrandingTab() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               onBlur={saveName}
-              placeholder="Hoppa"
+              placeholder="Modern Zen"
               maxLength={60}
               className="max-w-sm"
             />
@@ -974,7 +974,7 @@ function BrandingTab() {
               value={terms}
               onChange={(e) => setTerms(e.target.value)}
               onBlur={saveTerms}
-              placeholder="https://allebrum.com/terms"
+              placeholder="https://Modern Zen.com/terms"
             />
           </Field>
           <Field label="Privacy Policy URL">
@@ -983,7 +983,7 @@ function BrandingTab() {
               value={privacy}
               onChange={(e) => setPrivacy(e.target.value)}
               onBlur={savePrivacy}
-              placeholder="https://allebrum.com/privacy"
+              placeholder="https://Modern Zen.com/privacy"
             />
           </Field>
         </Card>

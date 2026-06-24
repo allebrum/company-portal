@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { eq, and, isNotNull, inArray, gte, asc } from 'drizzle-orm';
+import { eq, and, isNotNull, inArray, gte, asc, desc } from 'drizzle-orm';
 import {
   PortalRequestAccessSchema,
   PortalExchangeSchema,
   CreateTicketSchema,
   TicketMessageSchema,
-} from '@allebrum/shared';
+} from '@modernzen/shared';
 import { db } from '../db/client.js';
 import {
   clients,
@@ -15,12 +15,20 @@ import {
   goals,
   milestones,
   todos,
+  workflowRuns,
 } from '../db/schema.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { findContactByEmail, resendContactInvite } from '../services/clientContacts.js';
 import { consumeToken, type TokenSubject } from '../auth/tokens.js';
 import { requireClientPortalAuth } from '../middleware/requireClientPortalAuth.js';
+import { requirePrimaryContact } from '../middleware/requirePrimaryContact.js';
+import { listConnections, getConnection, deleteConnection } from '../connect/connections.js';
+import { syncClientConnections } from '../connect/sync.js';
+import { disconnect as composioDisconnect } from '../connect/composio.js';
+import { disconnectAccount as zernioDisconnect } from '../connect/zernio.js';
+import { runSocialPost, runComposioTool } from '../connect/workflows.js';
+import { signPortalSession } from '../auth/portalSession.js';
 import { getSettings } from '../services/settings.js';
 import { withTenant } from '../tenancy/context.js';
 import { appendActivity } from '../services/activity.js';
@@ -172,12 +180,14 @@ portalRouter.post(
         })
         .where(eq(clientContacts.id, contact.id));
 
-      req.session.clientPortalSession = {
+      // Stateless: mint a signed portal-session token for the browser to send
+      // back as X-Portal-Token on subsequent portal calls (no server session).
+      const sessionToken = signPortalSession({
         contactId: contact.id,
         clientId: contact.clientId,
         slug: client.slug!,
-      };
-      res.json({ ok: true, slug: client.slug });
+      });
+      res.json({ ok: true, slug: client.slug, token: sessionToken });
     } catch (e) {
       next(e);
     }
@@ -200,15 +210,15 @@ portalRouter.get('/me', requireClientPortalAuth, async (req, res, next) => {
       .where(eq(clients.id, sess.clientId))
       .limit(1);
     if (!contact || !client) {
-      // Session points at a row that's been deleted under us. Clear it.
-      req.session.clientPortalSession = undefined;
+      // Token points at a row that's been deleted under us — the client
+      // discards the token on a 401.
       res.status(401).json({ error: 'session_invalidated' });
       return;
     }
     // The portal header should carry the WORKSPACE's branding (the agency the
     // client belongs to), not the instance/product branding — on the SaaS the
     // pre-login /auth/config is deliberately product-branded (see routes/
-    // auth.ts), so the header would otherwise read "Hoppa" for every tenant.
+    // auth.ts), so the header would otherwise read "Modern Zen" for every tenant.
     const ws = client.tenantId ? await withTenant(client.tenantId, () => getSettings()) : null;
     res.json({
       contact: { id: contact.id, name: contact.name, email: contact.email, role: contact.role },
@@ -222,10 +232,168 @@ portalRouter.get('/me', requireClientPortalAuth, async (req, res, next) => {
   }
 });
 
-portalRouter.post('/logout', requireClientPortalAuth, (req, res) => {
-  req.session.clientPortalSession = undefined;
+portalRouter.post('/logout', (_req, res) => {
+  // Stateless: the client simply discards its portal token. (No auth gate —
+  // there is no server-side session to destroy.)
   res.json({ ok: true });
 });
+
+// ---- Connections hub (primary contact only) ---------------------------
+// The connecting of third-party accounts is a higher-trust action than the
+// read-only portal surfaces, so it is restricted to the client's `primary`
+// contact (UI hides it for viewers; this gate enforces it server-side).
+portalRouter.get('/connections', requireClientPortalAuth, requirePrimaryContact, async (req, res, next) => {
+  try {
+    const sess = req.session.clientPortalSession!;
+    const [rows, runs] = await Promise.all([
+      listConnections(sess.clientId),
+      db
+        .select({
+          id: workflowRuns.id,
+          kind: workflowRuns.kind,
+          result: workflowRuns.result,
+          createdAt: workflowRuns.createdAt,
+        })
+        .from(workflowRuns)
+        .where(eq(workflowRuns.clientId, sess.clientId))
+        .orderBy(desc(workflowRuns.createdAt))
+        .limit(20),
+    ]);
+    res.json({
+      connections: rows.map((c) => ({
+        id: c.id,
+        provider: c.provider,
+        integration: c.integration,
+        displayName: c.displayName,
+        status: c.status,
+        connectedAt: c.connectedAt,
+      })),
+      runs,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Disconnect a single connection (primary only): revoke at the provider, then
+// remove the local row. We delete locally even if the provider call fails, so a
+// client is never stuck with a row they can't remove.
+portalRouter.delete('/connections/:id', requireClientPortalAuth, requirePrimaryContact, async (req, res, next) => {
+  try {
+    const sess = req.session.clientPortalSession!;
+    const conn = await getConnection(sess.clientId, req.params.id!);
+    if (!conn) {
+      res.status(404).json({ error: 'connection_not_found' });
+      return;
+    }
+    try {
+      if (conn.provider === 'composio') await composioDisconnect(conn.externalId);
+      else await zernioDisconnect(conn.externalId);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[connect] provider disconnect failed', conn.provider, (e as Error).message);
+    }
+    await deleteConnection(sess.clientId, conn.provider, conn.externalId);
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Refresh: re-read both providers and reconcile our cache (surfaces revocation).
+portalRouter.post('/connections/refresh', requireClientPortalAuth, requirePrimaryContact, async (req, res, next) => {
+  try {
+    const sess = req.session.clientPortalSession!;
+    const [client] = await db
+      .select({ tenantId: clients.tenantId, composioUserId: clients.composioUserId, zernioProfileId: clients.zernioProfileId })
+      .from(clients)
+      .where(eq(clients.id, sess.clientId))
+      .limit(1);
+    if (client) {
+      await syncClientConnections({
+        clientId: sess.clientId,
+        tenantId: client.tenantId,
+        composioUserId: client.composioUserId ?? sess.clientId,
+        zernioProfileId: client.zernioProfileId,
+      });
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Activity — the audit trail of on-behalf workflow runs (primary contact only).
+portalRouter.get('/activity', requireClientPortalAuth, requirePrimaryContact, async (req, res, next) => {
+  try {
+    const sess = req.session.clientPortalSession!;
+    const runs = await db
+      .select({
+        id: workflowRuns.id,
+        kind: workflowRuns.kind,
+        payload: workflowRuns.payload,
+        result: workflowRuns.result,
+        createdAt: workflowRuns.createdAt,
+      })
+      .from(workflowRuns)
+      .where(eq(workflowRuns.clientId, sess.clientId))
+      .orderBy(desc(workflowRuns.createdAt))
+      .limit(50);
+    res.json(runs);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Workflow 1 — publish a post to the client's connected social accounts (Zernio).
+portalRouter.post(
+  '/workflows/social-post',
+  requireClientPortalAuth,
+  requirePrimaryContact,
+  rateLimit({ key: 'wf-social', max: 30, windowSec: 60 }),
+  async (req, res, next) => {
+    try {
+      const sess = req.session.clientPortalSession!;
+      const [client] = await db.select({ tenantId: clients.tenantId }).from(clients).where(eq(clients.id, sess.clientId)).limit(1);
+      const body = req.body as { content?: string; accountIds?: string[]; publishNow?: boolean };
+      const out = await runSocialPost(sess.clientId, client?.tenantId ?? null, {
+        content: String(body?.content ?? ''),
+        accountIds: Array.isArray(body?.accountIds) ? body.accountIds : [],
+        publishNow: body?.publishNow !== false,
+      });
+      res.json(out);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+// Workflow 2 — run a Composio tool on behalf of the client. Fixed safe demo
+// (list Gmail labels); not a general arbitrary-tool runner from the browser.
+portalRouter.post(
+  '/workflows/composio-tool',
+  requireClientPortalAuth,
+  requirePrimaryContact,
+  rateLimit({ key: 'wf-composio', max: 30, windowSec: 60 }),
+  async (req, res, next) => {
+    try {
+      const sess = req.session.clientPortalSession!;
+      const [client] = await db
+        .select({ tenantId: clients.tenantId, composioUserId: clients.composioUserId })
+        .from(clients)
+        .where(eq(clients.id, sess.clientId))
+        .limit(1);
+      const composioUserId = client?.composioUserId ?? sess.clientId;
+      const out = await runComposioTool(sess.clientId, client?.tenantId ?? null, composioUserId, {
+        slug: 'GMAIL_LIST_LABELS',
+        toolkit: 'gmail',
+      });
+      res.json(out);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
 
 // ---- Session-gated read endpoints (curated portal view) ---------------
 //

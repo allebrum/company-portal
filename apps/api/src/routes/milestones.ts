@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { CreateMilestoneSchema, UpdateMilestoneSchema } from '@allebrum/shared';
+import { CreateMilestoneSchema, UpdateMilestoneSchema } from '@modernzen/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import { listMilestones, createMilestone, updateMilestone, deleteMilestone } from '../services/milestones.js';

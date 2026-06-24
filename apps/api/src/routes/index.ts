@@ -21,11 +21,11 @@ import { bootstrapRouter } from './bootstrap.js';
 import { onboardingRouter } from './onboarding.js';
 import { rbacRouter } from './rbac.js';
 import { settingsRouter } from './settings.js';
-import { twofaRouter } from './twofa.js';
 import { tenantContext } from '../middleware/tenantContext.js';
 import { requireActiveSubscription } from '../middleware/requireActiveSubscription.js';
 import { provisioningRouter } from './provisioning.js';
 import { billingRouter } from './billing.js';
+import { connectRouter } from './connect.js';
 import { provisioningConfigured } from '../env.js';
 
 export const apiRouter = Router();
@@ -34,18 +34,17 @@ apiRouter.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
 
-// Hoppa: bind the request's active workspace (from session.user.tenantId) to
+// Modern Zen: bind the request's active workspace (from session.user.tenantId) to
 // an AsyncLocalStorage context for all downstream services. No-op for routes
 // reached before login (auth, public portal/QR) — they pass through and any
 // service that needs a tenant will throw, which is correct for those paths.
 apiRouter.use(tenantContext);
-// Hoppa: gate business routes on the workspace's subscription. Exempts auth /
+// Modern Zen: gate business routes on the workspace's subscription. Exempts auth /
 // billing / provisioning / portal / public; no-ops to "allow" when billing
 // isn't configured. Lapsed workspaces get 402 on everything else.
 apiRouter.use(requireActiveSubscription);
 
 apiRouter.use('/auth', authRouter);
-apiRouter.use('/auth', twofaRouter);
 apiRouter.use('/users', usersRouter);
 apiRouter.use('/clients', clientsRouter);
 apiRouter.use('/projects', projectsRouter);
@@ -61,6 +60,7 @@ apiRouter.use('/activity', activityRouter);
 apiRouter.use('/integrations', integrationsRouter);
 apiRouter.use('/spaces', spacesRouter);
 apiRouter.use('/portal', portalRouter);
+apiRouter.use('/connect', connectRouter);
 apiRouter.use('/qr', qrRouter);
 apiRouter.use('/q', qrPublicRouter);
 apiRouter.use('/upload/qr', uploadQrRouter);
@@ -68,7 +68,7 @@ apiRouter.use('/bootstrap', bootstrapRouter);
 apiRouter.use('/onboarding', onboardingRouter);
 apiRouter.use('/rbac', rbacRouter);
 apiRouter.use('/settings', settingsRouter);
-// Hoppa Phase 3: billing portal (session-gated, subscription-exempt) +
+// Modern Zen Phase 3: billing portal (session-gated, subscription-exempt) +
 // provisioning webhook (HMAC-gated, only mounted when the secret is set).
 apiRouter.use('/billing', billingRouter);
 if (provisioningConfigured) {

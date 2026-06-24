@@ -132,7 +132,7 @@ export async function ensureSharedFolder(): Promise<string> {
     }
   }
   const created = await drive.files.create({
-    requestBody: { name: 'Allebrum Portal', mimeType: FOLDER_MIME },
+    requestBody: { name: 'Modern Zen Portal', mimeType: FOLDER_MIME },
     fields: 'id',
   });
   const id = created.data.id!;

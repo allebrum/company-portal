@@ -23,7 +23,7 @@ import {
   type TodoRow,
   type GoalRow,
 } from '@/hooks/useResources';
-import type { ActivityPayload } from '@allebrum/shared';
+import type { ActivityPayload } from '@modernzen/shared';
 import { fmtMins, fmtMoney, relativeFromIso, startOfWeek, PRIORITY_DOT } from '@/lib/formatters';
 
 /**

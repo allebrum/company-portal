@@ -1,7 +1,7 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { milestones, type Milestone } from '../db/schema.js';
-import type { CreateMilestoneInput, UpdateMilestoneInput } from '@allebrum/shared';
+import type { CreateMilestoneInput, UpdateMilestoneInput } from '@modernzen/shared';
 import { HttpError } from '../middleware/errorHandler.js';
 import { tenantEq, stampTenant } from '../tenancy/scope.js';
 

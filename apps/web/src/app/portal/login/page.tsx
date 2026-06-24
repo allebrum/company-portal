@@ -39,7 +39,7 @@ function Inner() {
         <h1 className="text-xl font-bold text-gray-900 mb-2">Portal not found</h1>
         <p className="text-sm text-gray-500">
           This portal URL isn&apos;t recognised. Double-check the link from your invite email or
-          ask your contact at {cfg?.portalName ?? 'Hoppa'} for the correct one.
+          ask your contact at {cfg?.portalName ?? 'Modern Zen'} for the correct one.
         </p>
         <Link href="/login" className="inline-block mt-4 text-sm hover:underline" style={{ color: brandColor }}>
           Staff sign-in →
@@ -81,7 +81,7 @@ function Inner() {
         </div>
 
         <p className="text-sm text-gray-600 mb-5">
-          Enter the email your contact at {cfg?.portalName ?? 'Hoppa'} invited. We&apos;ll
+          Enter the email your contact at {cfg?.portalName ?? 'Modern Zen'} invited. We&apos;ll
           send you a one-time sign-in link.
         </p>
 

@@ -5,7 +5,7 @@ import { Target, CheckCircle, Link as LinkIcon } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Field';
 import { useGoals, useTodos } from '@/hooks/useResources';
-import type { SpaceFile } from '@allebrum/shared';
+import type { SpaceFile } from '@modernzen/shared';
 
 /**
  * Modal picker for the `/link` slash command. Lists every in-scope goal,

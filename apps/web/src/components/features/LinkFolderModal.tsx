@@ -59,7 +59,7 @@ export function LinkFolderModal({
       }
     >
       <div className="space-y-3">
-        <Field label="Drive path" hint="e.g. Allebrum LLC / Clients / Foothill CU">
+        <Field label="Drive path" hint="e.g. Modern Zen LLC / Clients / Foothill CU">
           <Input value={drivePath} onChange={(e) => setDrivePath(e.target.value)} />
         </Field>
         <Field label="Client">

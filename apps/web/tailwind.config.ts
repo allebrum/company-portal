@@ -9,7 +9,7 @@ const config: Config = {
         mono: ['ui-monospace', 'SF Mono', 'Menlo', 'Consolas', 'monospace'],
       },
       colors: {
-        // Allebrum brand purple uses Tailwind's purple scale verbatim, but
+        // Modern Zen brand purple uses Tailwind's purple scale verbatim, but
         // we expose tokens for the few semantic uses called out in tokens.css.
         brand: {
           50: '#faf5ff',

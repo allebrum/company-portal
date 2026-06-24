@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { UpdateTicketSchema, TicketMessageSchema, TICKET_STATUSES, type TicketStatus } from '@allebrum/shared';
+import { UpdateTicketSchema, TicketMessageSchema, TICKET_STATUSES, type TicketStatus } from '@modernzen/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requirePermission } from '../auth/permissions.js';
 import { validate, getValidated } from '../middleware/validate.js';

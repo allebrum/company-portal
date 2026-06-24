@@ -1,9 +1,9 @@
 import { and, asc, eq, isNotNull, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { projects, timeEntries, type Project } from '../db/schema.js';
-import type { CreateProjectInput, UpdateProjectInput } from '@allebrum/shared';
+import type { CreateProjectInput, UpdateProjectInput } from '@modernzen/shared';
 import { emit } from '../realtime/emit.js';
-import { EV } from '@allebrum/shared';
+import { EV } from '@modernzen/shared';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { isConnected as driveIsConnected, ensureProjectFolder } from './drive.js';

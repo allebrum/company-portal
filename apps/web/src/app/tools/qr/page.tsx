@@ -31,7 +31,7 @@ import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { relativeFromIso } from '@/lib/formatters';
-import type { QrCodeRow, QrErrorLevel, QrVisibility, QrScanRow } from '@allebrum/shared';
+import type { QrCodeRow, QrErrorLevel, QrVisibility, QrScanRow } from '@modernzen/shared';
 
 const LOGO_MAX_BYTES = 100_000;
 

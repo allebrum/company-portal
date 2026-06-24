@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 /**
- * Hoppa multi-tenancy — request-scoped tenant context.
+ * Modern Zen multi-tenancy — request-scoped tenant context.
  *
  * The `tenantContext` middleware (middleware/tenantContext.ts) wraps each
  * authenticated request in `withTenant(tenantId, next)`, so any service

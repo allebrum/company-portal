@@ -4,8 +4,8 @@ import { AuthGate } from '@/components/shell/AuthGate';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Hoppa',
-  description: 'Hoppa — the calm workspace for client work.',
+  title: 'Modern Zen',
+  description: 'Modern Zen — the calm workspace for client work.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

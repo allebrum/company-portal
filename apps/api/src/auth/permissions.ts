@@ -2,14 +2,14 @@ import type { Request, Response, NextFunction } from 'express';
 import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { userGroups, groupPermissions, userPermissionOverrides } from '../db/schema.js';
-import type { Permission } from '@allebrum/shared';
+import type { Permission } from '@modernzen/shared';
 
 /**
  * Effective permissions = union of all permissions from every group the user
  * belongs to IN THE GIVEN WORKSPACE, then apply that workspace's per-user
  * overrides (grant adds, deny removes).
  *
- * Hoppa: `tenantId` is passed explicitly (not from the AsyncLocalStorage
+ * Modern Zen: `tenantId` is passed explicitly (not from the AsyncLocalStorage
  * context) because this is called from places with no request context — the
  * socket-connect handler and the login flow before `session.user` is set. A
  * user's permissions in one workspace must never leak from their groups in

@@ -1,17 +1,15 @@
 import { and, eq, sql, asc, count } from 'drizzle-orm';
-import argon2 from 'argon2';
 import { db } from '../db/client.js';
-import { users, groups, userGroups, userPermissionOverrides, tenantMembers, type User } from '../db/schema.js';
+import { users, userGroups, userPermissionOverrides, tenantMembers, type User } from '../db/schema.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { appendActivity } from './activity.js';
 import { emit } from '../realtime/emit.js';
-import { EV } from '@allebrum/shared';
+import { EV } from '@modernzen/shared';
 import { env } from '../env.js';
-import { issueToken, invalidateTokensFor, INVITE_TTL_MS } from '../auth/tokens.js';
-import { sendInviteEmail } from './mail.js';
+import { getServiceSupabase } from '../lib/supabase.js';
 import { currentTenantId } from '../tenancy/context.js';
 import { tenantEq } from '../tenancy/scope.js';
-import { ensureMembership, getDefaultTenantId, getTenant, isMember } from './tenants.js';
+import { ensureMembership, getTenant, isMember } from './tenants.js';
 
 function initialsFrom(name: string): string {
   return name
@@ -77,7 +75,7 @@ export async function inviteUser(args: {
     throw new HttpError(409, 'already_member');
   }
 
-  // Hoppa: seat enforcement. The workspace's seat limit lives on the tenant
+  // Modern Zen: seat enforcement. The workspace's seat limit lives on the tenant
   // row (tenant.seatLimit). Null = unlimited (the flat-price custom-billing
   // model doesn't meter seats by default, and self-host is always unlimited).
   // Adding EITHER a brand-new or an existing-from-another-org user consumes a
@@ -110,16 +108,31 @@ export async function inviteUser(args: {
     return { user: existing, reused: true };
   }
 
-  // Brand-new identity. We never accept a password on invite — the invitee sets
-  // their own via the accept-invite page after consuming an invite token. The
-  // column stays nullable; if `sendInvite` is false (Google-only), it stays
-  // null forever and password login is correctly disabled for them.
+  // Brand-new identity. The Supabase auth user must exist first (the profile
+  // `users.id` FK references `auth.users.id`). `inviteUserByEmail` creates the
+  // auth user AND sends the Supabase invite email (a magic link to set a
+  // password); `sendInvite: false` (Google-only / SSO teammates) just creates
+  // the auth user with no email. We mirror the identity into the `users`
+  // profile keyed to the returned auth uid.
+  const supa = getServiceSupabase().auth.admin;
+  const created =
+    args.sendInvite !== false
+      ? await supa.inviteUserByEmail(args.email, {
+          data: { name: args.name },
+          redirectTo: `${env.WEB_ORIGIN}/accept-invite`,
+        })
+      : await supa.createUser({ email: args.email, email_confirm: true, user_metadata: { name: args.name } });
+  if (created.error || !created.data.user) {
+    throw new HttpError(502, 'invite_failed');
+  }
+  const authId = created.data.user.id;
+
   const [row] = await db
     .insert(users)
     .values({
+      id: authId,
       name: args.name,
       email: args.email,
-      passwordHash: null,
       initials: initialsFrom(args.name),
       color: args.color ?? '#6b7280',
       billable: String(args.billable ?? 150),
@@ -127,58 +140,24 @@ export async function inviteUser(args: {
     })
     .returning();
   if (!row) throw new Error('user insert failed');
-  // Hoppa: enroll the invited user in the inviting admin's workspace so they
-  // can resolve a tenant at login. The user row itself is global (one
-  // identity across workspaces); membership is per-tenant.
+  // Enroll the invited user in the inviting admin's workspace so they can
+  // resolve a tenant at login. The profile row is global (one identity across
+  // workspaces); membership is per-tenant.
   await ensureMembership(inviteTenantId, row.id);
   emit.toOrg(EV.USER_CREATED, { id: row.id, by: args.whoId, at: new Date().toISOString() });
-  await appendActivity({
-    whoId: args.whoId,
-    kind: 'user.invite',
-    target: `${row.email} invited`,
-  });
-
-  // Issue a 7-day invite token and send the accept-invite email from the
-  // inviter's connected Gmail. Errors here are logged but don't fail the
-  // invite — the user row is already created and the admin can resend
-  // once they've connected Gmail (otherwise the URL hits the log).
-  if (args.sendInvite !== false) {
-    try {
-      const inviter = await getUser(args.whoId);
-      const { rawToken, expiresAt } = await issueToken({ kind: 'user', userId: row.id }, 'invite', INVITE_TTL_MS);
-      const acceptUrl = `${env.WEB_ORIGIN}/accept-invite?token=${encodeURIComponent(rawToken)}`;
-      await sendInviteEmail({
-        senderUserId: args.whoId,
-        to: row.email,
-        inviterName: inviter?.name ?? 'A teammate',
-        acceptUrl,
-        expiresAt,
-      });
-    } catch (e) {
-      console.error('[invite] failed to send email', e);
-    }
-  }
+  await appendActivity({ whoId: args.whoId, kind: 'user.invite', target: `${row.email} invited` });
   return { user: row, reused: false };
 }
 
-/** Re-issue an invite token for an `invited` user — invalidates any prior
- *  unused invite tokens so older email links stop working immediately.
- *  The new email is sent from whoever clicks Resend (their Gmail). */
+/** Re-send the Supabase invite email for an `invited` user. */
 export async function resendInvite(userId: string, whoId: string): Promise<void> {
   const target = await getUser(userId);
   if (!target) throw new HttpError(404, 'user_not_found');
   if (target.status !== 'invited') throw new HttpError(400, 'user_already_active');
-  await invalidateTokensFor(target.id, 'invite');
-  const inviter = await getUser(whoId);
-  const { rawToken, expiresAt } = await issueToken({ kind: 'user', userId: target.id }, 'invite', INVITE_TTL_MS);
-  const acceptUrl = `${env.WEB_ORIGIN}/accept-invite?token=${encodeURIComponent(rawToken)}`;
-  await sendInviteEmail({
-    senderUserId: whoId,
-    to: target.email,
-    inviterName: inviter?.name ?? 'A teammate',
-    acceptUrl,
-    expiresAt,
+  const { error } = await getServiceSupabase().auth.admin.inviteUserByEmail(target.email, {
+    redirectTo: `${env.WEB_ORIGIN}/accept-invite`,
   });
+  if (error) throw new HttpError(502, 'invite_resend_failed');
   await appendActivity({ whoId, kind: 'user.invite.resend', target: target.email });
 }
 
@@ -203,7 +182,11 @@ export async function updateUser(
   if (patch.billable !== undefined) upd.billable = String(patch.billable);
   if (patch.color !== undefined) upd.color = patch.color;
   if (patch.initials !== undefined) upd.initials = patch.initials;
-  if (patch.password !== undefined) upd.passwordHash = await argon2.hash(patch.password);
+  // Passwords live in Supabase Auth, not the profile table.
+  if (patch.password !== undefined) {
+    const { error } = await getServiceSupabase().auth.admin.updateUserById(id, { password: patch.password });
+    if (error) throw new HttpError(502, 'password_update_failed');
+  }
   const [row] = await db.update(users).set(upd).where(eq(users.id, id)).returning();
   if (!row) throw new HttpError(404, 'user_not_found');
   emit.toOrg(EV.USER_UPDATED, { id: row.id, by: whoId, at: new Date().toISOString() });
@@ -251,88 +234,7 @@ export async function deleteUser(id: string, whoId: string): Promise<void> {
   await appendActivity({ whoId, kind: 'user.remove', target: `${name ?? id} removed` });
 }
 
-export async function verifyLogin(email: string, password: string): Promise<User | null> {
-  const user = await findByEmail(email);
-  if (!user) return null;
-  if (!user.passwordHash) return null; // Google-only account: no password login
-  const ok = await argon2.verify(user.passwordHash, password);
-  if (!ok) return null;
-  if (user.status === 'invited') {
-    await db.update(users).set({ status: 'active' }).where(eq(users.id, user.id));
-  }
-  return user;
-}
-
-export async function findByGoogleSub(sub: string): Promise<User | undefined> {
-  const rows = await db.select().from(users).where(eq(users.googleSub, sub)).limit(1);
-  return rows[0];
-}
-
-/**
- * Resolve a Google identity to a local user: match by google_sub, else link
- * by verified email, else create a new account (no password, member-less —
- * an admin assigns groups afterward).
- */
-export async function findOrCreateGoogleUser(profile: {
-  sub: string;
-  email: string;
-  name: string;
-  picture?: string;
-}): Promise<User> {
-  const bySub = await findByGoogleSub(profile.sub);
-  if (bySub) return bySub;
-
-  const byEmail = await findByEmail(profile.email);
-  if (byEmail) {
-    const [linked] = await db
-      .update(users)
-      .set({ googleSub: profile.sub, status: 'active', updatedAt: new Date().toISOString() })
-      .where(eq(users.id, byEmail.id))
-      .returning();
-    return linked ?? byEmail;
-  }
-
-  const initials = (profile.name || profile.email)
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((p) => p[0]!)
-    .join('')
-    .toUpperCase();
-  const [created] = await db
-    .insert(users)
-    .values({
-      name: profile.name || profile.email,
-      email: profile.email,
-      passwordHash: null,
-      googleSub: profile.sub,
-      authProvider: 'google',
-      initials,
-      color: '#6b7280',
-      billable: '150',
-      status: 'active',
-    })
-    .returning();
-  if (!created) throw new Error('google user creation failed');
-
-  // New domain-restricted Google sign-ups land in the default workspace with
-  // its Member group so they get a working app immediately. This runs in the
-  // OAuth callback (no request tenant context), so the default tenant is
-  // resolved explicitly. The caller (auth.ts) also enrolls them in
-  // tenant_members.
-  const defaultTenantId = await getDefaultTenantId();
-  if (defaultTenantId) {
-    const [memberGroup] = await db
-      .select({ id: groups.id })
-      .from(groups)
-      .where(and(eq(groups.name, 'Member'), eq(groups.tenantId, defaultTenantId)))
-      .limit(1);
-    if (memberGroup) {
-      await db
-        .insert(userGroups)
-        .values({ userId: created.id, groupId: memberGroup.id, tenantId: defaultTenantId })
-        .onConflictDoNothing();
-    }
-  }
-  return created;
-}
+// Password verification + Google identity resolution moved to Supabase Auth.
+// Sign-in (password / OAuth) happens client-side via supabase.auth; the API
+// trusts the resulting JWT (see auth/supabaseAuth.ts). New Google users are
+// provisioned into the default workspace by the post-sign-in bootstrap, not here.

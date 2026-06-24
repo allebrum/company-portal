@@ -9,7 +9,7 @@ import {
   type ClientRow,
   type ProjectRow,
 } from '@/hooks/useResources';
-import type { SpaceBlock, SpaceFile } from '@allebrum/shared';
+import type { SpaceBlock, SpaceFile } from '@modernzen/shared';
 import type { Scope } from '@/lib/roadmap';
 
 /**

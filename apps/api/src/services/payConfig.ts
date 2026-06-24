@@ -1,14 +1,14 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { payConfig, type PayConfig } from '../db/schema.js';
-import type { PayConfigInput } from '@allebrum/shared';
+import type { PayConfigInput } from '@modernzen/shared';
 import { appendActivity } from './activity.js';
 import { emit } from '../realtime/emit.js';
-import { EV } from '@allebrum/shared';
+import { EV } from '@modernzen/shared';
 import { regenerateFuturePeriods } from './payPeriods.js';
 import { currentTenantId } from '../tenancy/context.js';
 
-// Hoppa: pay_config is one row per workspace. Pay routes are always
+// Modern Zen: pay_config is one row per workspace. Pay routes are always
 // authenticated, so the active tenant is in the request context.
 export async function getConfig(): Promise<PayConfig> {
   const tenantId = currentTenantId();

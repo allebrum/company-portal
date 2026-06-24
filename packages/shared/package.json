@@ -1,5 +1,5 @@
 {
-  "name": "@allebrum/shared",
+  "name": "@modernzen/shared",
   "version": "1.0.0",
   "private": true,
   "main": "./dist/index.js",
@@ -21,7 +21,7 @@
     "prepare": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "zod": "3.23.8"
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "typescript": "5.6.3"

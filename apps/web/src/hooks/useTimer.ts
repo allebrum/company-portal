@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from './useAuth';
 import { useActiveTimers } from './useResources';
-import type { TimerPayload } from '@allebrum/shared';
+import type { TimerPayload } from '@modernzen/shared';
 
 export function useMyTimer(): { timer: TimerPayload | null; elapsedSec: number } {
   const { me } = useAuth();

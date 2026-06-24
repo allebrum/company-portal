@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { CreateTodoSchema, UpdateTodoSchema } from '@allebrum/shared';
+import { CreateTodoSchema, UpdateTodoSchema } from '@modernzen/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requireAnyPermission } from '../auth/permissions.js';
 import { validate, getValidated } from '../middleware/validate.js';

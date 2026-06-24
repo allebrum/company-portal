@@ -12,9 +12,17 @@ import { env } from '../env.js';
 
 const MANAGE_REF_TTL_MS = 15 * 60 * 1000; // 15 min
 
+// Billing manage-ref signing is part of the (dormant) marketing/provisioning
+// contract. It reuses SESSION_SECRET, now optional — require it lazily so the
+// core app boots without it and only this dormant path fails if unconfigured.
+function manageRefSecret(): string {
+  if (!env.SESSION_SECRET) throw new Error('SESSION_SECRET is required for billing manage-ref signing');
+  return env.SESSION_SECRET;
+}
+
 export function signManageRef(tenantId: string, userId: string): string {
   const payload = `${tenantId}.${userId}.${Date.now() + MANAGE_REF_TTL_MS}`;
-  const sig = createHmac('sha256', env.SESSION_SECRET).update(payload).digest('base64url');
+  const sig = createHmac('sha256', manageRefSecret()).update(payload).digest('base64url');
   return `${Buffer.from(payload).toString('base64url')}.${sig}`;
 }
 
@@ -27,7 +35,7 @@ export function verifyManageRef(ref: string): { tenantId: string; userId: string
   } catch {
     return null;
   }
-  const expected = createHmac('sha256', env.SESSION_SECRET).update(payload).digest('base64url');
+  const expected = createHmac('sha256', manageRefSecret()).update(payload).digest('base64url');
   const a = Buffer.from(ref.slice(i + 1));
   const b = Buffer.from(expected);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;

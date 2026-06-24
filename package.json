@@ -1,17 +1,17 @@
 {
-  "name": "allebrum-company-portal",
+  "name": "modernzen-company-portal",
   "version": "1.0.0",
   "private": true,
-  "description": "Allebrum internal portal — Next.js static + Express/Socket.IO + Postgres + Redis",
+  "description": "Modern Zen company portal — Next.js static (Netlify) + Supabase (Auth/DB/Realtime/Storage)",
   "scripts": {
     "dev": "pnpm -r --parallel run dev",
-    "build": "pnpm --filter @allebrum/shared build && pnpm --filter @allebrum/api build && pnpm --filter @allebrum/web build",
+    "build": "pnpm --filter @modernzen/shared build && pnpm --filter @modernzen/api build && pnpm --filter @modernzen/web build",
     "lint": "pnpm -r run lint",
     "typecheck": "pnpm -r run typecheck",
-    "db:generate": "pnpm --filter @allebrum/api db:generate",
-    "db:migrate": "pnpm --filter @allebrum/api db:migrate",
-    "db:push": "pnpm --filter @allebrum/api db:push",
-    "db:seed": "pnpm --filter @allebrum/api db:seed",
+    "db:generate": "pnpm --filter @modernzen/api db:generate",
+    "db:migrate": "pnpm --filter @modernzen/api db:migrate",
+    "db:push": "pnpm --filter @modernzen/api db:push",
+    "db:seed": "pnpm --filter @modernzen/api db:seed",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down"
   },
@@ -21,7 +21,11 @@
   },
   "packageManager": "pnpm@9.12.0",
   "devDependencies": {
-    "typescript": "5.6.3",
-    "@types/node": "20.16.10"
+    "@types/node": "20.16.10",
+    "supabase": "^2.107.0",
+    "typescript": "5.6.3"
+  },
+  "dependencies": {
+    "serverless-http": "^4.0.0"
   }
 }

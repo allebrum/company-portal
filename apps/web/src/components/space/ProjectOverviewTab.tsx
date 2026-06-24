@@ -7,7 +7,7 @@ import { Field, Input, Select, Checkbox } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/hooks/useAuth';
 import { useUpdateProject, type ProjectRow } from '@/hooks/useResources';
-import type { ProjectAddress, ProjectContact } from '@allebrum/shared';
+import type { ProjectAddress, ProjectContact } from '@modernzen/shared';
 
 function blankAddress(): ProjectAddress {
   return {

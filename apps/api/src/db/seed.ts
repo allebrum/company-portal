@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import argon2 from 'argon2';
 import { sql } from 'drizzle-orm';
 import { db, sqlClient } from './client.js';
+import { getServiceSupabase } from '../lib/supabase.js';
 import {
   users,
   tenants,
@@ -31,9 +31,9 @@ import {
   PERMISSION_CATEGORIES,
   SYSTEM_GROUPS,
   SYSTEM_GROUP_PERMISSIONS,
-} from '@allebrum/shared';
+} from '@modernzen/shared';
 
-const DEFAULT_PASSWORD = 'Allebrum2026!';
+const DEFAULT_PASSWORD = 'ModernZen2026!';
 
 // Helpers ported from data.jsx
 function isoDayOffset(offset: number): string {
@@ -79,10 +79,6 @@ async function clearAll(): Promise<void> {
 
 async function main(): Promise<void> {
   // eslint-disable-next-line no-console
-  console.log('[seed] hashing password...');
-  const passwordHash = await argon2.hash(DEFAULT_PASSWORD);
-
-  // eslint-disable-next-line no-console
   console.log('[seed] clearing existing data...');
   await clearAll();
 
@@ -94,23 +90,42 @@ async function main(): Promise<void> {
   const TENANT_ID = tenant!.id;
 
   // ---- Users ----
+  // Identities live in Supabase Auth; the `users` profile row is keyed to the
+  // auth uid (FK). Create each via the Admin API, then mirror the profile.
   const userSeeds = [
-    { key: 'senica', name: 'Senica Gonzalez', initials: 'SG', group: 'Owner' as const, color: '#9333ea', email: 'senica@allebrum.com', billable: '225' },
-    { key: 'marcus', name: 'Marcus Lee', initials: 'ML', group: 'Member' as const, color: '#2563eb', email: 'marcus@allebrum.com', billable: '185' },
-    { key: 'priya', name: 'Priya Patel', initials: 'PP', group: 'Member' as const, color: '#0d9488', email: 'priya@allebrum.com', billable: '165' },
-    { key: 'jordan', name: 'Jordan Reyes', initials: 'JR', group: 'Member' as const, color: '#db2777', email: 'jordan@allebrum.com', billable: '145' },
-    { key: 'avery', name: 'Avery Chen', initials: 'AC', group: 'Member' as const, color: '#f97316', email: 'avery@allebrum.com', billable: '155' },
-    { key: 'sam', name: 'Sam Okafor', initials: 'SO', group: 'Member' as const, color: '#22c55e', email: 'sam@allebrum.com', billable: '175' },
+    { key: 'senica', name: 'Senica Gonzalez', initials: 'SG', group: 'Owner' as const, color: '#9333ea', email: 'senica@modernzen.com', billable: '225' },
+    { key: 'marcus', name: 'Marcus Lee', initials: 'ML', group: 'Member' as const, color: '#2563eb', email: 'marcus@modernzen.com', billable: '185' },
+    { key: 'priya', name: 'Priya Patel', initials: 'PP', group: 'Member' as const, color: '#0d9488', email: 'priya@modernzen.com', billable: '165' },
+    { key: 'jordan', name: 'Jordan Reyes', initials: 'JR', group: 'Member' as const, color: '#db2777', email: 'jordan@modernzen.com', billable: '145' },
+    { key: 'avery', name: 'Avery Chen', initials: 'AC', group: 'Member' as const, color: '#f97316', email: 'avery@modernzen.com', billable: '155' },
+    { key: 'sam', name: 'Sam Okafor', initials: 'SO', group: 'Member' as const, color: '#22c55e', email: 'sam@modernzen.com', billable: '175' },
   ];
+  const admin = getServiceSupabase().auth.admin;
+
+  // Idempotent re-seed: drop any existing auth users for the seed emails first.
+  const seedEmails = new Set(userSeeds.map((u) => u.email.toLowerCase()));
+  const existingAuth = await admin.listUsers({ perPage: 1000 });
+  for (const au of existingAuth.data?.users ?? []) {
+    if (au.email && seedEmails.has(au.email.toLowerCase())) await admin.deleteUser(au.id);
+  }
+
   const userIds: Record<string, string> = {};
   for (const u of userSeeds) {
-    const id = randomUUID();
+    const created = await admin.createUser({
+      email: u.email,
+      password: DEFAULT_PASSWORD,
+      email_confirm: true,
+      user_metadata: { name: u.name },
+    });
+    if (created.error || !created.data.user) {
+      throw new Error(`[seed] failed to create auth user ${u.email}: ${created.error?.message ?? 'unknown'}`);
+    }
+    const id = created.data.user.id;
     userIds[u.key] = id;
     await db.insert(users).values({
       id,
       name: u.name,
       email: u.email,
-      passwordHash,
       initials: u.initials,
       color: u.color,
       billable: u.billable,
@@ -164,7 +179,7 @@ async function main(): Promise<void> {
     { key: 'csus', name: 'Sacramento State', kind: 'edu' as const, color: '#2563eb' },
     { key: 'northpk', name: 'North Park Agency', kind: 'agency' as const, color: '#db2777' },
     { key: 'foothill', name: 'Foothill Credit Union', kind: 'finance' as const, color: '#0d9488' },
-    { key: 'internal', name: 'Allebrum (internal)', kind: 'internal' as const, color: '#4b5563' },
+    { key: 'internal', name: 'Modern Zen (internal)', kind: 'internal' as const, color: '#4b5563' },
   ];
   const clientIds: Record<string, string> = {};
   for (const c of clientSeeds) {
@@ -181,7 +196,7 @@ async function main(): Promise<void> {
     { key: 'records', clientKey: 'csus', name: 'Student Records Integration', code: 'CSUS-SR', billable: true, budgetHrs: 240, color: '#0d9488' },
     { key: 'onboard', clientKey: 'northpk', name: 'Client Onboarding Tool', code: 'NP-ONB', billable: true, budgetHrs: 160, color: '#db2777' },
     { key: 'member', clientKey: 'foothill', name: 'Member Portal Refresh', code: 'FCU-MP', billable: true, budgetHrs: 280, color: '#22c55e' },
-    { key: 'marketing', clientKey: 'internal', name: 'Allebrum.com', code: 'INT-WEB', billable: false, budgetHrs: 60, color: '#6b7280' },
+    { key: 'marketing', clientKey: 'internal', name: 'Modern Zen.com', code: 'INT-WEB', billable: false, budgetHrs: 60, color: '#6b7280' },
     { key: 'sales', clientKey: 'internal', name: 'Sales & proposals', code: 'INT-SAL', billable: false, budgetHrs: 80, color: '#9ca3af' },
   ];
   const projectIds: Record<string, string> = {};
@@ -251,7 +266,7 @@ async function main(): Promise<void> {
     { key: 'g5', title: 'North Park onboarding launch', clientKey: 'northpk', projectKey: 'onboard', status: 'done' as const, ownerKey: 'avery', start: '2026-03-02', end: '2026-04-30', priority: 'low' as const, tag: 'Delivery' },
     { key: 'g6', title: 'Foothill member portal redesign', clientKey: 'foothill', projectKey: 'member', status: 'in-progress' as const, ownerKey: 'avery', start: '2026-04-27', end: '2026-07-17', priority: 'high' as const, tag: 'Delivery' },
     { key: 'g7', title: 'SOC 2 Type II readiness', clientKey: 'internal', projectKey: 'sales', status: 'in-progress' as const, ownerKey: 'sam', start: '2026-04-01', end: '2026-09-30', priority: 'high' as const, tag: 'Ops' },
-    { key: 'g8', title: 'Refresh allebrum.com case studies', clientKey: 'internal', projectKey: 'marketing', status: 'backlog' as const, ownerKey: 'avery', start: '2026-06-01', end: '2026-07-15', priority: 'low' as const, tag: 'Growth' },
+    { key: 'g8', title: 'Refresh Modern Zen.com case studies', clientKey: 'internal', projectKey: 'marketing', status: 'backlog' as const, ownerKey: 'avery', start: '2026-06-01', end: '2026-07-15', priority: 'low' as const, tag: 'Growth' },
     { key: 'g9', title: 'Hire 2nd full-stack engineer', clientKey: 'internal', projectKey: 'sales', status: 'review' as const, ownerKey: 'senica', start: '2026-04-15', end: '2026-06-30', priority: 'medium' as const, tag: 'Hiring' },
   ];
   const goalIds: Record<string, string> = {};
@@ -287,7 +302,7 @@ async function main(): Promise<void> {
     { goalKey: 'g1', kind: 'drive-doc', title: 'GovGrants v2 — PRD', url: 'drive://CDT/GovGrants/PRD', meta: '18 pages', addedByKey: 'jordan', addedAt: '2026-04-07' },
     { goalKey: 'g1', kind: 'drive-folder', title: 'CDT shared folder', url: 'drive://CDT', meta: '142 files', addedByKey: 'senica', addedAt: '2026-04-01' },
     { goalKey: 'g1', kind: 'link', title: 'CA contracting handbook §3', url: 'https://dgs.ca.gov/handbook#s3', meta: 'dgs.ca.gov', addedByKey: 'senica', addedAt: '2026-04-08' },
-    { goalKey: 'g2', kind: 'github', title: 'allebrum/vendor-onboarding-api', url: 'https://github.com/allebrum/vendor-onboarding-api', meta: 'main · v0.9', addedByKey: 'marcus', addedAt: '2026-04-22' },
+    { goalKey: 'g2', kind: 'github', title: 'Modern Zen/vendor-onboarding-api', url: 'https://github.com/Modern Zen/vendor-onboarding-api', meta: 'main · v0.9', addedByKey: 'marcus', addedAt: '2026-04-22' },
     { goalKey: 'g2', kind: 'drive-doc', title: 'API spec & test plan', url: 'drive://CDT/VendorAPI/spec', meta: '42 pages', addedByKey: 'priya', addedAt: '2026-04-25' },
     { goalKey: 'g3', kind: 'drive-sheet', title: 'Roseville stakeholder list', url: 'drive://Roseville/stakeholders', meta: '47 rows', addedByKey: 'jordan', addedAt: '2026-04-15' },
     { goalKey: 'g3', kind: 'note', title: 'Discovery interview notes', url: '', meta: '6 interviews', addedByKey: 'jordan', addedAt: '2026-04-20' },
@@ -296,7 +311,7 @@ async function main(): Promise<void> {
     { goalKey: 'g6', kind: 'drive-doc', title: 'Compliance checklist (FFIEC)', url: 'drive://Foothill/compliance', meta: '12 pages', addedByKey: 'senica', addedAt: '2026-05-02' },
     { goalKey: 'g7', kind: 'drive-folder', title: 'SOC2 evidence locker', url: 'drive://Internal/SOC2', meta: '89 files', addedByKey: 'sam', addedAt: '2026-04-01' },
     { goalKey: 'g9', kind: 'drive-doc', title: 'JD — Senior Full-Stack', url: 'drive://Internal/Hiring/JD', meta: '3 pages', addedByKey: 'senica', addedAt: '2026-04-15' },
-    { goalKey: 'g9', kind: 'link', title: 'Interview rubric', url: 'https://allebrum.com/hiring/rubric', meta: 'internal', addedByKey: 'senica', addedAt: '2026-04-15' },
+    { goalKey: 'g9', kind: 'link', title: 'Interview rubric', url: 'https://Modern Zen.com/hiring/rubric', meta: 'internal', addedByKey: 'senica', addedAt: '2026-04-15' },
   ];
   for (const r of resources) {
     await db.insert(goalResources).values({
@@ -439,7 +454,7 @@ async function main(): Promise<void> {
     tenantId: TENANT_ID,
     kind: 'drive',
     connected: true,
-    account: 'senica@allebrum.com',
+    account: 'senica@Modern Zen.com',
     connectedAt: '2026-03-15',
     lastSyncAt: '2026-05-14T08:12:00Z',
     autoSync: true,
@@ -451,11 +466,11 @@ async function main(): Promise<void> {
   await db.insert(integrations).values({ tenantId: TENANT_ID, kind: 'quickbooks', connected: false, config: {} });
 
   const folderSeeds = [
-    { key: 'df1', drivePath: 'Allebrum LLC / Clients / CDT', clientKey: 'cdt', itemCount: 142, lastSync: '2026-05-14T08:12:00Z' },
-    { key: 'df2', drivePath: 'Allebrum LLC / Clients / Roseville', clientKey: 'rsv', itemCount: 87, lastSync: '2026-05-14T08:12:00Z' },
-    { key: 'df3', drivePath: 'Allebrum LLC / Clients / Sac State', clientKey: 'csus', itemCount: 34, lastSync: '2026-05-13T16:30:00Z' },
-    { key: 'df4', drivePath: 'Allebrum LLC / Clients / Foothill CU', clientKey: 'foothill', itemCount: 56, lastSync: '2026-05-14T08:12:00Z' },
-    { key: 'df5', drivePath: 'Allebrum LLC / Internal', clientKey: 'internal', itemCount: 219, lastSync: '2026-05-14T08:12:00Z' },
+    { key: 'df1', drivePath: 'Modern Zen LLC / Clients / CDT', clientKey: 'cdt', itemCount: 142, lastSync: '2026-05-14T08:12:00Z' },
+    { key: 'df2', drivePath: 'Modern Zen LLC / Clients / Roseville', clientKey: 'rsv', itemCount: 87, lastSync: '2026-05-14T08:12:00Z' },
+    { key: 'df3', drivePath: 'Modern Zen LLC / Clients / Sac State', clientKey: 'csus', itemCount: 34, lastSync: '2026-05-13T16:30:00Z' },
+    { key: 'df4', drivePath: 'Modern Zen LLC / Clients / Foothill CU', clientKey: 'foothill', itemCount: 56, lastSync: '2026-05-14T08:12:00Z' },
+    { key: 'df5', drivePath: 'Modern Zen LLC / Internal', clientKey: 'internal', itemCount: 219, lastSync: '2026-05-14T08:12:00Z' },
   ];
   const folderIds: Record<string, string> = {};
   for (const f of folderSeeds) {
@@ -481,7 +496,7 @@ async function main(): Promise<void> {
     { folderKey: 'df4', kind: 'drive-doc' as const, title: 'Compliance checklist (FFIEC)', path: 'drive://Foothill/compliance', meta: '12 pages', modified: '2026-05-02' },
     { folderKey: 'df5', kind: 'drive-folder' as const, title: 'SOC2 evidence locker', path: 'drive://Internal/SOC2', meta: '89 files', modified: '2026-05-14' },
     { folderKey: 'df5', kind: 'drive-doc' as const, title: 'JD — Senior Full-Stack', path: 'drive://Internal/Hiring/JD', meta: '3 pages', modified: '2026-04-15' },
-    { folderKey: 'df5', kind: 'drive-doc' as const, title: 'Allebrum SOW template (v3)', path: 'drive://Internal/Templates/SOW', meta: '4 pages', modified: '2026-03-22' },
+    { folderKey: 'df5', kind: 'drive-doc' as const, title: 'Modern Zen SOW template (v3)', path: 'drive://Internal/Templates/SOW', meta: '4 pages', modified: '2026-03-22' },
   ];
   for (const it of driveItemSeeds) {
     await db.insert(driveItems).values({
@@ -500,7 +515,7 @@ async function main(): Promise<void> {
     { whoKey: 'marcus', kind: 'todo.done', target: 'Refactor auth middleware (shared)' },
     { whoKey: 'priya', kind: 'time.start', target: 'GovGrants Portal — QA pass' },
     { whoKey: 'avery', kind: 'goal.move', target: 'Foothill member portal redesign → in-progress' },
-    { whoKey: 'senica', kind: 'user.invite', target: 'casey@allebrum.com invited as member' },
+    { whoKey: 'senica', kind: 'user.invite', target: 'casey@Modern Zen.com invited as member' },
     { whoKey: 'jordan', kind: 'todo.assign', target: 'Roseville stakeholder demo prep → Jordan' },
   ];
   for (const a of initialActivity) {

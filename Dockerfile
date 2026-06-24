@@ -17,9 +17,9 @@ WORKDIR /app
 # and install + build. --frozen-lockfile pins to pnpm-lock.yaml.
 COPY . .
 RUN pnpm install --frozen-lockfile \
- && pnpm --filter @allebrum/shared build \
- && pnpm --filter @allebrum/api build \
- && NEXT_PUBLIC_API_URL= pnpm --filter @allebrum/web build
+ && pnpm --filter @modernzen/shared build \
+ && pnpm --filter @modernzen/api build \
+ && NEXT_PUBLIC_API_URL= pnpm --filter @modernzen/web build
 
 ENV NODE_ENV=production \
     API_PORT=8080 \
@@ -29,4 +29,4 @@ ENV NODE_ENV=production \
 EXPOSE 8080
 
 # Apply migrations, seed the default workspace + admin (idempotent), then serve.
-CMD ["sh", "-c", "pnpm --filter @allebrum/api db:migrate && pnpm --filter @allebrum/api db:init && pnpm --filter @allebrum/api start"]
+CMD ["sh", "-c", "pnpm --filter @modernzen/api db:migrate && pnpm --filter @modernzen/api db:init && pnpm --filter @modernzen/api start"]

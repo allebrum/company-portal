@@ -10,8 +10,11 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   API_PORT: z.coerce.number().int().min(1).max(65535).default(8080),
   DATABASE_URL: z.string().url(),
-  REDIS_URL: z.string().url(),
-  SESSION_SECRET: z.string().min(16, 'SESSION_SECRET must be at least 16 characters'),
+  // Redis + express-session were removed in the Supabase/Netlify migration
+  // (auth is stateless Supabase JWT; rate-limit + geo cache are in-process).
+  // Kept optional so old .env files don't fail validation.
+  REDIS_URL: z.string().url().optional(),
+  SESSION_SECRET: z.string().optional(),
   WEB_ORIGIN: z.string().url().default('http://localhost:3000'),
   COOKIE_DOMAIN: z.string().optional(),
   // Google OAuth (optional — the feature stays dormant until all three are set)
@@ -32,7 +35,7 @@ const EnvSchema = z.object({
   ADMIN_EMAIL: z.string().email().optional(),
   ADMIN_PASSWORD: z.string().min(8).optional(),
   ALLOWED_EMAIL_DOMAINS: z.string().optional(),
-  // Hoppa SaaS — billing lives in the separate MARKETING service, which owns
+  // Modern Zen SaaS — billing lives in the separate MARKETING service, which owns
   // Stripe and writes the `tenants` billing columns directly in THIS database.
   // The portal only READS them to gate, and exposes the identity provisioning
   // contract (mounted only when PROVISIONING_SECRET is set). All optional →
@@ -62,6 +65,26 @@ const EnvSchema = z.object({
   // policy (app_settings.passwordLoginEnabled) is enforced separately, against
   // the user's resolved tenant at login (see routes/auth.ts).
   PASSWORD_LOGIN_ENABLED: z.string().optional(),
+  // Supabase platform (Auth/DB/Realtime/Storage). Optional during the migration
+  // so the legacy server still boots; required once the relevant phase lands.
+  SUPABASE_URL: z.string().url().optional(),
+  SUPABASE_ANON_KEY: z.string().optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  // Client portal — HMAC secret for the stateless portal-session token.
+  // Required for the magic-link portal to function (guarded at use).
+  PORTAL_SESSION_SECRET: z.string().optional(),
+  // Connect feature — provider keys (server-only). Dormant until set.
+  COMPOSIO_API_KEY: z.string().optional(),
+  ZERNIO_API_KEY: z.string().optional(),
+  APP_URL: z.string().url().optional(),
+  // Transactional email via Resend (HTTP API). When RESEND_API_KEY + MAIL_FROM
+  // are set, all app-sent mail (invites, ticket + payroll notifications) goes
+  // through Resend; otherwise it falls back to the legacy Gmail path / log-only.
+  // MAIL_FROM must be on a domain verified in Resend, e.g.
+  // "Modern Zen <no-reply@modernzen.co>". MAIL_REPLY_TO is optional.
+  RESEND_API_KEY: z.string().optional(),
+  MAIL_FROM: z.string().optional(),
+  MAIL_REPLY_TO: z.string().optional(),
 });
 
 export const env = EnvSchema.parse(process.env);
@@ -106,6 +129,10 @@ export const provisioningConfigured = !!env.PROVISIONING_SECRET;
 // Subscription gate enforcement. False (self-host / pre-billing) → every
 // workspace is treated active; SaaS sets BILLING_ENFORCED=true to gate.
 export const billingEnforced = env.BILLING_ENFORCED;
+
+// Transactional email via Resend. Both the API key and a verified From address
+// must be set for the Resend transport to engage.
+export const resendConfigured = !!(env.RESEND_API_KEY && env.MAIL_FROM);
 
 // Instance-level password-login switch. Default ON; only an explicit
 // PASSWORD_LOGIN_ENABLED=false (or 0) turns the password surface off entirely

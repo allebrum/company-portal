@@ -3,10 +3,10 @@ import { db } from '../db/client.js';
 import {
   payPeriods, payConfig, timeEntries, users, projects, type PayPeriod,
 } from '../db/schema.js';
-import type { PayConfigInput, PayDateRef } from '@allebrum/shared';
+import type { PayConfigInput, PayDateRef } from '@modernzen/shared';
 import { appendActivity } from './activity.js';
 import { emit } from '../realtime/emit.js';
-import { EV } from '@allebrum/shared';
+import { EV } from '@modernzen/shared';
 import { getSettings } from './settings.js';
 import { sendPayrollReportEmail } from './mail.js';
 import { HttpError } from '../middleware/errorHandler.js';
@@ -175,7 +175,7 @@ export async function generateAndInsert(args: {
   fromDate?: string;
   prevPeriodEnd?: string;
 }): Promise<{ inserted: number }> {
-  // Hoppa: pay_config is per-workspace; read the active tenant's row.
+  // Modern Zen: pay_config is per-workspace; read the active tenant's row.
   const cfgRows = await db.select().from(payConfig).where(tenantEq(payConfig.tenantId)).limit(1);
   const cfg = cfgRows[0];
   if (!cfg) throw new Error('pay_config_missing_for_tenant');

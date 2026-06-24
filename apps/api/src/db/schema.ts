@@ -26,7 +26,7 @@ import {
   WEEKEND_RULES,
   TICKET_STATUSES,
   TICKET_AUTHOR_KINDS,
-} from '@allebrum/shared';
+} from '@modernzen/shared';
 
 // ---- Enums ----
 export const entryStatusEnum = pgEnum('entry_status', ENTRY_STATUSES);
@@ -45,7 +45,7 @@ export const ticketAuthorKindEnum = pgEnum('ticket_author_kind', TICKET_AUTHOR_K
 const ts = () => timestamp('created_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull();
 const updTs = () => timestamp('updated_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull();
 
-// Hoppa multi-tenancy — every tenant-owned business table carries this.
+// Modern Zen multi-tenancy — every tenant-owned business table carries this.
 // Lazy `() => tenants.id` so it can be used before `tenants` is declared in
 // source order. ON DELETE CASCADE: deleting a workspace wipes its data.
 //
@@ -60,14 +60,15 @@ const tenantRef = () => uuid('tenant_id').references(() => tenants.id, { onDelet
 // 0017 SET NOT NULL after the 0016 backfill.
 const tenantRefNN = () => uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' });
 
-// ---- Users ----
+// ---- Users (profile) ----
+// One row per global identity, keyed to Supabase Auth's `auth.users.id`.
+// Credentials (password, OAuth identities, MFA factors) live in Supabase Auth
+// — NOT here. `id` is set to the auth uid on creation (the FK to auth.users is
+// added in the platform migration `0001_supabase_platform.sql`).
 export const users = pgTable('users', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').primaryKey(),
   name: text('name').notNull(),
   email: text('email').notNull(),
-  passwordHash: text('password_hash'),
-  googleSub: text('google_sub'),
-  authProvider: text('auth_provider').notNull().default('password'),
   initials: text('initials').notNull().default(''),
   color: text('color').notNull().default('#6b7280'),
   billable: numeric('billable', { precision: 10, scale: 2 }).notNull().default('150'),
@@ -76,10 +77,9 @@ export const users = pgTable('users', {
   updatedAt: updTs(),
 }, (t) => ({
   emailIdx: uniqueIndex('users_email_lower_idx').on(sql`lower(${t.email})`),
-  googleSubIdx: uniqueIndex('users_google_sub_idx').on(t.googleSub),
 }));
 
-// ---- Tenants (workspaces) — Hoppa multi-tenancy ----
+// ---- Tenants (workspaces) — Modern Zen multi-tenancy ----
 // One row per workspace. Subscription truth lives in the marketing site;
 // `plan` / `seatLimit` / `status` are a cached mirror refreshed by the
 // subscription client (Phase 3). `billingExternalId` is the stable Stripe
@@ -130,7 +130,7 @@ export const tenantMembers = pgTable('tenant_members', {
 
 // ---- App settings (one row per tenant) ----
 export const appSettings = pgTable('app_settings', {
-  // Hoppa Phase 2: re-keyed from the global `id='singleton'` row to one row
+  // Modern Zen Phase 2: re-keyed from the global `id='singleton'` row to one row
   // per workspace. Migration 0017 drops `id` and makes tenant_id the PK.
   tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id, { onDelete: 'cascade' }),
   passwordLoginEnabled: boolean('password_login_enabled').notNull().default(true),
@@ -154,7 +154,7 @@ export const appSettings = pgTable('app_settings', {
   // on the login card and sidebar header. The logo, when set, replaces
   // the gradient "A" tile and is stored as a base64 data URL so we don't
   // need Drive permissions or external hosting for it.
-  portalName: text('portal_name').notNull().default('Hoppa'),
+  portalName: text('portal_name').notNull().default('Modern Zen'),
   brandPrimaryColor: text('brand_primary_color').notNull().default('#9333ea'),
   brandLogoDataUrl: text('brand_logo_data_url'),
   updatedAt: updTs(),
@@ -164,7 +164,7 @@ export const appSettings = pgTable('app_settings', {
 export const oauthTokens = pgTable('oauth_tokens', {
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   provider: text('provider').notNull(),
-  // Hoppa: the Google Drive connection is per-WORKSPACE — one shared Drive per
+  // Modern Zen: the Google Drive connection is per-WORKSPACE — one shared Drive per
   // tenant, connected once by an admin and used by every member. `tenant_id`
   // scopes the credential so each workspace resolves only its own Drive (see
   // services/drive.ts `getStoredToken`). Nullable because Gmail tokens are
@@ -180,54 +180,21 @@ export const oauthTokens = pgTable('oauth_tokens', {
   tenantIdx: index('oauth_tokens_tenant_idx').on(t.tenantId),
 }));
 
-// ---- 2FA: TOTP, recovery codes, WebAuthn passkeys ----
-export const userTotp = pgTable('user_totp', {
-  userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
-  secret: text('secret').notNull(),
-  enabled: boolean('enabled').notNull().default(false),
-  verifiedAt: timestamp('verified_at', { withTimezone: true, mode: 'string' }),
-  createdAt: ts(),
-});
+// ---- 2FA / passkeys ----
+// REMOVED — Supabase Auth MFA owns TOTP + WebAuthn factors now (they live in
+// the auth schema). Staff password reset + invite also move to Supabase Auth.
 
-export const userRecoveryCodes = pgTable('user_recovery_codes', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  codeHash: text('code_hash').notNull(),
-  usedAt: timestamp('used_at', { withTimezone: true, mode: 'string' }),
-  createdAt: ts(),
-}, (t) => ({
-  userIdx: index('recovery_codes_user_idx').on(t.userId),
-}));
-
-export const webauthnCredentials = pgTable('webauthn_credentials', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  credentialId: text('credential_id').notNull(),
-  publicKey: text('public_key').notNull(),
-  counter: integer('counter').notNull().default(0),
-  transports: text('transports').array().notNull().default(sql`'{}'::text[]`),
-  name: text('name').notNull().default('Passkey'),
-  createdAt: ts(),
-}, (t) => ({
-  credIdx: uniqueIndex('webauthn_cred_id_idx').on(t.credentialId),
-  userIdx: index('webauthn_user_idx').on(t.userId),
-}));
-
-// ---- Auth tokens (invite + password-reset) ----
+// ---- Auth tokens (client-portal magic-link + marketing→portal handoff) ----
 //
-// Opaque random tokens, SHA-256-hashed at rest. The raw token is only ever
-// in the outbound email and the user's browser URL; the DB only ever holds
-// the hash, the kind (`invite` or `reset`), an absolute expiry, and a
-// `usedAt` marker for single-use revocation.
+// Opaque random tokens, SHA-256-hashed at rest. Staff invite/reset moved to
+// Supabase Auth; this table now backs the external client-portal magic-link
+// ('portal-magic', keyed to a clientContact) and the optional marketing→portal
+// auto-login handoff ('portal-login'). The DB only ever holds the hash.
 export const authTokens = pgTable('auth_tokens', {
   id: uuid('id').defaultRandom().primaryKey(),
-  // Subject is exactly one of userId (internal staff) or contactId
-  // (external client portal contact). Enforced by a CHECK constraint in
-  // the migration; both columns are nullable at the schema level so the
-  // discriminated subject can live in one table.
+  // Subject is exactly one of userId (staff) or contactId (client portal).
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
   contactId: uuid('contact_id').references(() => clientContacts.id, { onDelete: 'cascade' }),
-  // 'invite' | 'reset' (staff, F1) | 'portal-magic' (client portal, F23).
   kind: text('kind').notNull(),
   tokenHash: text('token_hash').notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'string' }).notNull(),
@@ -258,7 +225,7 @@ export const groups = pgTable('groups', {
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
-  // Hoppa Phase 2: group names are unique PER WORKSPACE so every tenant can
+  // Modern Zen Phase 2: group names are unique PER WORKSPACE so every tenant can
   // have its own Owner/Admin/Bookkeeper/Member system groups.
   nameIdx: uniqueIndex('groups_name_lower_idx').on(t.tenantId, sql`lower(${t.name})`),
   tenantIdx: index('groups_tenant_idx').on(t.tenantId),
@@ -288,7 +255,7 @@ export const userPermissionOverrides = pgTable('user_permission_overrides', {
   effect: overrideEffectEnum('effect').notNull(),
   tenantId: tenantRefNN(),
 }, (t) => ({
-  // Hoppa Phase 2: PK widened to include tenant_id so a user can hold
+  // Modern Zen Phase 2: PK widened to include tenant_id so a user can hold
   // different overrides per workspace.
   pk: primaryKey({ columns: [t.userId, t.permissionKey, t.tenantId] }),
   tenantUserIdx: index('user_perm_overrides_tenant_user_idx').on(t.tenantId, t.userId),
@@ -319,6 +286,12 @@ export const clients = pgTable('clients', {
   // non-null = published.
   portalSlug: text('portal_slug').unique(),
   portalPublishedAt: timestamp('portal_published_at', { withTimezone: true, mode: 'string' }),
+  // Connect feature — one stable client → one Composio user → one Zernio profile.
+  // `composioUserId` is the client's own id (Composio users exist implicitly);
+  // `zernioProfileId` is created on first provisioning. Both stored for clarity
+  // and uniqueness. See lib/provision.ts.
+  composioUserId: text('composio_user_id').unique(),
+  zernioProfileId: text('zernio_profile_id').unique(),
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
@@ -344,6 +317,45 @@ export const clientContacts = pgTable('client_contacts', {
 }, (t) => ({
   clientEmailUnique: uniqueIndex('client_contacts_client_email_unique').on(t.clientId, t.email),
   emailIdx: index('client_contacts_email_idx').on(t.email),
+}));
+
+// ---- Connect feature: third-party connections + on-behalf workflow runs ----
+// A client's connected accounts are managed by two providers (Composio for
+// SaaS/productivity tools, Zernio for social channels). We never store raw
+// provider credentials — only the provider's external account id + metadata.
+export const connectionProviderEnum = pgEnum('connection_provider', ['composio', 'zernio']);
+
+export const connections = pgTable('connections', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'cascade' }),
+  tenantId: tenantRef(),
+  provider: connectionProviderEnum('provider').notNull(),
+  // Provider's account id: Composio connected-account id, or Zernio account id.
+  externalId: text('external_id').notNull(),
+  // Toolkit (Composio, e.g. 'gmail') or platform (Zernio, e.g. 'linkedin').
+  integration: text('integration').notNull(),
+  displayName: text('display_name'),
+  status: text('status').notNull().default('active'),
+  connectedAt: timestamp('connected_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
+  createdAt: ts(),
+}, (t) => ({
+  clientProviderExtUnique: uniqueIndex('connections_client_provider_ext_unique').on(t.clientId, t.provider, t.externalId),
+  clientIdx: index('connections_client_idx').on(t.clientId),
+  tenantIdx: index('connections_tenant_idx').on(t.tenantId),
+}));
+
+// Audit trail: one row per on-behalf action taken for a client.
+export const workflowRuns = pgTable('workflow_runs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'cascade' }),
+  tenantId: tenantRef(),
+  kind: text('kind').notNull(),
+  payload: jsonb('payload').notNull().default(sql`'{}'::jsonb`),
+  result: jsonb('result').notNull().default(sql`'{}'::jsonb`),
+  createdAt: ts(),
+}, (t) => ({
+  clientTimeIdx: index('workflow_runs_client_time_idx').on(t.clientId, t.createdAt),
+  tenantIdx: index('workflow_runs_tenant_idx').on(t.tenantId),
 }));
 
 // ---- Projects ----
@@ -578,14 +590,14 @@ export const payPeriods = pgTable('pay_periods', {
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
-  // Hoppa Phase 2: period date ranges are unique PER WORKSPACE.
+  // Modern Zen Phase 2: period date ranges are unique PER WORKSPACE.
   startEndUnique: uniqueIndex('pay_periods_start_end_unique').on(t.tenantId, t.startDate, t.endDate),
   tenantIdx: index('pay_periods_tenant_idx').on(t.tenantId),
 }));
 
 // ---- Pay config (one row per tenant) ----
 export const payConfig = pgTable('pay_config', {
-  // Hoppa Phase 2: re-keyed from `id='singleton'` to one row per workspace.
+  // Modern Zen Phase 2: re-keyed from `id='singleton'` to one row per workspace.
   tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id, { onDelete: 'cascade' }),
   cadence: cadenceEnum('cadence').notNull().default('by-date'),
   payDates: jsonb('pay_dates').notNull().default(sql`'[15, "last"]'::jsonb`),
@@ -662,7 +674,7 @@ export const activityLog = pgTable('activity_log', {
 
 // ---- Integrations (one row per kind PER TENANT) ----
 export const integrations = pgTable('integrations', {
-  // Hoppa Phase 2: PK widened from `kind` to (tenant_id, kind) so two
+  // Modern Zen Phase 2: PK widened from `kind` to (tenant_id, kind) so two
   // workspaces each connect their own Drive/Gmail/etc.
   tenantId: tenantRefNN(),
   kind: text('kind').notNull(),
@@ -804,12 +816,12 @@ export type Tenant = typeof tenants.$inferSelect;
 export type TenantMember = typeof tenantMembers.$inferSelect;
 export type AppSettingsRow = typeof appSettings.$inferSelect;
 export type OAuthToken = typeof oauthTokens.$inferSelect;
-export type UserTotp = typeof userTotp.$inferSelect;
-export type WebauthnCredential = typeof webauthnCredentials.$inferSelect;
 export type Group = typeof groups.$inferSelect;
 export type Permission = typeof permissions.$inferSelect;
 export type Client = typeof clients.$inferSelect;
 export type ClientContact = typeof clientContacts.$inferSelect;
+export type Connection = typeof connections.$inferSelect;
+export type WorkflowRun = typeof workflowRuns.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export type Goal = typeof goals.$inferSelect;
 export type GoalResource = typeof goalResources.$inferSelect;

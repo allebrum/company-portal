@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { withTenant } from '../tenancy/context.js';
 
 /**
- * Hoppa multi-tenancy — bind the request's active workspace to an
+ * Modern Zen multi-tenancy — bind the request's active workspace to an
  * AsyncLocalStorage context so downstream services can read
  * `currentTenantId()` without threading it through every signature.
  *

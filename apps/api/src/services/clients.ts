@@ -1,9 +1,9 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { clients, type Client } from '../db/schema.js';
-import type { CreateClientInput, UpdateClientInput } from '@allebrum/shared';
+import type { CreateClientInput, UpdateClientInput } from '@modernzen/shared';
 import { emit } from '../realtime/emit.js';
-import { EV } from '@allebrum/shared';
+import { EV } from '@modernzen/shared';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { isConnected as driveIsConnected, ensureClientFolder } from './drive.js';

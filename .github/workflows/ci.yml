@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'refactor/**', 'supabase-**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        # env.ts validates on import; tests don't touch a real DB, so dummy
+        # values are enough to let the modules load.
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/test
+          PORTAL_SESSION_SECRET: ci-dummy-portal-session-secret
+          SESSION_SECRET: ci-dummy-session-secret
+        run: pnpm --filter @modernzen/api test

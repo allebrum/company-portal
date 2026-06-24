@@ -6,8 +6,8 @@ import {
   ConnectIntegrationSchema,
   IntegrationKindParam,
   INTEGRATION_KINDS,
-} from '@allebrum/shared';
-import type { IntegrationKind } from '@allebrum/shared';
+} from '@modernzen/shared';
+import type { IntegrationKind } from '@modernzen/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requirePermission, requireAnyPermission } from '../auth/permissions.js';
 import { validate, getValidated } from '../middleware/validate.js';

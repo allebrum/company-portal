@@ -2,7 +2,7 @@ import { desc } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { activityLog, type ActivityRow } from '../db/schema.js';
 import { emit } from '../realtime/emit.js';
-import { EV } from '@allebrum/shared';
+import { EV } from '@modernzen/shared';
 import { tenantEq, stampTenant } from '../tenancy/scope.js';
 
 export async function appendActivity(args: {
