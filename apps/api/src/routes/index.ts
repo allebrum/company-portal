@@ -34,12 +34,12 @@ apiRouter.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
 
-// Hoppa: bind the request's active workspace (from session.user.tenantId) to
+// Modern Zen: bind the request's active workspace (from session.user.tenantId) to
 // an AsyncLocalStorage context for all downstream services. No-op for routes
 // reached before login (auth, public portal/QR) — they pass through and any
 // service that needs a tenant will throw, which is correct for those paths.
 apiRouter.use(tenantContext);
-// Hoppa: gate business routes on the workspace's subscription. Exempts auth /
+// Modern Zen: gate business routes on the workspace's subscription. Exempts auth /
 // billing / provisioning / portal / public; no-ops to "allow" when billing
 // isn't configured. Lapsed workspaces get 402 on everything else.
 apiRouter.use(requireActiveSubscription);
@@ -68,7 +68,7 @@ apiRouter.use('/bootstrap', bootstrapRouter);
 apiRouter.use('/onboarding', onboardingRouter);
 apiRouter.use('/rbac', rbacRouter);
 apiRouter.use('/settings', settingsRouter);
-// Hoppa Phase 3: billing portal (session-gated, subscription-exempt) +
+// Modern Zen Phase 3: billing portal (session-gated, subscription-exempt) +
 // provisioning webhook (HMAC-gated, only mounted when the secret is set).
 apiRouter.use('/billing', billingRouter);
 if (provisioningConfigured) {

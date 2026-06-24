@@ -2,7 +2,7 @@ import { eq, type Column } from 'drizzle-orm';
 import { currentTenantId } from './context.js';
 
 /**
- * Hoppa multi-tenancy — query-scoping helpers built on the request tenant
+ * Modern Zen multi-tenancy — query-scoping helpers built on the request tenant
  * context (tenancy/context.ts).
  *
  * Phase 2 threads these through every service:

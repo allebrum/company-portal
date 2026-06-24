@@ -24,7 +24,7 @@ import { getServiceSupabase } from '../lib/supabase.js';
 type Executor = Pick<typeof db, 'select' | 'insert' | 'update' | 'delete' | 'execute'>;
 
 /**
- * Hoppa multi-tenancy — tenant/workspace lookups.
+ * Modern Zen multi-tenancy — tenant/workspace lookups.
  *
  * Phase 1 surface: resolve which workspace(s) a user belongs to and pick the
  * active one on login. Provisioning (creating new tenants from the marketing

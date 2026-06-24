@@ -14,7 +14,6 @@ import { IntegrationGateProvider } from './IntegrationGate';
 import { OnboardingChecklist } from './OnboardingChecklist';
 import { ShortcutsHelp } from './ShortcutsHelp';
 import { ShellSkeleton } from '@/components/ui/Skeleton';
-import { HoppaMark } from '@/components/ui/HoppaMark';
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
@@ -110,7 +109,7 @@ function ShellWithBootstrap({ children }: { children: ReactNode }) {
   if (isLoading) {
     return <ShellSkeleton label="Loading workspace" />;
   }
-  // Hoppa: a 402 from the subscription gate → show the billing screen instead
+  // Modern Zen: a 402 from the subscription gate → show the billing screen instead
   // of the generic error (the workspace's subscription lapsed/canceled).
   if (isError && error instanceof ApiError && error.status === 402) {
     // The 402 body carries billingStatus/trialEndsAt so the lockout screen
@@ -163,8 +162,6 @@ function ShellWithBootstrap({ children }: { children: ReactNode }) {
               {cfg?.brandLogoDataUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={cfg.brandLogoDataUrl} alt="" className="w-full h-full object-contain" />
-              ) : (cfg?.portalName ?? 'Modern Zen') === 'Hoppa' ? (
-                <HoppaMark className="w-[18px] h-[18px]" />
               ) : (
                 (cfg?.portalName ?? 'Modern Zen').charAt(0).toUpperCase()
               )}
@@ -254,7 +251,7 @@ function TrialBanner() {
 }
 
 /**
- * Hoppa: shown when the active workspace's subscription is inactive (402 from
+ * Modern Zen: shown when the active workspace's subscription is inactive (402 from
  * the gate). Billing lives on the marketing site, so "Update payment method"
  * redirects to the marketing-hosted fix-card page (via a short-lived signed
  * link); a multi-workspace user can switch to an active workspace; anyone can

@@ -75,7 +75,7 @@ export async function inviteUser(args: {
     throw new HttpError(409, 'already_member');
   }
 
-  // Hoppa: seat enforcement. The workspace's seat limit lives on the tenant
+  // Modern Zen: seat enforcement. The workspace's seat limit lives on the tenant
   // row (tenant.seatLimit). Null = unlimited (the flat-price custom-billing
   // model doesn't meter seats by default, and self-host is always unlimited).
   // Adding EITHER a brand-new or an existing-from-another-org user consumes a

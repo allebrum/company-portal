@@ -35,7 +35,7 @@ const EnvSchema = z.object({
   ADMIN_EMAIL: z.string().email().optional(),
   ADMIN_PASSWORD: z.string().min(8).optional(),
   ALLOWED_EMAIL_DOMAINS: z.string().optional(),
-  // Hoppa SaaS — billing lives in the separate MARKETING service, which owns
+  // Modern Zen SaaS — billing lives in the separate MARKETING service, which owns
   // Stripe and writes the `tenants` billing columns directly in THIS database.
   // The portal only READS them to gate, and exposes the identity provisioning
   // contract (mounted only when PROVISIONING_SECRET is set). All optional →

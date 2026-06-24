@@ -71,7 +71,7 @@ export function qrScansCsvUrl(id: string): string {
 /** The public tracking URL the QR encodes. */
 export function trackingUrlFor(shortCode: string): string {
   // Same origin as the staff app since both ship in the same static
-  // export. API_URL is e.g. https://rc.allebrum.com/api → strip /api.
+  // export. API_URL is e.g. https://rc.Modern Zen.com/api → strip /api.
   if (typeof window !== 'undefined') {
     return `${window.location.origin}/api/q/${shortCode}`;
   }

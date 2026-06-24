@@ -9,7 +9,7 @@ import type { Permission } from '@modernzen/shared';
  * belongs to IN THE GIVEN WORKSPACE, then apply that workspace's per-user
  * overrides (grant adds, deny removes).
  *
- * Hoppa: `tenantId` is passed explicitly (not from the AsyncLocalStorage
+ * Modern Zen: `tenantId` is passed explicitly (not from the AsyncLocalStorage
  * context) because this is called from places with no request context — the
  * socket-connect handler and the login flow before `session.user` is set. A
  * user's permissions in one workspace must never leak from their groups in

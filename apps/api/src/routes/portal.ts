@@ -218,7 +218,7 @@ portalRouter.get('/me', requireClientPortalAuth, async (req, res, next) => {
     // The portal header should carry the WORKSPACE's branding (the agency the
     // client belongs to), not the instance/product branding — on the SaaS the
     // pre-login /auth/config is deliberately product-branded (see routes/
-    // auth.ts), so the header would otherwise read "Hoppa" for every tenant.
+    // auth.ts), so the header would otherwise read "Modern Zen" for every tenant.
     const ws = client.tenantId ? await withTenant(client.tenantId, () => getSettings()) : null;
     res.json({
       contact: { id: contact.id, name: contact.name, email: contact.email, role: contact.role },

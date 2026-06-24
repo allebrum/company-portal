@@ -48,7 +48,7 @@ async function main(): Promise<void> {
     .map((d) => d.trim().toLowerCase())
     .filter(Boolean);
 
-  // 0. Hoppa: ensure the default workspace exists (migration 0016 creates it,
+  // 0. Modern Zen: ensure the default workspace exists (migration 0016 creates it,
   //    but on any path where it's missing, create it). Everything init seeds
   //    is attached to this tenant so the bootstrap workspace is coherent.
   let defaultTenantId: string;
@@ -165,7 +165,7 @@ async function main(): Promise<void> {
     adminCreated = true;
   }
 
-  // 5. Hoppa: ensure the admin is a member of the default workspace so login
+  // 5. Modern Zen: ensure the admin is a member of the default workspace so login
   //    can resolve their tenant. Idempotent across re-runs.
   {
     const [admin] = await db

@@ -10,7 +10,7 @@ import { currentTenantIdOrNull } from '../tenancy/context.js';
 import { getDefaultTenantId } from './tenants.js';
 
 /**
- * Hoppa: app_settings is now one row per workspace. In-app calls resolve the
+ * Modern Zen: app_settings is now one row per workspace. In-app calls resolve the
  * active workspace from the request context; pre-login calls (/auth/config,
  * the login gate) have no context and fall back to the DEFAULT workspace,
  * which governs the generic single-domain login surface.

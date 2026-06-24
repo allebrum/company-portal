@@ -14,7 +14,7 @@ import { api, PORTAL_TOKEN_KEY } from '@/lib/api';
 export type PortalMe = {
   contact: { id: string; name: string; email: string; role: 'primary' | 'viewer' };
   client: { id: string; name: string; color: string; slug: string };
-  /** The owning WORKSPACE's branding (the agency, not the Hoppa product) —
+  /** The owning WORKSPACE's branding (the agency, not the Modern Zen product) —
    *  null only for legacy rows with no tenant. */
   workspace: { name: string; color: string; logo: string | null } | null;
 };

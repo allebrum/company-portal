@@ -39,14 +39,14 @@ Browser
 |---|---|---|
 | 0 | Rename `@allebrum/*` → `@modernzen/*`, CI, Supabase scaffolding | ✅ done |
 | 1 | Database on Supabase + identity reshape | ✅ done |
-| 2 | Auth → Supabase Auth | 🔧 backend done · frontend next |
-| 3 | API → Netlify Functions | ⏳ pending |
-| 4 | Realtime → Supabase Realtime | ⏳ pending |
-| 5 | Storage → Supabase Storage | ⏳ pending |
-| 6 | Email via Resend | ⏳ pending |
-| 7 | Netlify + Supabase cloud deploy | ⏳ pending |
-| 8 | Rebrand finalization (Allebrum/Hoppa → Modern Zen) | ⏳ pending |
-| 9 | Code-quality refactor + tests | ⏳ pending |
+| 2 | Auth → Supabase Auth | ✅ done |
+| 3 | API → Netlify Functions | ✅ done |
+| 4 | Realtime → Supabase Realtime | ✅ done |
+| 5 | Storage → Supabase Storage | ✅ done |
+| 6 | Email via Resend | ✅ done (app mail; Supabase Auth SMTP pending) |
+| 7 | Netlify + Supabase cloud deploy | ✅ done (live) |
+| 8 | Rebrand finalization (Allebrum/Hoppa → Modern Zen) | ✅ done (code/UI/docs; legacy `project/` prototype untouched) |
+| 9 | Code-quality refactor + tests | 🔧 in progress (safe pure-fn tests; large decompositions deferred) |
 
 ## What's done on this branch
 

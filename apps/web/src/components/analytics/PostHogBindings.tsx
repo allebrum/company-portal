@@ -69,9 +69,9 @@ export function PostHogBindings(): null {
     }
   }, [me]);
 
-  // Support widget visibility. The widget is for HOPPA's users (staff in the
+  // Support widget visibility. The widget is for Modern Zen's users (staff in the
   // app) — never for their clients: the public client portal (/portal/*) is
-  // an agency-branded surface where Hoppa support chat would be confusing,
+  // an agency-branded surface where Modern Zen support chat would be confusing,
   // and pre-login pages shouldn't carry it either. PostHog renders the
   // widget automatically when it's enabled in Support settings, so this
   // actively hides it everywhere except the authenticated app.

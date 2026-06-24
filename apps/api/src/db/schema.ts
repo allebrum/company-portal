@@ -45,7 +45,7 @@ export const ticketAuthorKindEnum = pgEnum('ticket_author_kind', TICKET_AUTHOR_K
 const ts = () => timestamp('created_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull();
 const updTs = () => timestamp('updated_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull();
 
-// Hoppa multi-tenancy — every tenant-owned business table carries this.
+// Modern Zen multi-tenancy — every tenant-owned business table carries this.
 // Lazy `() => tenants.id` so it can be used before `tenants` is declared in
 // source order. ON DELETE CASCADE: deleting a workspace wipes its data.
 //
@@ -79,7 +79,7 @@ export const users = pgTable('users', {
   emailIdx: uniqueIndex('users_email_lower_idx').on(sql`lower(${t.email})`),
 }));
 
-// ---- Tenants (workspaces) — Hoppa multi-tenancy ----
+// ---- Tenants (workspaces) — Modern Zen multi-tenancy ----
 // One row per workspace. Subscription truth lives in the marketing site;
 // `plan` / `seatLimit` / `status` are a cached mirror refreshed by the
 // subscription client (Phase 3). `billingExternalId` is the stable Stripe
@@ -130,7 +130,7 @@ export const tenantMembers = pgTable('tenant_members', {
 
 // ---- App settings (one row per tenant) ----
 export const appSettings = pgTable('app_settings', {
-  // Hoppa Phase 2: re-keyed from the global `id='singleton'` row to one row
+  // Modern Zen Phase 2: re-keyed from the global `id='singleton'` row to one row
   // per workspace. Migration 0017 drops `id` and makes tenant_id the PK.
   tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id, { onDelete: 'cascade' }),
   passwordLoginEnabled: boolean('password_login_enabled').notNull().default(true),
@@ -164,7 +164,7 @@ export const appSettings = pgTable('app_settings', {
 export const oauthTokens = pgTable('oauth_tokens', {
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   provider: text('provider').notNull(),
-  // Hoppa: the Google Drive connection is per-WORKSPACE — one shared Drive per
+  // Modern Zen: the Google Drive connection is per-WORKSPACE — one shared Drive per
   // tenant, connected once by an admin and used by every member. `tenant_id`
   // scopes the credential so each workspace resolves only its own Drive (see
   // services/drive.ts `getStoredToken`). Nullable because Gmail tokens are
@@ -225,7 +225,7 @@ export const groups = pgTable('groups', {
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
-  // Hoppa Phase 2: group names are unique PER WORKSPACE so every tenant can
+  // Modern Zen Phase 2: group names are unique PER WORKSPACE so every tenant can
   // have its own Owner/Admin/Bookkeeper/Member system groups.
   nameIdx: uniqueIndex('groups_name_lower_idx').on(t.tenantId, sql`lower(${t.name})`),
   tenantIdx: index('groups_tenant_idx').on(t.tenantId),
@@ -255,7 +255,7 @@ export const userPermissionOverrides = pgTable('user_permission_overrides', {
   effect: overrideEffectEnum('effect').notNull(),
   tenantId: tenantRefNN(),
 }, (t) => ({
-  // Hoppa Phase 2: PK widened to include tenant_id so a user can hold
+  // Modern Zen Phase 2: PK widened to include tenant_id so a user can hold
   // different overrides per workspace.
   pk: primaryKey({ columns: [t.userId, t.permissionKey, t.tenantId] }),
   tenantUserIdx: index('user_perm_overrides_tenant_user_idx').on(t.tenantId, t.userId),
@@ -590,14 +590,14 @@ export const payPeriods = pgTable('pay_periods', {
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
-  // Hoppa Phase 2: period date ranges are unique PER WORKSPACE.
+  // Modern Zen Phase 2: period date ranges are unique PER WORKSPACE.
   startEndUnique: uniqueIndex('pay_periods_start_end_unique').on(t.tenantId, t.startDate, t.endDate),
   tenantIdx: index('pay_periods_tenant_idx').on(t.tenantId),
 }));
 
 // ---- Pay config (one row per tenant) ----
 export const payConfig = pgTable('pay_config', {
-  // Hoppa Phase 2: re-keyed from `id='singleton'` to one row per workspace.
+  // Modern Zen Phase 2: re-keyed from `id='singleton'` to one row per workspace.
   tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id, { onDelete: 'cascade' }),
   cadence: cadenceEnum('cadence').notNull().default('by-date'),
   payDates: jsonb('pay_dates').notNull().default(sql`'[15, "last"]'::jsonb`),
@@ -674,7 +674,7 @@ export const activityLog = pgTable('activity_log', {
 
 // ---- Integrations (one row per kind PER TENANT) ----
 export const integrations = pgTable('integrations', {
-  // Hoppa Phase 2: PK widened from `kind` to (tenant_id, kind) so two
+  // Modern Zen Phase 2: PK widened from `kind` to (tenant_id, kind) so two
   // workspaces each connect their own Drive/Gmail/etc.
   tenantId: tenantRefNN(),
   kind: text('kind').notNull(),

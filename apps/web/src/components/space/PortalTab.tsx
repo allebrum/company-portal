@@ -29,7 +29,7 @@ function slugify(s: string): string {
 }
 
 function portalOriginFor(slug: string): string {
-  // API_URL is like "https://rc.allebrum.com/api"; the portal page lives
+  // API_URL is like "https://rc.Modern Zen.com/api"; the portal page lives
   // at the bare origin (same domain as the staff app, since both ship in
   // the same static export). Slug rides as a query param so the routes
   // stay statically exportable.
