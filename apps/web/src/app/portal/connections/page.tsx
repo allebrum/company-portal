@@ -21,6 +21,7 @@ import {
   Share2,
   Send,
   Loader2,
+  Unplug,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -30,6 +31,9 @@ import {
   useConnectZernio,
   useRunSocialPost,
   useRunComposioTool,
+  useDisconnectConnection,
+  useRefreshConnections,
+  type PortalConnection,
 } from '@/hooks/usePortal';
 import { PortalHeader } from '@/components/portal/PortalHeader';
 
@@ -69,6 +73,8 @@ function Inner() {
   const zernio = useConnectZernio();
   const busy = composio.isPending || zernio.isPending;
 
+  const disconnect = useDisconnectConnection();
+  const refresh = useRefreshConnections();
   const socialPost = useRunSocialPost();
   const gmailTool = useRunComposioTool();
   const [postText, setPostText] = useState('');
@@ -86,9 +92,9 @@ function Inner() {
     if (!isPrimary) router.replace(`/portal?slug=${encodeURIComponent(slug)}`);
   }, [meQuery.isLoading, me, isPrimary, slug, router]);
 
-  // provider:integration -> status, from the cache.
-  const status = new Map<string, string>();
-  for (const c of conns.data?.connections ?? []) status.set(`${c.provider}:${c.integration}`, c.status);
+  // provider:integration -> connection, from the cache.
+  const byKey = new Map<string, PortalConnection>();
+  for (const c of conns.data?.connections ?? []) byKey.set(`${c.provider}:${c.integration}`, c);
 
   const connectComposio = (toolkit: string) => {
     if (busy) return; // guard double-clicks while a redirect is being prepared
@@ -109,15 +115,15 @@ function Inner() {
   const startError = composio.isError || zernio.isError;
 
   const Row = ({ provider, it, onConnect }: { provider: 'composio' | 'zernio'; it: Item; onConnect: (k: string) => void }) => {
-    const s = status.get(`${provider}:${it.key}`);
-    const connected = !!s && s.toLowerCase() === 'active';
+    const conn = byKey.get(`${provider}:${it.key}`);
+    const connected = !!conn && conn.status.toLowerCase() === 'active';
     const Icon = it.icon;
     return (
       <li className="px-4 py-3 flex items-center gap-3">
         <Icon className="w-5 h-5 text-gray-400 shrink-0" />
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold text-gray-900">{it.label}</div>
-          {s && !connected && <div className="text-[11px] text-amber-600 capitalize">{s}</div>}
+          {conn && !connected && <div className="text-[11px] text-amber-600 capitalize">{conn.status}</div>}
         </div>
         <span
           className={`text-[11px] px-2 py-0.5 rounded-full ${
@@ -126,14 +132,26 @@ function Inner() {
         >
           {connected ? 'Connected' : 'Not connected'}
         </span>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => onConnect(it.key)}
-          className="text-sm font-semibold px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50"
-        >
-          {connected ? 'Reconnect' : 'Connect'}
-        </button>
+        {connected ? (
+          <button
+            type="button"
+            disabled={disconnect.isPending}
+            onClick={() => disconnect.mutate(conn!.id)}
+            className="text-sm font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5"
+          >
+            <Unplug className="w-3.5 h-3.5" />
+            Disconnect
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onConnect(it.key)}
+            className="text-sm font-semibold px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50"
+          >
+            {conn ? 'Reconnect' : 'Connect'}
+          </button>
+        )}
       </li>
     );
   };
@@ -146,10 +164,11 @@ function Inner() {
           <h1 className="text-2xl font-bold text-gray-900">Connections</h1>
           <button
             type="button"
-            onClick={() => conns.refetch()}
-            className="text-sm text-gray-500 hover:text-gray-800 flex items-center gap-1"
+            disabled={refresh.isPending}
+            onClick={() => refresh.mutate()}
+            className="text-sm text-gray-500 hover:text-gray-800 flex items-center gap-1 disabled:opacity-50"
           >
-            <RefreshCw className={`w-4 h-4 ${conns.isFetching ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-4 h-4 ${refresh.isPending || conns.isFetching ? 'animate-spin' : ''}`} />
             Refresh
           </button>
         </div>

@@ -40,6 +40,16 @@ export async function upsertConnection(input: UpsertConnectionInput): Promise<vo
     });
 }
 
+/** A single connection, scoped to its owning client (null if not theirs). */
+export async function getConnection(clientId: string, id: string): Promise<Connection | undefined> {
+  const [row] = await db
+    .select()
+    .from(connections)
+    .where(and(eq(connections.id, id), eq(connections.clientId, clientId)))
+    .limit(1);
+  return row;
+}
+
 export async function listConnections(clientId: string): Promise<Connection[]> {
   return db
     .select()

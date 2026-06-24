@@ -297,6 +297,24 @@ export function useConnectComposio() {
   });
 }
 
+/** Disconnect a single connection (revokes at the provider + removes locally). */
+export function useDisconnectConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del<{ ok: true }>(`/portal/connections/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['portal', 'connections'] }),
+  });
+}
+
+/** Re-read both providers and reconcile statuses (surfaces revocation). */
+export function useRefreshConnections() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<{ ok: true }>('/portal/connections/refresh'),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['portal', 'connections'] }),
+  });
+}
+
 /** Start a Zernio (social channel) connect; returns the URL to redirect to. */
 export function useConnectZernio() {
   return useMutation({

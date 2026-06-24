@@ -23,7 +23,10 @@ import { findContactByEmail, resendContactInvite } from '../services/clientConta
 import { consumeToken, type TokenSubject } from '../auth/tokens.js';
 import { requireClientPortalAuth } from '../middleware/requireClientPortalAuth.js';
 import { requirePrimaryContact } from '../middleware/requirePrimaryContact.js';
-import { listConnections } from '../connect/connections.js';
+import { listConnections, getConnection, deleteConnection } from '../connect/connections.js';
+import { syncClientConnections } from '../connect/sync.js';
+import { disconnect as composioDisconnect } from '../connect/composio.js';
+import { disconnectAccount as zernioDisconnect } from '../connect/zernio.js';
 import { runSocialPost, runComposioTool } from '../connect/workflows.js';
 import { signPortalSession } from '../auth/portalSession.js';
 import { getSettings } from '../services/settings.js';
@@ -267,6 +270,54 @@ portalRouter.get('/connections', requireClientPortalAuth, requirePrimaryContact,
       })),
       runs,
     });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Disconnect a single connection (primary only): revoke at the provider, then
+// remove the local row. We delete locally even if the provider call fails, so a
+// client is never stuck with a row they can't remove.
+portalRouter.delete('/connections/:id', requireClientPortalAuth, requirePrimaryContact, async (req, res, next) => {
+  try {
+    const sess = req.session.clientPortalSession!;
+    const conn = await getConnection(sess.clientId, req.params.id!);
+    if (!conn) {
+      res.status(404).json({ error: 'connection_not_found' });
+      return;
+    }
+    try {
+      if (conn.provider === 'composio') await composioDisconnect(conn.externalId);
+      else await zernioDisconnect(conn.externalId);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[connect] provider disconnect failed', conn.provider, (e as Error).message);
+    }
+    await deleteConnection(sess.clientId, conn.provider, conn.externalId);
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Refresh: re-read both providers and reconcile our cache (surfaces revocation).
+portalRouter.post('/connections/refresh', requireClientPortalAuth, requirePrimaryContact, async (req, res, next) => {
+  try {
+    const sess = req.session.clientPortalSession!;
+    const [client] = await db
+      .select({ tenantId: clients.tenantId, composioUserId: clients.composioUserId, zernioProfileId: clients.zernioProfileId })
+      .from(clients)
+      .where(eq(clients.id, sess.clientId))
+      .limit(1);
+    if (client) {
+      await syncClientConnections({
+        clientId: sess.clientId,
+        tenantId: client.tenantId,
+        composioUserId: client.composioUserId ?? sess.clientId,
+        zernioProfileId: client.zernioProfileId,
+      });
+    }
+    res.json({ ok: true });
   } catch (e) {
     next(e);
   }

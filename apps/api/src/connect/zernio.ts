@@ -86,6 +86,11 @@ export async function createPost(input: CreatePostInput): Promise<{ _id: string 
   return post;
 }
 
+/** Disconnect + remove a connected social account. */
+export async function disconnectAccount(accountId: string): Promise<void> {
+  await zfetch(`/accounts/${encodeURIComponent(accountId)}`, { method: 'DELETE' });
+}
+
 /** Account/post analytics. Param shape is refined in the workflows milestone. */
 export async function getAnalytics(query: Record<string, string>): Promise<unknown> {
   const qs = new URLSearchParams(query);
