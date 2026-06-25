@@ -1,13 +1,21 @@
 import { API_URL } from './env';
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string, public body?: unknown) {
+  constructor(
+    public status: number,
+    message: string,
+    public body?: unknown,
+    public method?: string,
+    public path?: string,
+    public url?: string,
+  ) {
     super(message);
   }
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${API_URL}/api${path}`, {
+  const url = `${API_URL}/api${path}`;
+  const res = await fetch(url, {
     method,
     credentials: 'include',
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
@@ -16,7 +24,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const contentType = res.headers.get('content-type') ?? '';
   const payload = contentType.includes('application/json') ? await res.json() : await res.text();
   if (!res.ok) {
-    throw new ApiError(res.status, typeof payload === 'string' ? payload : (payload?.error ?? 'request_failed'), payload);
+    const detail = typeof payload === 'string' ? payload : (payload?.error ?? 'request_failed');
+    throw new ApiError(res.status, `[${method} ${path}] ${detail}`, payload, method, path, url);
   }
   return payload as T;
 }

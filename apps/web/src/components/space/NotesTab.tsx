@@ -249,44 +249,70 @@ export function NotesTab({ scope }: { scope: Scope }) {
       return;
     }
     setSlash(null);
-    // Strip the trailing "/{query}" from the target's content so the visible
-    // text doesn't show the slash residue when the user picks a command.
-    const trimmed = (target.content ?? '').replace(/(^|\s)\/[^\s/]*$/, '$1');
-    convertBlock(target.id, { content: trimmed });
+
+    // Slash commands should apply to the *current line*, not the whole
+    // multiline block. If the slash token is on a later line, split that
+    // line into its own block and run the command on that new block.
+    let activeBlockId = target.id;
+    const raw = target.content ?? '';
+    const slashToken = /(^|[\s])\/[^\s/]*$/.exec(raw);
+    if (slashToken) {
+      const slashStart = slashToken.index + slashToken[1]!.length;
+      const lineStart = raw.lastIndexOf('\n', Math.max(0, slashStart - 1)) + 1;
+      const beforeRaw = raw.slice(0, lineStart);
+      const lineRaw = raw.slice(lineStart);
+      const lineContent = lineRaw
+        .replace(/(^|[\s])\/[^\s/]*$/, '$1')
+        .replace(/\s+$/g, '');
+
+      if (beforeRaw.length > 0) {
+        const before = beforeRaw.endsWith('\n') ? beforeRaw.slice(0, -1) : beforeRaw;
+        convertBlock(target.id, { content: before });
+        const split: SpaceBlock = { id: blockId(), type: 'text', content: lineContent };
+        dispatch({ type: 'insert', after: target.id, block: split });
+        activeBlockId = split.id;
+      } else {
+        convertBlock(target.id, { content: lineContent });
+      }
+    } else {
+      // Fallback for unexpected states: just remove slash residue in-place.
+      const trimmed = raw.replace(/(^|\s)\/[^\s/]*$/, '$1');
+      convertBlock(target.id, { content: trimmed });
+    }
 
     if (cmd === 'h1' || cmd === 'h2' || cmd === 'h3' || cmd === 'text' ||
         cmd === 'bullet' || cmd === 'numbered' || cmd === 'checkbox' ||
         cmd === 'quote' || cmd === 'callout') {
-      convertBlock(target.id, { type: cmd });
-      requestAnimationFrame(() => focusBlock(target.id));
+      convertBlock(activeBlockId, { type: cmd });
+      requestAnimationFrame(() => focusBlock(activeBlockId));
       return;
     }
     if (cmd === 'divider') {
-      convertBlock(target.id, { type: 'divider', content: '' });
+      convertBlock(activeBlockId, { type: 'divider', content: '' });
       // Always append a fresh text block after a divider so the canvas
       // keeps growing.
-      insertAfter(target.id);
+      insertAfter(activeBlockId);
       return;
     }
     if (cmd === 'todo') {
       // Convert the current block into a todo placeholder, then create the
       // real to-do async and patch in the resulting id.
-      convertBlock(target.id, { type: 'todo', content: 'New to-do' });
+      convertBlock(activeBlockId, { type: 'todo', content: 'New to-do' });
       if (!data.clientId) return;
       try {
-        const created = await createTodoForBlock(target.id);
-        if (created) convertBlock(target.id, { todoId: created.id, content: created.title });
+        const created = await createTodoForBlock(activeBlockId);
+        if (created) convertBlock(activeBlockId, { todoId: created.id, content: created.title });
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Could not create to-do');
       }
       return;
     }
     if (cmd === 'goal') {
-      convertBlock(target.id, { type: 'goal', content: 'New goal' });
+      convertBlock(activeBlockId, { type: 'goal', content: 'New goal' });
       if (!data.clientId) return;
       try {
-        const created = await createGoalForBlock(target.id);
-        if (created) convertBlock(target.id, { goalId: created.id, content: created.title });
+        const created = await createGoalForBlock(activeBlockId);
+        if (created) convertBlock(activeBlockId, { goalId: created.id, content: created.title });
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Could not create goal');
       }
@@ -297,7 +323,7 @@ export function NotesTab({ scope }: { scope: Scope }) {
         ?? (data.clientId
           ? (projectsForClient[0]?.id ?? null)
           : null);
-      convertBlock(target.id, {
+      convertBlock(activeBlockId, {
         type: 'timer',
         content: data.project?.name ?? data.client?.name ?? 'Working',
         projectId: pid ?? null,
@@ -305,19 +331,19 @@ export function NotesTab({ scope }: { scope: Scope }) {
       return;
     }
     if (cmd === 'link') {
-      setLinkOpen({ blockId: target.id });
+      setLinkOpen({ blockId: activeBlockId });
       return;
     }
     if (cmd === 'mention') {
-      setMentionOpen({ blockId: target.id });
+      setMentionOpen({ blockId: activeBlockId });
       return;
     }
     if (cmd === 'embed') {
-      setEmbedOpen({ blockId: target.id });
+      setEmbedOpen({ blockId: activeBlockId });
       return;
     }
     if (cmd === 'upload') {
-      openInsertAssetModal(target.id, 'computer');
+      openInsertAssetModal(activeBlockId, 'computer');
       return;
     }
   };
@@ -604,40 +630,91 @@ export function NotesTab({ scope }: { scope: Scope }) {
     return f.title.toLowerCase().includes(q) || f.url.toLowerCase().includes(q);
   });
 
+  const headings = useMemo(
+    () => blocks
+      .filter((b) => b.type === 'h1' || b.type === 'h2' || b.type === 'h3')
+      .map((b) => ({
+        id: b.id,
+        type: b.type,
+        label: (b.content ?? '').trim(),
+      }))
+      .filter((h) => h.label.length > 0),
+    [blocks],
+  );
+
+  const focusHeading = (id: string) => {
+    const el = document.querySelector<HTMLElement>(`[data-block-id="${id}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    requestAnimationFrame(() => focusBlock(id));
+  };
+
   return (
-    <div className="max-w-3xl mx-auto">
-      {/* S2.6 — autosave status. Fixed-height strip so state flips don't shift the canvas. */}
-      <div className="h-5 flex items-center justify-end" aria-live="polite">
-        <SaveStatus state={saveState} savedKey={latestSave?.submittedAt ?? 0} />
+    <div className="mx-auto max-w-6xl lg:grid lg:grid-cols-[220px,minmax(0,1fr)] lg:gap-8">
+      <aside className="hidden lg:block">
+        <div className="sticky top-24 rounded-xl border border-gray-200 bg-white/90 backdrop-blur px-3 py-3">
+          <div className="text-[11px] uppercase tracking-wider font-semibold text-gray-500 mb-2">Contents</div>
+          {headings.length === 0 ? (
+            <div className="text-xs text-gray-400">Add headings to build a table of contents.</div>
+          ) : (
+            <nav className="space-y-0.5" aria-label="Notes table of contents">
+              {headings.map((h) => {
+                const indent = h.type === 'h1' ? '' : h.type === 'h2' ? 'pl-3' : 'pl-6';
+                const size = h.type === 'h1' ? 'text-[13px] font-semibold' : h.type === 'h2' ? 'text-xs font-medium' : 'text-xs';
+                return (
+                  <button
+                    key={h.id}
+                    type="button"
+                    onClick={() => focusHeading(h.id)}
+                    className={`block w-full truncate rounded-md px-2 py-1 text-left text-gray-600 hover:bg-gray-100 hover:text-gray-900 ${indent} ${size}`}
+                    title={h.label}
+                  >
+                    {h.label}
+                  </button>
+                );
+              })}
+            </nav>
+          )}
+        </div>
+      </aside>
+
+      <div className="max-w-3xl w-full">
+        {/* S2.6 — autosave status. Fixed-height strip so state flips don't shift the canvas. */}
+        <div className="h-5 flex items-center justify-end" aria-live="polite">
+          <SaveStatus state={saveState} savedKey={latestSave?.submittedAt ?? 0} />
+        </div>
+        <div>
+          {blocks.map((b, i) => (
+            <BlockRow
+              key={b.id}
+              block={b}
+              index={i}
+              blocks={blocks}
+              onRemove={() => removeBlock(b.id)}
+              onConvert={(patch) => convertBlock(b.id, patch)}
+              onChangeContent={(c) => setContent(b.id, c)}
+              onInsertSibling={(typeOverride) =>
+                insertAfter(b.id, typeOverride ? { type: typeOverride } : undefined)
+              }
+              onOpenSlash={(next) => {
+                if (!next) {
+                  setSlash((prev) => (prev?.blockId === b.id ? null : prev));
+                  return;
+                }
+                setSlash({ blockId: b.id, rect: next.rect, query: next.query });
+              }}
+            />
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => insertAfter(blocks[blocks.length - 1]?.id ?? null)}
+          className="w-full text-left text-sm text-gray-400 hover:text-gray-600 py-3 px-2 rounded-lg hover:bg-gray-50"
+          contentEditable={false}
+        >
+          Click to write, or press <kbd className="font-mono text-[11px] bg-gray-100 px-1 rounded">/</kbd> for commands…
+        </button>
       </div>
-      {blocks.map((b, i) => (
-        <BlockRow
-          key={b.id}
-          block={b}
-          index={i}
-          blocks={blocks}
-          onRemove={() => removeBlock(b.id)}
-          onConvert={(patch) => convertBlock(b.id, patch)}
-          onChangeContent={(c) => setContent(b.id, c)}
-          onInsertSibling={(typeOverride) =>
-            insertAfter(b.id, typeOverride ? { type: typeOverride } : undefined)
-          }
-          onOpenSlash={(next) => {
-            if (!next) {
-              setSlash((prev) => (prev?.blockId === b.id ? null : prev));
-              return;
-            }
-            setSlash({ blockId: b.id, rect: next.rect, query: next.query });
-          }}
-        />
-      ))}
-      <button
-        type="button"
-        onClick={() => insertAfter(blocks[blocks.length - 1]?.id ?? null)}
-        className="w-full text-left text-sm text-gray-400 hover:text-gray-600 py-3 px-2 rounded-lg hover:bg-gray-50"
-      >
-        Click to write, or press <kbd className="font-mono text-[11px] bg-gray-100 px-1 rounded">/</kbd> for commands…
-      </button>
 
       <input
         ref={uploadInputRef}
@@ -946,12 +1023,13 @@ function BlockRow({
   onOpenSlash: (next: { rect: { x: number; y: number }; query: string } | null) => void;
 }) {
   return (
-    <div className="group relative pl-8 -ml-8 py-0.5">
+    <div className="group relative pl-12 -ml-12 py-0.5">
       <button
         type="button"
         onClick={onRemove}
         title="Remove block"
-        className="absolute left-1 top-1.5 opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-600 transition-opacity"
+        className="absolute left-2 top-1.5 opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-600 transition-opacity"
+        contentEditable={false}
         // Block remove without focusing the gutter so the block keeps focus on rapid edits.
         onMouseDown={(e) => e.preventDefault()}
       >
@@ -984,7 +1062,11 @@ function BlockBody(props: {
   const { block } = props;
   switch (block.type) {
     case 'divider':
-      return <hr className="my-3 border-gray-200" />;
+      return (
+        <div contentEditable={false}>
+          <hr className="my-3 border-gray-200" />
+        </div>
+      );
     case 'todo':
       return <TodoBlockCard block={block} onConvert={props.onConvert} />;
     case 'goal':
@@ -1035,7 +1117,7 @@ function EditableBlock({
       el.innerText = block.content ?? '';
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [block.id, block.type]);
+  }, [block.id, block.type, block.content]);
 
   const onInput = () => {
     const el = ref.current;
@@ -1059,6 +1141,11 @@ function EditableBlock({
     const text = el?.innerText ?? '';
 
     if (e.key === 'Enter' && !e.shiftKey) {
+      if (block.type === 'text' || block.type === 'quote' || block.type === 'callout') {
+        // Let native contentEditable handle line breaks so users can
+        // naturally edit/select across multiple lines in one block.
+        return;
+      }
       e.preventDefault();
       // Demote empty list/heading to text instead of growing the list.
       if (text === '' && (block.type === 'bullet' || block.type === 'numbered' || block.type === 'checkbox')) {
@@ -1088,7 +1175,7 @@ function EditableBlock({
 
   // Prefix prefixing for ordered/unordered/checkbox lists.
   const prefix = (() => {
-    if (block.type === 'bullet') return <span className="inline-block w-5 -ml-5 align-top text-gray-400 select-none">•</span>;
+    if (block.type === 'bullet') return <span className="inline-block w-6 mr-2 align-top text-gray-400 select-none text-center">•</span>;
     if (block.type === 'numbered') {
       // Count consecutive numbered blocks ending at this index.
       let n = 1;
@@ -1096,7 +1183,7 @@ function EditableBlock({
         if (blocks[i]!.type === 'numbered') n++;
         else break;
       }
-      return <span className="inline-block w-7 -ml-7 align-top text-gray-400 tabular-nums select-none">{n}.</span>;
+      return <span className="inline-block w-8 mr-2 align-top text-gray-400 tabular-nums select-none text-right">{n}.</span>;
     }
     if (block.type === 'checkbox') {
       return (
@@ -1106,7 +1193,7 @@ function EditableBlock({
             e.preventDefault();
             onConvert({ checked: !block.checked });
           }}
-          className="inline-flex items-center justify-center w-4 h-4 -ml-6 mr-1 mt-1 rounded border border-gray-300 align-top"
+          className="inline-flex items-center justify-center w-4 h-4 mr-3 mt-1 rounded border border-gray-300 align-top shrink-0"
           aria-label={block.checked ? 'Uncheck' : 'Check'}
           onMouseDown={(e) => e.preventDefault()}
         >
@@ -1389,7 +1476,10 @@ function extractDriveFileId(url: string): string | null {
 
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={`my-1.5 flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2.5 ${className ?? 'bg-white'}`}>
+    <div
+      contentEditable={false}
+      className={`my-1.5 flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2.5 ${className ?? 'bg-white'}`}
+    >
       {children}
     </div>
   );

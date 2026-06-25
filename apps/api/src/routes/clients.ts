@@ -6,7 +6,7 @@ import {
   UpdateContactSchema,
 } from '@allebrum/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
-import { requirePermission } from '../auth/permissions.js';
+import { requirePermission, userCan } from '../auth/permissions.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import { listClients, createClient, updateClient } from '../services/clients.js';
 import {
@@ -41,10 +41,17 @@ clientsRouter.post('/', validate(CreateClientSchema), async (req, res, next) => 
   }
 });
 
-clientsRouter.patch('/:id', requirePermission('clients.manage'), validate(UpdateClientSchema), async (req, res, next) => {
+clientsRouter.patch('/:id', validate(UpdateClientSchema), async (req, res, next) => {
   try {
     const me = req.session.user!;
-    const row = await updateClient(req.params.id!, getValidated<typeof UpdateClientSchema._type>(req), me.userId);
+    const patch = getValidated<typeof UpdateClientSchema._type>(req);
+    const keys = Object.keys(patch);
+    const notesOnlyPatch = keys.every((k) => k === 'spaceBlocks' || k === 'spaceFiles');
+    if (!notesOnlyPatch && !(await userCan(req, 'clients.manage'))) {
+      res.status(403).json({ error: 'forbidden' });
+      return;
+    }
+    const row = await updateClient(req.params.id!, patch, me.userId);
     res.json(row);
   } catch (e) {
     next(e);

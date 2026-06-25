@@ -97,10 +97,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
 }
 
 function ShellWithBootstrap({ children }: { children: ReactNode }) {
+  const router = useRouter();
   const { isLoading, isError, error } = useBootstrap();
   const { data: cfg } = useAuthConfig();
   const pathname = usePathname();
   const [navOpen, setNavOpen] = useState(false);
+
+  useEffect(() => {
+    if (isError && error instanceof ApiError && error.status === 401) {
+      router.replace('/login');
+    }
+  }, [isError, error, router]);
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {

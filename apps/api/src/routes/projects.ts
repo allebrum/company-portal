@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { CreateProjectSchema, UpdateProjectSchema } from '@allebrum/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
-import { requirePermission } from '../auth/permissions.js';
+import { userCan } from '../auth/permissions.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import { listProjects, createProject, updateProject } from '../services/projects.js';
 
@@ -30,10 +30,17 @@ projectsRouter.post('/', validate(CreateProjectSchema), async (req, res, next) =
   }
 });
 
-projectsRouter.patch('/:id', requirePermission('projects.manage'), validate(UpdateProjectSchema), async (req, res, next) => {
+projectsRouter.patch('/:id', validate(UpdateProjectSchema), async (req, res, next) => {
   try {
     const me = req.session.user!;
-    const row = await updateProject(req.params.id!, getValidated<typeof UpdateProjectSchema._type>(req), me.userId);
+    const patch = getValidated<typeof UpdateProjectSchema._type>(req);
+    const keys = Object.keys(patch);
+    const notesOnlyPatch = keys.every((k) => k === 'spaceBlocks' || k === 'spaceFiles');
+    if (!notesOnlyPatch && !(await userCan(req, 'projects.manage'))) {
+      res.status(403).json({ error: 'forbidden' });
+      return;
+    }
+    const row = await updateProject(req.params.id!, patch, me.userId);
     res.json(row);
   } catch (e) {
     next(e);
