@@ -6,6 +6,7 @@ import {
   X, Layers, Target, CheckSquare, FileText, Play, Square,
   Upload, ExternalLink, Trash2, Link2, Plus, FolderOpen, Globe, Pencil, RefreshCw,
   MessageSquare, QrCode as QrCodeIcon,
+  FormInput,
 } from 'lucide-react';
 import { useSpace } from '@/contexts/SpaceContext';
 import { useSpaceData, useUpdateSpaceFiles } from '@/hooks/useSpace';
@@ -23,7 +24,9 @@ import {
 } from '@/hooks/useDrive';
 import { useTickets } from '@/hooks/useTickets';
 import { useQrCodes } from '@/hooks/useQr';
+import { useForms } from '@/hooks/useForms';
 import { QrCodeManager } from '@/components/tools/QrCodeManager';
+import { FormBuilderManager } from '@/components/tools/FormBuilderManager';
 import { useIntegrationGate } from '@/components/shell/IntegrationGate';
 import { useUploadManager } from '@/contexts/UploadManagerContext';
 import { useMyTimer } from '@/hooks/useTimer';
@@ -71,9 +74,9 @@ function useSpaceModals(): SpaceModals {
 // Narrowed scope (the overlay never opens for 'all').
 type OpenScope = Exclude<Scope, { kind: 'all' }>;
 
-type TabKey = 'overview' | 'notes' | 'goals' | 'todos' | 'qr' | 'files' | 'portal' | 'tickets';
+type TabKey = 'overview' | 'notes' | 'goals' | 'todos' | 'qr' | 'forms' | 'files' | 'portal' | 'tickets';
 const SPACE_TAB_PARAM = 'spaceTab';
-const TAB_KEYS: ReadonlyArray<TabKey> = ['overview', 'notes', 'goals', 'todos', 'qr', 'files', 'portal', 'tickets'];
+const TAB_KEYS: ReadonlyArray<TabKey> = ['overview', 'notes', 'goals', 'todos', 'qr', 'forms', 'files', 'portal', 'tickets'];
 
 function readTabFromUrl(): TabKey | null {
   const raw = new URL(window.location.href).searchParams.get(SPACE_TAB_PARAM);
@@ -207,6 +210,9 @@ export function ClientSpaceOverlay() {
             )}
             {tab === 'qr' && (
               <QrCodesTab scope={narrowed} clientId={data.clientId} projectId={data.projectId} />
+            )}
+            {tab === 'forms' && (
+              <FormsTab scope={narrowed} clientId={data.clientId} projectId={data.projectId} />
             )}
             {tab === 'files' && (
               <FilesTab scope={narrowed} data={data} />
@@ -466,6 +472,7 @@ function SpaceTabs({
   const scopedGoals = goals.filter((g) => goalInScope(g, data));
   const scopedOpenTodos = todos.filter((t) => todoInScope(t, data) && t.status === 'open');
   const { data: scopedQrs = [] } = useQrCodes({ clientId: data.clientId, projectId: data.projectId });
+  const { data: scopedForms = [] } = useForms({ clientId: data.clientId, projectId: data.projectId });
   const filesCount = data.spaceFiles.length;
   const showOverviewTab = !!data.client || !!data.project;
   // Portal tab only at client scope, and only for staff with the F23
@@ -506,6 +513,7 @@ function SpaceTabs({
       <Tab k="goals" label="Goals" icon={Target} count={scopedGoals.length} />
       <Tab k="todos" label="To-dos" icon={CheckSquare} count={scopedOpenTodos.length} />
       <Tab k="qr" label="QR codes" icon={QrCodeIcon} count={scopedQrs.length} />
+      <Tab k="forms" label="Forms" icon={FormInput} count={scopedForms.length} />
       <Tab k="files" label="Files" icon={Upload} count={filesCount} />
       {showTicketsTab && <Tab k="tickets" label="Tickets" icon={MessageSquare} count={openTicketCount} />}
       {showPortalTab && <Tab k="portal" label="Portal" icon={Globe} />}
@@ -536,6 +544,31 @@ function QrCodesTab({
       allowProjectLinkPicker={scope.kind === 'client'}
       createHeading={`New QR code for this ${scope.kind === 'project' ? 'project' : 'client'}`}
       emptyHint="No QR codes linked to this scope yet."
+      onOpenClient={(id) => openSpace({ kind: 'client', id })}
+      onOpenProject={(id) => openSpace({ kind: 'project', id })}
+    />
+  );
+}
+
+function FormsTab({
+  scope,
+  clientId,
+  projectId,
+}: {
+  scope: { kind: 'client' | 'project'; id: string };
+  clientId: string;
+  projectId: string | null;
+}) {
+  const { openSpace } = useSpace();
+
+  return (
+    <FormBuilderManager
+      clientId={clientId}
+      projectId={projectId}
+      defaultVisibility="workspace"
+      allowProjectLinkPicker={scope.kind === 'client'}
+      createHeading={`New form for this ${scope.kind === 'project' ? 'project' : 'client'}`}
+      emptyHint="No forms linked to this scope yet."
       onOpenClient={(id) => openSpace({ kind: 'client', id })}
       onOpenProject={(id) => openSpace({ kind: 'project', id })}
     />

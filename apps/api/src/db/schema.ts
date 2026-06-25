@@ -796,6 +796,64 @@ export const websiteMembers = pgTable('website_members', {
   tenantUserIdx: index('website_members_tenant_user_idx').on(t.tenantId, t.userId),
 }));
 
+// ---- F31 Forms builder + embed (Tools + Spaces) ----
+// Workspace staff can build hosted forms and embed them on external sites.
+// Public endpoints resolve forms by signed token, then capture views,
+// interactions, and submissions into tenant-owned rows.
+export const forms = pgTable('forms', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRefNN(),
+  ownerUserId: uuid('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  description: text('description').notNull().default(''),
+  clientId: uuid('client_id').references(() => clients.id, { onDelete: 'set null' }),
+  projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
+  visibility: text('visibility').notNull().default('workspace'),
+  status: text('status').notNull().default('active'),
+  definition: jsonb('definition').notNull().default(sql`'{}'::jsonb`),
+  createdAt: ts(),
+  updatedAt: updTs(),
+  archivedAt: timestamp('archived_at', { withTimezone: true, mode: 'string' }),
+}, (t) => ({
+  ownerIdx: index('forms_owner_idx').on(t.ownerUserId),
+  visibilityIdx: index('forms_visibility_idx').on(t.visibility),
+  statusIdx: index('forms_status_idx').on(t.status),
+  clientIdx: index('forms_client_idx').on(t.clientId),
+  projectIdx: index('forms_project_idx').on(t.projectId),
+}));
+
+export const formEvents = pgTable('form_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRefNN(),
+  formId: uuid('form_id').notNull().references(() => forms.id, { onDelete: 'cascade' }),
+  sessionId: text('session_id'),
+  eventType: text('event_type').notNull(),
+  path: text('path'),
+  ip: text('ip'),
+  userAgent: text('user_agent'),
+  referer: text('referer'),
+  occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (t) => ({
+  formTimeIdx: index('form_events_form_time_idx').on(t.formId, t.occurredAt),
+  formTypeIdx: index('form_events_form_type_idx').on(t.formId, t.eventType),
+  formSessionIdx: index('form_events_form_session_idx').on(t.formId, t.sessionId),
+}));
+
+export const formSubmissions = pgTable('form_submissions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRefNN(),
+  formId: uuid('form_id').notNull().references(() => forms.id, { onDelete: 'cascade' }),
+  sessionId: text('session_id'),
+  answers: jsonb('answers').notNull().default(sql`'{}'::jsonb`),
+  ip: text('ip'),
+  userAgent: text('user_agent'),
+  referer: text('referer'),
+  submittedAt: timestamp('submitted_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (t) => ({
+  formTimeIdx: index('form_submissions_form_time_idx').on(t.formId, t.submittedAt),
+  formSessionIdx: index('form_submissions_form_session_idx').on(t.formId, t.sessionId),
+}));
+
 // ---- Upload QR sessions (public mobile upload handoff) ----
 // A staff user mints a one-time-ish tokenized upload URL that can be opened
 // on a phone (no auth required). The token maps to a concrete target in DB
@@ -875,5 +933,8 @@ export type QrCode = typeof qrCodes.$inferSelect;
 export type QrScan = typeof qrScans.$inferSelect;
 export type Website = typeof websites.$inferSelect;
 export type WebsiteMember = typeof websiteMembers.$inferSelect;
+export type Form = typeof forms.$inferSelect;
+export type FormEvent = typeof formEvents.$inferSelect;
+export type FormSubmission = typeof formSubmissions.$inferSelect;
 export type UploadQrSession = typeof uploadQrSessions.$inferSelect;
 export type UploadQrSessionFile = typeof uploadQrSessionFiles.$inferSelect;

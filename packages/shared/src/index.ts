@@ -17,5 +17,6 @@ export * from './schemas/integration';
 export * from './schemas/space';
 export * from './schemas/portal';
 export * from './schemas/qr';
+export * from './schemas/forms';
 export * from './schemas/websites';
 export * from './schemas/ticket';

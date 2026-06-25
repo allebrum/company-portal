@@ -70,6 +70,9 @@ and serves the whole product (API + UI) on **one origin** at
   for Tools → Website Memory Bank entries. Without it, website tracking still
   works, but credential save/reveal requests return
   `websites_credentials_secret_missing`.
+- **Form embeds can use a dedicated signing secret:** set
+  `FORMS_EMBED_SECRET` to sign non-expiring embed tokens for Tools → Form
+  Builder snippets. When unset, token signing falls back to `SESSION_SECRET`.
 - **SaaS / multi-tenant mode is opt-in:** setting `MARKETING_API_URL` +
   `MARKETING_API_KEY` + `PROVISIONING_SECRET` turns on subscription gating and
   the provisioning webhook (see `HOPPA_MARKETING_CONTRACT.md`). Leave them unset

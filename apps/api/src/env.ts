@@ -60,6 +60,15 @@ const EnvSchema = z.object({
   // password fields are encrypted at rest with AES-256-GCM. When unset, the
   // feature still works but credential save/reveal returns a 400.
   WEBSITES_CREDENTIALS_SECRET: z.string().min(16).optional(),
+  // Forms builder embed token HMAC secret. Optional; falls back to
+  // SESSION_SECRET when unset.
+  FORMS_EMBED_SECRET: z.string().min(16).optional(),
+  // Optional CAPTCHA verification for public embedded form submissions.
+  // When set, forms can require hCaptcha or reCAPTCHA.
+  HCAPTCHA_SITE_KEY: z.string().optional(),
+  HCAPTCHA_SECRET: z.string().optional(),
+  RECAPTCHA_SITE_KEY: z.string().optional(),
+  RECAPTCHA_SECRET: z.string().optional(),
   // Instance-level: is email+password login offered AT ALL on this deployment?
   // Default true; a pure-SSO self-host sets PASSWORD_LOGIN_ENABLED=false to hide
   // it entirely. This is the shared-login-page gate — per-WORKSPACE password

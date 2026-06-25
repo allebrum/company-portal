@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowRight, Globe, QrCode } from 'lucide-react';
+import { ArrowRight, FormInput, Globe, QrCode } from 'lucide-react';
 
 /**
  * F24 — Tools landing page. Cards-grid index of available utilities.
@@ -31,6 +31,13 @@ const TOOLS: Tool[] = [
     description: 'Track website vendors, costs, assignees, and encrypted credentials.',
     Icon: Globe,
     color: '#0284c7',
+  },
+  {
+    href: '/tools/forms',
+    label: 'Form Builder',
+    description: 'Design embeddable forms, track views/interactions, and export submissions.',
+    Icon: FormInput,
+    color: '#b45309',
   },
 ];
 

@@ -24,9 +24,19 @@ app.use(
   }),
 );
 app.use(
-  cors({
-    origin: env.WEB_ORIGIN,
-    credentials: true,
+  cors((req, cb) => {
+    const isPublicForms = req.path.startsWith('/api/f/');
+    if (isPublicForms) {
+      cb(null, {
+        origin: true,
+        credentials: false,
+      });
+      return;
+    }
+    cb(null, {
+      origin: env.WEB_ORIGIN,
+      credentials: true,
+    });
   }),
 );
 app.use(compression());
