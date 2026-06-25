@@ -14,10 +14,18 @@ import type {
 
 const QR_KEY = ['qrCodes'] as const;
 
-export function useQrCodes() {
+export function useQrCodes(filters?: { clientId?: string | null; projectId?: string | null }) {
+  const clientId = filters?.clientId ?? null;
+  const projectId = filters?.projectId ?? null;
   return useQuery({
-    queryKey: QR_KEY,
-    queryFn: () => api.get<QrCodeRow[]>('/qr'),
+    queryKey: [...QR_KEY, clientId ?? '', projectId ?? ''] as const,
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (clientId) params.set('clientId', clientId);
+      if (projectId) params.set('projectId', projectId);
+      const qs = params.toString();
+      return api.get<QrCodeRow[]>(`/qr${qs ? `?${qs}` : ''}`);
+    },
   });
 }
 

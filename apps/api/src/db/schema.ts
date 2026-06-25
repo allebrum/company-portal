@@ -712,6 +712,9 @@ export const qrCodes = pgTable('qr_codes', {
   ownerUserId: uuid('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   label: text('label').notNull().default(''),
   targetUrl: text('target_url').notNull(),
+  // Optional scope link so QRs can be organized at client/project level.
+  clientId: uuid('client_id').references(() => clients.id, { onDelete: 'set null' }),
+  projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
   shortCode: text('short_code').notNull().unique(),
   // 'private' (default) | 'workspace'. CHECK constraint added in the migration.
   visibility: text('visibility').notNull().default('private'),
@@ -729,6 +732,8 @@ export const qrCodes = pgTable('qr_codes', {
 }, (t) => ({
   ownerIdx: index('qr_codes_owner_idx').on(t.ownerUserId),
   visibilityIdx: index('qr_codes_visibility_idx').on(t.visibility),
+  clientIdx: index('qr_codes_client_idx').on(t.clientId),
+  projectIdx: index('qr_codes_project_idx').on(t.projectId),
 }));
 
 export const qrScans = pgTable('qr_scans', {

@@ -21,6 +21,8 @@ const colorHex = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Hex color #RRGGBB');
 export const CreateQrSchema = z.object({
   label: z.string().max(80).optional().default(''),
   targetUrl: z.string().url().max(2000),
+  clientId: z.string().uuid().nullable().optional(),
+  projectId: z.string().uuid().nullable().optional(),
   visibility: z.enum(QR_VISIBILITIES).optional().default('private'),
   foregroundColor: colorHex.optional().default('#000000'),
   backgroundColor: colorHex.optional().default('#FFFFFF'),
@@ -32,6 +34,8 @@ export type CreateQrInput = z.input<typeof CreateQrSchema>;
 export const UpdateQrSchema = z.object({
   label: z.string().max(80).optional(),
   targetUrl: z.string().url().max(2000).optional(),
+  clientId: z.string().uuid().nullable().optional(),
+  projectId: z.string().uuid().nullable().optional(),
   visibility: z.enum(QR_VISIBILITIES).optional(),
   foregroundColor: colorHex.optional(),
   backgroundColor: colorHex.optional(),
@@ -46,6 +50,10 @@ export type QrCodeRow = {
   ownerUserId: string;
   label: string;
   targetUrl: string;
+  clientId: string | null;
+  projectId: string | null;
+  totalScans: number;
+  uniqueVisitors: number;
   shortCode: string;
   visibility: QrVisibility;
   foregroundColor: string;

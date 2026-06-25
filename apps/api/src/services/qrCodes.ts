@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { eq, and, or, desc, gte, isNull, count, sql } from 'drizzle-orm';
+import { eq, and, or, desc, gte, isNull, count, inArray, sql } from 'drizzle-orm';
 import { UAParser } from 'ua-parser-js';
 import { db } from '../db/client.js';
-import { qrCodes, qrScans, type QrCode, type QrScan } from '../db/schema.js';
+import { clients, projects, qrCodes, qrScans, type QrCode, type QrScan } from '../db/schema.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { appendActivity } from './activity.js';
 import { lookupGeo } from './ipGeo.js';
@@ -31,12 +31,19 @@ import type {
 
 // ---------- helpers ----------
 
-function rowToRow(r: QrCode): QrCodeRow {
+function rowToRow(
+  r: QrCode,
+  stats?: { totalScans?: number; uniqueVisitors?: number },
+): QrCodeRow {
   return {
     id: r.id,
     ownerUserId: r.ownerUserId,
     label: r.label,
     targetUrl: r.targetUrl,
+    clientId: r.clientId,
+    projectId: r.projectId,
+    totalScans: Number(stats?.totalScans ?? 0),
+    uniqueVisitors: Number(stats?.uniqueVisitors ?? 0),
     shortCode: r.shortCode,
     visibility: r.visibility as 'private' | 'workspace',
     foregroundColor: r.foregroundColor,
@@ -47,6 +54,35 @@ function rowToRow(r: QrCode): QrCodeRow {
     updatedAt: r.updatedAt,
     archivedAt: r.archivedAt,
   };
+}
+
+async function resolveScopeLink(args: {
+  clientId: string | null;
+  projectId: string | null;
+}): Promise<{ clientId: string | null; projectId: string | null }> {
+  if (args.projectId) {
+    const [project] = await db
+      .select({ id: projects.id, clientId: projects.clientId })
+      .from(projects)
+      .where(and(tenantEq(projects.tenantId), eq(projects.id, args.projectId)))
+      .limit(1);
+    if (!project) throw new HttpError(400, 'qr_project_not_found');
+    if (args.clientId && args.clientId !== project.clientId) {
+      throw new HttpError(400, 'qr_project_client_mismatch');
+    }
+    return { clientId: project.clientId, projectId: project.id };
+  }
+
+  if (args.clientId) {
+    const [client] = await db
+      .select({ id: clients.id })
+      .from(clients)
+      .where(and(tenantEq(clients.tenantId), eq(clients.id, args.clientId)))
+      .limit(1);
+    if (!client) throw new HttpError(400, 'qr_client_not_found');
+  }
+
+  return { clientId: args.clientId, projectId: null };
 }
 
 function scanRowToRow(s: QrScan): QrScanRow {
@@ -90,19 +126,40 @@ async function mintShortCode(): Promise<string> {
 // ---------- CRUD ----------
 
 /** Returns codes the viewer can see: their own + workspace-shared. */
-export async function listVisible(viewerId: string): Promise<QrCodeRow[]> {
+export async function listVisible(args: {
+  viewerId: string;
+  clientId?: string;
+  projectId?: string;
+}): Promise<QrCodeRow[]> {
+  const filters = [
+    tenantEq(qrCodes.tenantId),
+    isNull(qrCodes.archivedAt),
+    or(eq(qrCodes.ownerUserId, args.viewerId), eq(qrCodes.visibility, 'workspace')),
+  ];
+  if (args.clientId) filters.push(eq(qrCodes.clientId, args.clientId));
+  if (args.projectId) filters.push(eq(qrCodes.projectId, args.projectId));
+
   const rows = await db
     .select()
     .from(qrCodes)
-    .where(
-      and(
-        tenantEq(qrCodes.tenantId),
-        isNull(qrCodes.archivedAt),
-        or(eq(qrCodes.ownerUserId, viewerId), eq(qrCodes.visibility, 'workspace')),
-      ),
-    )
+    .where(and(...filters))
     .orderBy(desc(qrCodes.createdAt));
-  return rows.map(rowToRow);
+  if (rows.length === 0) return [];
+
+  const statsRows = await db
+    .select({
+      qrCodeId: qrScans.qrCodeId,
+      totalScans: count(qrScans.id),
+      uniqueVisitors: sql<number>`count(distinct ${qrScans.ip})`,
+    })
+    .from(qrScans)
+    .where(inArray(qrScans.qrCodeId, rows.map((r) => r.id)))
+    .groupBy(qrScans.qrCodeId);
+
+  const statsByCode = new Map(
+    statsRows.map((r) => [r.qrCodeId, { totalScans: Number(r.totalScans), uniqueVisitors: Number(r.uniqueVisitors) }]),
+  );
+  return rows.map((r) => rowToRow(r, statsByCode.get(r.id)));
 }
 
 /** Owner-only fetch. Returns null when not found or not owned. */
@@ -138,12 +195,18 @@ export async function getForViewer(id: string, viewerId: string): Promise<QrCode
 
 export async function create(args: { ownerId: string; input: CreateQrInput }): Promise<QrCodeRow> {
   const shortCode = await mintShortCode();
+  const scopeLink = await resolveScopeLink({
+    clientId: args.input.clientId ?? null,
+    projectId: args.input.projectId ?? null,
+  });
   const [row] = await db
     .insert(qrCodes)
     .values(stampTenant({
       ownerUserId: args.ownerId,
       label: args.input.label ?? '',
       targetUrl: args.input.targetUrl,
+      clientId: scopeLink.clientId,
+      projectId: scopeLink.projectId,
       shortCode,
       visibility: args.input.visibility ?? 'private',
       foregroundColor: args.input.foregroundColor ?? '#000000',
@@ -174,6 +237,21 @@ export async function update(args: {
   if (!existing) throw new HttpError(404, 'qr_not_found');
   const upd: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   const changedKeys: string[] = [];
+
+  const hasClient = Object.prototype.hasOwnProperty.call(args.patch, 'clientId');
+  const hasProject = Object.prototype.hasOwnProperty.call(args.patch, 'projectId');
+  if (hasClient || hasProject) {
+    const requestedClientId = hasClient ? (args.patch.clientId ?? null) : (existing.clientId ?? null);
+    const requestedProjectId = hasProject ? (args.patch.projectId ?? null) : (existing.projectId ?? null);
+    const scopeLink = await resolveScopeLink({
+      clientId: requestedClientId,
+      projectId: requestedProjectId,
+    });
+    upd.clientId = scopeLink.clientId;
+    upd.projectId = scopeLink.projectId;
+    changedKeys.push('clientId', 'projectId');
+  }
+
   for (const k of [
     'label',
     'targetUrl',

@@ -21,7 +21,9 @@ qrRouter.use(requireAuth);
 qrRouter.get('/', async (req, res, next) => {
   try {
     const me = req.session.user!;
-    res.json(await qrSvc.listVisible(me.userId));
+    const clientId = typeof req.query.clientId === 'string' && req.query.clientId ? req.query.clientId : undefined;
+    const projectId = typeof req.query.projectId === 'string' && req.query.projectId ? req.query.projectId : undefined;
+    res.json(await qrSvc.listVisible({ viewerId: me.userId, clientId, projectId }));
   } catch (e) {
     next(e);
   }

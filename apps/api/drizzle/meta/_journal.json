@@ -218,6 +218,13 @@
       "when": 1782374400000,
       "tag": "0030_websites_memory_bank",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1782381600000,
+      "tag": "0031_qr_scope_links",
+      "breakpoints": true
     }
   ]
 }
