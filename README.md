@@ -65,6 +65,11 @@ and serves the whole product (API + UI) on **one origin** at
   variables — see [`.env.example`](.env.example) and `apps/api/src/env.ts`.
 - **Optional integrations** (Google sign-in, Drive, Gmail, passkeys, analytics)
   stay dormant until you set their env vars; the core app works without them.
+- **Website Memory Bank credentials are optional:** set
+  `WEBSITES_CREDENTIALS_SECRET` to enable encrypted username/password storage
+  for Tools → Website Memory Bank entries. Without it, website tracking still
+  works, but credential save/reveal requests return
+  `websites_credentials_secret_missing`.
 - **SaaS / multi-tenant mode is opt-in:** setting `MARKETING_API_URL` +
   `MARKETING_API_KEY` + `PROVISIONING_SECRET` turns on subscription gating and
   the provisioning webhook (see `HOPPA_MARKETING_CONTRACT.md`). Leave them unset

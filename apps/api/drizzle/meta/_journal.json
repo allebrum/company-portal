@@ -211,6 +211,13 @@
       "when": 1781291998735,
       "tag": "0029_portal_sharing",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1782374400000,
+      "tag": "0030_websites_memory_bank",
+      "breakpoints": true
     }
   ]
 }

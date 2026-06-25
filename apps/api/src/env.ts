@@ -56,6 +56,10 @@ const EnvSchema = z.object({
   // and the widget falls back to browser-session tickets. Never sent to the
   // client; only the hash is.
   POSTHOG_IDENTITY_SECRET: z.string().optional(),
+  // Websites tool credentials vault (Tools > Websites). When set, username /
+  // password fields are encrypted at rest with AES-256-GCM. When unset, the
+  // feature still works but credential save/reveal returns a 400.
+  WEBSITES_CREDENTIALS_SECRET: z.string().min(16).optional(),
   // Instance-level: is email+password login offered AT ALL on this deployment?
   // Default true; a pure-SSO self-host sets PASSWORD_LOGIN_ENABLED=false to hide
   // it entirely. This is the shared-login-page gate — per-WORKSPACE password

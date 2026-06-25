@@ -752,6 +752,45 @@ export const qrScans = pgTable('qr_scans', {
   codeTimeIdx: index('qr_scans_code_time_idx').on(t.qrCodeId, t.scannedAt),
 }));
 
+// ---- F30 Websites memory bank (Tools) ----
+// Tracks third-party websites/services the workspace uses, billing metadata,
+// and optional encrypted credentials stored with an instance-level secret.
+export const websites = pgTable('websites', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRefNN(),
+  name: text('name').notNull(),
+  siteUrl: text('site_url').notNull(),
+  category: text('category').notNull().default(''),
+  status: text('status').notNull().default('active'),
+  billingCycle: text('billing_cycle').notNull().default('monthly'),
+  billingAmountCents: integer('billing_amount_cents'),
+  billingCurrency: text('billing_currency').notNull().default('USD'),
+  renewalDate: date('renewal_date'),
+  notes: text('notes').notNull().default(''),
+  credentialUsernameEnc: text('credential_username_enc'),
+  credentialPasswordEnc: text('credential_password_enc'),
+  credentialsUpdatedAt: timestamp('credentials_updated_at', { withTimezone: true, mode: 'string' }),
+  createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  updatedByUserId: uuid('updated_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: ts(),
+  updatedAt: updTs(),
+  archivedAt: timestamp('archived_at', { withTimezone: true, mode: 'string' }),
+}, (t) => ({
+  tenantNameIdx: index('websites_tenant_name_idx').on(t.tenantId, sql`lower(${t.name})`),
+  tenantRenewalIdx: index('websites_tenant_renewal_idx').on(t.tenantId, t.renewalDate),
+  tenantStatusIdx: index('websites_tenant_status_idx').on(t.tenantId, t.status),
+}));
+
+export const websiteMembers = pgTable('website_members', {
+  websiteId: uuid('website_id').notNull().references(() => websites.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  tenantId: tenantRefNN(),
+  assignedAt: timestamp('assigned_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.websiteId, t.userId] }),
+  tenantUserIdx: index('website_members_tenant_user_idx').on(t.tenantId, t.userId),
+}));
+
 // ---- Upload QR sessions (public mobile upload handoff) ----
 // A staff user mints a one-time-ish tokenized upload URL that can be opened
 // on a phone (no auth required). The token maps to a concrete target in DB
@@ -829,5 +868,7 @@ export type DriveItem = typeof driveItems.$inferSelect;
 export type AuthToken = typeof authTokens.$inferSelect;
 export type QrCode = typeof qrCodes.$inferSelect;
 export type QrScan = typeof qrScans.$inferSelect;
+export type Website = typeof websites.$inferSelect;
+export type WebsiteMember = typeof websiteMembers.$inferSelect;
 export type UploadQrSession = typeof uploadQrSessions.$inferSelect;
 export type UploadQrSessionFile = typeof uploadQrSessionFiles.$inferSelect;

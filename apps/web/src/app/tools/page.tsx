@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowRight, QrCode } from 'lucide-react';
+import { ArrowRight, Globe, QrCode } from 'lucide-react';
 
 /**
  * F24 — Tools landing page. Cards-grid index of available utilities.
@@ -24,6 +24,13 @@ const TOOLS: Tool[] = [
     description: 'Mint trackable QR codes; see who scanned which and when.',
     Icon: QrCode,
     color: '#9333ea',
+  },
+  {
+    href: '/tools/websites',
+    label: 'Website Memory Bank',
+    description: 'Track website vendors, costs, assignees, and encrypted credentials.',
+    Icon: Globe,
+    color: '#0284c7',
   },
 ];
 
