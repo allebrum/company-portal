@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { CreateWebsiteSchema, UpdateWebsiteSchema } from '@allebrum/shared';
+import { requirePermission } from '../auth/permissions.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { getValidated, validate } from '../middleware/validate.js';
 import * as websitesSvc from '../services/websites.js';
@@ -8,7 +9,7 @@ export const websitesRouter = Router();
 
 websitesRouter.use(requireAuth);
 
-websitesRouter.get('/', async (req, res, next) => {
+websitesRouter.get('/', requirePermission('websites.view'), async (req, res, next) => {
   try {
     res.json(await websitesSvc.listWebsites());
   } catch (e) {
@@ -16,7 +17,7 @@ websitesRouter.get('/', async (req, res, next) => {
   }
 });
 
-websitesRouter.post('/', validate(CreateWebsiteSchema), async (req, res, next) => {
+websitesRouter.post('/', requirePermission('websites.create'), validate(CreateWebsiteSchema), async (req, res, next) => {
   try {
     const me = req.session.user!;
     const input = getValidated<typeof CreateWebsiteSchema._type>(req);
@@ -26,7 +27,7 @@ websitesRouter.post('/', validate(CreateWebsiteSchema), async (req, res, next) =
   }
 });
 
-websitesRouter.patch('/:id', validate(UpdateWebsiteSchema), async (req, res, next) => {
+websitesRouter.patch('/:id', requirePermission('websites.create'), validate(UpdateWebsiteSchema), async (req, res, next) => {
   try {
     const me = req.session.user!;
     const patch = getValidated<typeof UpdateWebsiteSchema._type>(req);
@@ -36,7 +37,7 @@ websitesRouter.patch('/:id', validate(UpdateWebsiteSchema), async (req, res, nex
   }
 });
 
-websitesRouter.delete('/:id', async (req, res, next) => {
+websitesRouter.delete('/:id', requirePermission('websites.delete'), async (req, res, next) => {
   try {
     const me = req.session.user!;
     await websitesSvc.archiveWebsite({ id: req.params.id!, actorId: me.userId });
@@ -46,7 +47,7 @@ websitesRouter.delete('/:id', async (req, res, next) => {
   }
 });
 
-websitesRouter.get('/:id/credentials', async (req, res, next) => {
+websitesRouter.get('/:id/credentials', requirePermission('websites.view'), async (req, res, next) => {
   try {
     const me = req.session.user!;
     res.json(await websitesSvc.readCredentials({ id: req.params.id!, viewerId: me.userId }));

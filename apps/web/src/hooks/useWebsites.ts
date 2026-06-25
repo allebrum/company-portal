@@ -11,10 +11,11 @@ import type {
 
 const WEBSITES_KEY = ['websites'] as const;
 
-export function useWebsites() {
+export function useWebsites(enabled = true) {
   return useQuery({
     queryKey: WEBSITES_KEY,
     queryFn: () => api.get<WebsiteRow[]>('/websites'),
+    enabled,
   });
 }
 

@@ -10,6 +10,8 @@ import { useToast } from '@/components/ui/Toast';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { relativeFromIso } from '@/lib/formatters';
 import { useUsers } from '@/hooks/useResources';
+import { useAuth } from '@/hooks/useAuth';
+import { Empty } from '@/components/ui/Card';
 import {
   useCreateWebsite,
   useDeleteWebsite,
@@ -90,7 +92,12 @@ function websiteToForm(w: WebsiteRow): FormState {
 }
 
 export default function WebsitesToolPage() {
-  const websites = useWebsites();
+  const { can } = useAuth();
+  const canView = can('websites.view');
+  const canCreate = can('websites.create');
+  const canDelete = can('websites.delete');
+
+  const websites = useWebsites(canView);
   const users = useUsers();
   const create = useCreateWebsite();
   const update = useUpdateWebsite();
@@ -207,6 +214,10 @@ export default function WebsitesToolPage() {
 
   const busy = create.isPending || update.isPending || remove.isPending;
 
+  if (!canView) {
+    return <Empty title="No access" description="You don't have permission to view the Website Memory Bank." />;
+  }
+
   return (
     <div className="space-y-7 max-w-6xl">
       <div>
@@ -226,6 +237,7 @@ export default function WebsitesToolPage() {
           <Button
             size="sm"
             variant="primary"
+            disabled={!canCreate}
             onClick={() => {
               setForm(blankForm());
               setFormOpen(true);
@@ -304,6 +316,7 @@ export default function WebsitesToolPage() {
                     <Button
                       variant="ghost"
                       size="sm"
+                      disabled={!canCreate}
                       onClick={() => {
                         setForm(websiteToForm(w));
                         setFormOpen(true);
@@ -324,6 +337,7 @@ export default function WebsitesToolPage() {
                     <Button
                       variant="ghost"
                       size="sm"
+                      disabled={!canDelete}
                       onClick={() => onDelete(w)}
                       title="Archive"
                     >
@@ -367,7 +381,7 @@ export default function WebsitesToolPage() {
       </div>
 
       <Modal
-        open={formOpen}
+        open={canCreate && formOpen}
         onClose={() => {
           setFormOpen(false);
           setForm(blankForm());

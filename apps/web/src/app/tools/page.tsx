@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { ArrowRight, FormInput, Globe, QrCode } from 'lucide-react';
+import type { Permission } from '@allebrum/shared';
+import { useAuth } from '@/hooks/useAuth';
 
 /**
  * F24 — Tools landing page. Cards-grid index of available utilities.
@@ -15,6 +17,7 @@ type Tool = {
   description: string;
   Icon: typeof QrCode;
   color: string;
+  requiredPerm?: Permission;
 };
 
 const TOOLS: Tool[] = [
@@ -31,6 +34,7 @@ const TOOLS: Tool[] = [
     description: 'Track website vendors, costs, assignees, and encrypted credentials.',
     Icon: Globe,
     color: '#0284c7',
+    requiredPerm: 'websites.view',
   },
   {
     href: '/tools/forms',
@@ -38,10 +42,14 @@ const TOOLS: Tool[] = [
     description: 'Design embeddable forms, track views/interactions, and export submissions.',
     Icon: FormInput,
     color: '#b45309',
+    requiredPerm: 'forms.view',
   },
 ];
 
 export default function ToolsPage() {
+  const { can } = useAuth();
+  const visibleTools = TOOLS.filter((tool) => !tool.requiredPerm || can(tool.requiredPerm));
+
   return (
     <div className="space-y-7">
       <div>
@@ -53,7 +61,7 @@ export default function ToolsPage() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {TOOLS.map((t) => (
+        {visibleTools.map((t) => (
           <Link
             key={t.href}
             href={t.href}

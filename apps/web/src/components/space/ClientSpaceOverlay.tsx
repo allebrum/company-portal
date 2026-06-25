@@ -105,6 +105,7 @@ function writeTabToUrl(tab: TabKey): void {
  */
 export function ClientSpaceOverlay() {
   const { openScope, openSpace, closeSpace } = useSpace();
+  const { can } = useAuth();
   const data = useSpaceData(openScope);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -124,6 +125,13 @@ export function ClientSpaceOverlay() {
     setTab(next);
     if (!fromUrl) writeTabToUrl(next);
   }, [openScope?.kind === 'client' || openScope?.kind === 'project' ? openScope.id : null]);
+
+  useEffect(() => {
+    if (tab === 'forms' && !can('forms.view')) {
+      setTab('notes');
+      if (openScope && openScope.kind !== 'all') writeTabToUrl('notes');
+    }
+  }, [tab, can, openScope]);
 
   // F25 — universal modals. State lives at the overlay level so children
   // can pop modals without prop drilling; cleared on overlay close.
@@ -211,7 +219,7 @@ export function ClientSpaceOverlay() {
             {tab === 'qr' && (
               <QrCodesTab scope={narrowed} clientId={data.clientId} projectId={data.projectId} />
             )}
-            {tab === 'forms' && (
+            {tab === 'forms' && can('forms.view') && (
               <FormsTab scope={narrowed} clientId={data.clientId} projectId={data.projectId} />
             )}
             {tab === 'files' && (
@@ -472,7 +480,8 @@ function SpaceTabs({
   const scopedGoals = goals.filter((g) => goalInScope(g, data));
   const scopedOpenTodos = todos.filter((t) => todoInScope(t, data) && t.status === 'open');
   const { data: scopedQrs = [] } = useQrCodes({ clientId: data.clientId, projectId: data.projectId });
-  const { data: scopedForms = [] } = useForms({ clientId: data.clientId, projectId: data.projectId });
+  const canViewForms = can('forms.view');
+  const { data: scopedForms = [] } = useForms({ clientId: data.clientId, projectId: data.projectId, enabled: canViewForms });
   const filesCount = data.spaceFiles.length;
   const showOverviewTab = !!data.client || !!data.project;
   // Portal tab only at client scope, and only for staff with the F23
@@ -513,7 +522,7 @@ function SpaceTabs({
       <Tab k="goals" label="Goals" icon={Target} count={scopedGoals.length} />
       <Tab k="todos" label="To-dos" icon={CheckSquare} count={scopedOpenTodos.length} />
       <Tab k="qr" label="QR codes" icon={QrCodeIcon} count={scopedQrs.length} />
-      <Tab k="forms" label="Forms" icon={FormInput} count={scopedForms.length} />
+      {canViewForms && <Tab k="forms" label="Forms" icon={FormInput} count={scopedForms.length} />}
       <Tab k="files" label="Files" icon={Upload} count={filesCount} />
       {showTicketsTab && <Tab k="tickets" label="Tickets" icon={MessageSquare} count={openTicketCount} />}
       {showPortalTab && <Tab k="portal" label="Portal" icon={Globe} />}
@@ -560,6 +569,7 @@ function FormsTab({
   projectId: string | null;
 }) {
   const { openSpace } = useSpace();
+  const { can } = useAuth();
 
   return (
     <FormBuilderManager
@@ -571,6 +581,8 @@ function FormsTab({
       emptyHint="No forms linked to this scope yet."
       onOpenClient={(id) => openSpace({ kind: 'client', id })}
       onOpenProject={(id) => openSpace({ kind: 'project', id })}
+      canCreate={can('forms.create')}
+      canDelete={can('forms.delete')}
     />
   );
 }

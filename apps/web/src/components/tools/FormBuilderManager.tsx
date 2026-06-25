@@ -50,6 +50,8 @@ type Props = {
   emptyHint?: string;
   onOpenClient?: (id: string) => void;
   onOpenProject?: (id: string) => void;
+  canCreate?: boolean;
+  canDelete?: boolean;
 };
 
 function normalizeOptionValue(label: string): string {
@@ -209,6 +211,8 @@ export function FormBuilderManager({
   emptyHint = 'Build one above and copy the embed snippet into your website.',
   onOpenClient,
   onOpenProject,
+  canCreate = true,
+  canDelete = true,
 }: Props) {
   const { data: clients = [] } = useClients();
   const { data: projects = [] } = useProjects();
@@ -386,6 +390,7 @@ export function FormBuilderManager({
 
   return (
     <div className="space-y-6">
+      {canCreate && (
       <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-4">
         <div className="text-[11px] uppercase tracking-widest font-bold text-gray-500">{createHeading}</div>
 
@@ -748,6 +753,7 @@ export function FormBuilderManager({
           </Button>
         </div>
       </div>
+      )}
 
       <div>
         <div className="text-[11px] uppercase tracking-widest font-bold text-gray-500 mb-2">My forms · {forms.data?.length ?? 0}</div>
@@ -810,10 +816,10 @@ export function FormBuilderManager({
                     </div>
 
                     <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => startEdit(form)} title="Edit form"><Save className="w-4 h-4" /></Button>
+                      {canCreate && <Button variant="ghost" size="sm" onClick={() => startEdit(form)} title="Edit form"><Save className="w-4 h-4" /></Button>}
                       <Button variant="ghost" size="sm" onClick={() => setEmbedFormId(form.id)} title="Embed snippet"><Link2 className="w-4 h-4" /></Button>
                       <Button variant="ghost" size="sm" onClick={() => setSubmissionsFormId(form.id)} title="View submissions"><FileSpreadsheet className="w-4 h-4" /></Button>
-                      <Button variant="ghost" size="sm" onClick={() => archive(form)} title="Archive"><Trash2 className="w-4 h-4 text-red-600" /></Button>
+                      {canDelete && <Button variant="ghost" size="sm" onClick={() => archive(form)} title="Archive"><Trash2 className="w-4 h-4 text-red-600" /></Button>}
                     </div>
                   </div>
                 </li>

@@ -6,6 +6,7 @@ import {
   UpdateFormSchema,
 } from '@allebrum/shared';
 import { env } from '../env.js';
+import { requirePermission } from '../auth/permissions.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { getValidated, validate } from '../middleware/validate.js';
@@ -14,7 +15,7 @@ import * as formsSvc from '../services/forms.js';
 export const formsRouter = Router();
 formsRouter.use(requireAuth);
 
-formsRouter.get('/', async (req, res, next) => {
+formsRouter.get('/', requirePermission('forms.view'), async (req, res, next) => {
   try {
     const me = req.session.user!;
     const clientId = typeof req.query.clientId === 'string' && req.query.clientId ? req.query.clientId : undefined;
@@ -25,7 +26,7 @@ formsRouter.get('/', async (req, res, next) => {
   }
 });
 
-formsRouter.post('/', validate(CreateFormSchema), async (req, res, next) => {
+formsRouter.post('/', requirePermission('forms.create'), validate(CreateFormSchema), async (req, res, next) => {
   try {
     const me = req.session.user!;
     const input = getValidated<typeof CreateFormSchema._type>(req);
@@ -36,7 +37,7 @@ formsRouter.post('/', validate(CreateFormSchema), async (req, res, next) => {
   }
 });
 
-formsRouter.patch('/:id', validate(UpdateFormSchema), async (req, res, next) => {
+formsRouter.patch('/:id', requirePermission('forms.create'), validate(UpdateFormSchema), async (req, res, next) => {
   try {
     const me = req.session.user!;
     const patch = getValidated<typeof UpdateFormSchema._type>(req);
@@ -47,7 +48,7 @@ formsRouter.patch('/:id', validate(UpdateFormSchema), async (req, res, next) => 
   }
 });
 
-formsRouter.delete('/:id', async (req, res, next) => {
+formsRouter.delete('/:id', requirePermission('forms.delete'), async (req, res, next) => {
   try {
     const me = req.session.user!;
     await formsSvc.softDelete(req.params.id!, me.userId);
@@ -57,7 +58,7 @@ formsRouter.delete('/:id', async (req, res, next) => {
   }
 });
 
-formsRouter.get('/:id/submissions', async (req, res, next) => {
+formsRouter.get('/:id/submissions', requirePermission('forms.view'), async (req, res, next) => {
   try {
     const me = req.session.user!;
     res.json(await formsSvc.listSubmissions({ formId: req.params.id!, viewerId: me.userId }));
@@ -66,7 +67,7 @@ formsRouter.get('/:id/submissions', async (req, res, next) => {
   }
 });
 
-formsRouter.get('/:id/submissions.csv', async (req, res, next) => {
+formsRouter.get('/:id/submissions.csv', requirePermission('forms.view'), async (req, res, next) => {
   try {
     const me = req.session.user!;
     const id = req.params.id!;
@@ -81,7 +82,7 @@ formsRouter.get('/:id/submissions.csv', async (req, res, next) => {
   }
 });
 
-formsRouter.get('/:id/embed-snippet', async (req, res, next) => {
+formsRouter.get('/:id/embed-snippet', requirePermission('forms.view'), async (req, res, next) => {
   try {
     const me = req.session.user!;
     const row = await formsSvc.getRowForViewer({ id: req.params.id!, viewerId: me.userId });

@@ -12,9 +12,10 @@ import type {
 
 const FORMS_KEY = ['forms'] as const;
 
-export function useForms(filters?: { clientId?: string | null; projectId?: string | null }) {
+export function useForms(filters?: { clientId?: string | null; projectId?: string | null; enabled?: boolean }) {
   const clientId = filters?.clientId ?? null;
   const projectId = filters?.projectId ?? null;
+  const enabled = filters?.enabled ?? true;
   return useQuery({
     queryKey: [...FORMS_KEY, clientId ?? '', projectId ?? ''] as const,
     queryFn: () => {
@@ -24,6 +25,7 @@ export function useForms(filters?: { clientId?: string | null; projectId?: strin
       const qs = params.toString();
       return api.get<FormRow[]>(`/forms${qs ? `?${qs}` : ''}`);
     },
+    enabled,
   });
 }
 

@@ -20,6 +20,12 @@ export const PERMISSIONS = [
   // tickets across all clients.
   'portal.manage',
   'tickets.manage',
+  'forms.view',
+  'forms.create',
+  'forms.delete',
+  'websites.view',
+  'websites.create',
+  'websites.delete',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -37,6 +43,7 @@ export const PERMISSION_CATEGORIES: Record<string, Permission[]> = {
   People: ['users.manage', 'groups.manage'],
   Workspace: ['clients.manage', 'projects.manage', 'goals.manage', 'integrations.manage', 'media.manage'],
   'Client portal': ['portal.manage', 'tickets.manage'],
+  Tools: ['forms.view', 'forms.create', 'forms.delete', 'websites.view', 'websites.create', 'websites.delete'],
 };
 
 export const PERMISSION_LABELS: Record<Permission, string> = {
@@ -57,6 +64,12 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'media.manage': 'Manage media / Drive',
   'portal.manage': 'Configure client portal (slug, publish, contacts)',
   'tickets.manage': 'Triage, reply, and close client tickets',
+  'forms.view': 'View forms and submissions',
+  'forms.create': 'Create and edit forms',
+  'forms.delete': 'Delete forms',
+  'websites.view': 'View website memory bank',
+  'websites.create': 'Create and edit websites',
+  'websites.delete': 'Delete websites',
 };
 
 // Built-in starter groups (seeded; users get mapped onto these).
@@ -67,7 +80,16 @@ export const SYSTEM_GROUP_PERMISSIONS: Record<SystemGroup, Permission[]> = {
   Owner: [...PERMISSIONS],
   Admin: PERMISSIONS.filter((p) => p !== 'groups.manage'),
   Bookkeeper: ['time_entry.view_all', 'pay.manage'],
-  Member: ['time_entry.create', 'time_entry.view_own', 'time_entry.submit', 'goals.manage'],
+  Member: [
+    'time_entry.create',
+    'time_entry.view_own',
+    'time_entry.submit',
+    'goals.manage',
+    'forms.view',
+    'forms.create',
+    'websites.view',
+    'websites.create',
+  ],
 };
 
 export const ENTRY_STATUSES = ['draft', 'submitted', 'approved', 'rejected'] as const;
