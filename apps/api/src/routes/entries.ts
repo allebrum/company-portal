@@ -33,6 +33,21 @@ export const entriesRouter = Router();
 
 entriesRouter.use(requireAuth);
 
+/**
+ * Can the caller create / submit time for OTHER workspace members? True for
+ * full-edit admins (`time_entry.edit`) and for the narrower, dedicated
+ * `time_entry.submit_on_behalf` role (log + submit a teammate's hours without
+ * the reach to edit or delete arbitrary entries). Note this only governs the
+ * on-behalf paths — editing/deleting other people's entries still requires
+ * `time_entry.edit` / `time_entry.delete` respectively.
+ */
+async function canActForOthers(req: Parameters<typeof userCan>[0]): Promise<boolean> {
+  return (
+    (await userCan(req, 'time_entry.edit')) ||
+    (await userCan(req, 'time_entry.submit_on_behalf'))
+  );
+}
+
 entriesRouter.get('/', validate(EntryListQuerySchema, 'query'), async (req, res, next) => {
   try {
     const me = req.session.user!;
@@ -107,12 +122,13 @@ entriesRouter.post('/', validate(ManualEntrySchema), async (req, res, next) => {
   try {
     const me = req.session.user!;
     const input = getValidated<typeof ManualEntrySchema._type>(req);
-    // On-behalf entry: admins with `time_entry.edit` can log time for any
-    // member of the ACTIVE workspace (cross-tenant ids 404 via isMember).
-    // The entry lands as that user's draft, exactly as if they logged it.
+    // On-behalf entry: admins with `time_entry.edit` OR the narrower
+    // `time_entry.submit_on_behalf` can log time for any member of the ACTIVE
+    // workspace (cross-tenant ids 404 via isMember). The entry lands as that
+    // user's draft, exactly as if they logged it.
     let targetUserId = me.userId;
     if (input.userId && input.userId !== me.userId) {
-      if (!(await userCan(req, 'time_entry.edit'))) {
+      if (!(await canActForOthers(req))) {
         res.status(403).json({ error: 'forbidden' });
         return;
       }
@@ -162,9 +178,10 @@ entriesRouter.delete('/:id', async (req, res, next) => {
 entriesRouter.post('/submit', validate(BulkIdsSchema), async (req, res, next) => {
   try {
     const me = req.session.user!;
-    // `time_entry.edit` admins may submit on behalf of teammates; everyone
-    // else is scoped to their own entries inside submitEntries.
-    const canManageAll = await userCan(req, 'time_entry.edit');
+    // `time_entry.edit` or `time_entry.submit_on_behalf` admins may submit on
+    // behalf of teammates; everyone else is scoped to their own entries inside
+    // submitEntries.
+    const canManageAll = await canActForOthers(req);
     const count = await submitEntries(getValidated<typeof BulkIdsSchema._type>(req).ids, me.userId, canManageAll);
     res.json({ count });
   } catch (e) {

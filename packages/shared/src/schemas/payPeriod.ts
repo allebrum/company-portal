@@ -3,6 +3,16 @@ import { CADENCES, WEEKEND_RULES } from '../enums';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD');
 
+/** True when `tz` is an IANA zone the JS runtime's Intl tz database knows. */
+function isValidTimeZone(tz: string): boolean {
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const PayDateRefSchema = z.union([
   z.number().int().min(1).max(31),
   z.literal('last'),
@@ -22,6 +32,22 @@ export const PayConfigSchema = z.object({
   processingBufferDays: z.number().int().min(0).max(60).default(5),
   autoClose: z.boolean().default(true),
   approverId: z.string().uuid().nullable().optional(),
+  // IANA timezone the workspace's payroll clock runs in. Anchors the
+  // reminder emails (otherwise "the morning of the processing day" is
+  // ambiguous — times in the DB are UTC). Validated against the runtime's
+  // tz database so a typo can't silently break the reminder scheduler.
+  timezone: z
+    .string()
+    .min(1)
+    .max(64)
+    .refine(isValidTimeZone, { message: 'Unknown IANA timezone' })
+    .default('America/New_York'),
+  // Reminder emails (see jobs/timeReminders). On the processing day —
+  // pay date minus the processing buffer, shifted off weekends by the
+  // weekend rule — employees with unsubmitted time get a morning nudge and
+  // approvers get an end-of-day "time to approve" prompt.
+  remindEmployees: z.boolean().default(true),
+  remindApprovers: z.boolean().default(true),
 });
 export type PayConfigInput = z.infer<typeof PayConfigSchema>;
 

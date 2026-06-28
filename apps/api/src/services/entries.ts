@@ -5,6 +5,7 @@ import {
   activeTimers,
   todos,
   payPeriods,
+  projects,
   type TimeEntry,
   type ActiveTimer,
 } from '../db/schema.js';
@@ -226,12 +227,73 @@ export async function updateEntry(
     upd.durationMin = minutesBetween(nextStart, nextEnd);
   }
   if (patch.todoId !== undefined) upd.todoId = patch.todoId;
+
+  // ---- Field-level diff for the audit log (computed against the old row) ----
+  // Only fields a user can actually change are tracked. Times are stored as
+  // ISO in meta (the feed formats them in the viewer's timezone); duration is
+  // minutes; project resolves to a name so the log reads cleanly.
+  const norm = (v: unknown) => (v === undefined || v === null ? null : v);
+  const changes: Array<{ field: string; label: string; from: string; to: string }> = [];
+  if (patch.note !== undefined && patch.note !== row.note) {
+    changes.push({ field: 'note', label: 'note', from: row.note ?? '', to: patch.note ?? '' });
+  }
+  if (patch.projectId !== undefined && norm(patch.projectId) !== norm(row.projectId)) {
+    const ids = [row.projectId, patch.projectId].filter((x): x is string => !!x);
+    const names = ids.length
+      ? await db
+          .select({ id: projects.id, name: projects.name })
+          .from(projects)
+          .where(and(inArray(projects.id, ids), tenantEq(projects.tenantId)))
+      : [];
+    const nameOf = (pid: string | null) =>
+      pid ? names.find((n) => n.id === pid)?.name ?? 'Unknown project' : '— none —';
+    changes.push({ field: 'project', label: 'project', from: nameOf(row.projectId), to: nameOf(patch.projectId ?? null) });
+  }
+  if (patch.startIso !== undefined && patch.startIso !== row.startIso) {
+    changes.push({ field: 'start', label: 'start time', from: row.startIso, to: patch.startIso });
+  }
+  if (patch.endIso !== undefined && norm(patch.endIso) !== norm(row.endIso)) {
+    changes.push({ field: 'end', label: 'end time', from: row.endIso ?? '', to: patch.endIso ?? '' });
+  }
+  if (upd.durationMin !== undefined && upd.durationMin !== row.durationMin) {
+    changes.push({ field: 'duration', label: 'duration', from: String(row.durationMin), to: String(upd.durationMin) });
+  }
+  if (patch.todoId !== undefined && norm(patch.todoId) !== norm(row.todoId)) {
+    changes.push({ field: 'todo', label: 'task', from: row.todoId ?? '—', to: patch.todoId ?? '—' });
+  }
+
   const [updated] = await db
     .update(timeEntries)
     .set(upd)
     .where(and(eq(timeEntries.id, id), tenantEq(timeEntries.tenantId)))
     .returning();
   if (!updated) throw new HttpError(404, 'entry_not_found');
+
+  // Audit the edit (only when something actually changed). Captures who made
+  // the change, whose entry it was, and the before/after of every field — so
+  // the activity feed shows exactly what an admin or teammate altered.
+  if (changes.length > 0) {
+    const onBehalf = row.userId !== viewerId;
+    let ownerName: string | undefined;
+    if (onBehalf) {
+      ownerName = (await listUsers()).find((u) => u.id === row.userId)?.name;
+    }
+    await appendActivity({
+      whoId: viewerId,
+      kind: 'time.edit',
+      target: `Edited ${onBehalf ? `${ownerName ?? 'a teammate'}'s ` : ''}time entry · changed ${changes
+        .map((c) => c.label)
+        .join(', ')}`,
+      meta: {
+        entryId: id,
+        ownerId: row.userId,
+        ownerName: ownerName ?? null,
+        onBehalf,
+        changes: changes.map((c) => ({ field: c.field, from: c.from, to: c.to })),
+      },
+    });
+  }
+
   emit.toUser(updated.userId, EV.ENTRY_UPDATED, { id: updated.id, by: viewerId, at: new Date().toISOString() });
   return updated;
 }
@@ -314,11 +376,35 @@ export async function submitEntries(ids: string[], whoId: string, canManageAll =
       count: result.filter((r) => r.userId === uid).length,
     });
   }
-  if (result.length > 0) {
+  // Audit. Separate self-submits from on-behalf submits so admins can see
+  // when someone pushed a teammate's time into the approval queue, and whose.
+  const own = result.filter((r) => r.userId === whoId);
+  const others = result.filter((r) => r.userId !== whoId);
+  if (own.length > 0) {
     await appendActivity({
       whoId,
       kind: 'time.submit',
-      target: `${result.length} entries submitted for approval`,
+      target: `${own.length} ${own.length === 1 ? 'entry' : 'entries'} submitted for approval`,
+    });
+  }
+  if (others.length > 0) {
+    const byUser = new Map<string, number>();
+    for (const r of others) byUser.set(r.userId, (byUser.get(r.userId) ?? 0) + 1);
+    const us = await listUsers();
+    const perUser = [...byUser.entries()].map(([userId, count]) => ({
+      userId,
+      name: us.find((u) => u.id === userId)?.name ?? 'a teammate',
+      count,
+    }));
+    const nameList =
+      perUser.length <= 3
+        ? perUser.map((p) => p.name).join(', ')
+        : `${perUser.slice(0, 3).map((p) => p.name).join(', ')} +${perUser.length - 3} more`;
+    await appendActivity({
+      whoId,
+      kind: 'time.submit_on_behalf',
+      target: `Submitted ${others.length} ${others.length === 1 ? 'entry' : 'entries'} on behalf of ${nameList}`,
+      meta: { onBehalf: true, perUser },
     });
   }
   return result.length;

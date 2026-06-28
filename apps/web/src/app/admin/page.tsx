@@ -1001,6 +1001,24 @@ function readAsDataUrl(file: File): Promise<string> {
   });
 }
 
+// Common IANA zones for the reminder scheduler. If a workspace has a value
+// outside this list (set via API/import), it's prepended so it stays visible.
+const TIMEZONES = [
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Phoenix',
+  'America/Los_Angeles',
+  'America/Anchorage',
+  'Pacific/Honolulu',
+  'UTC',
+  'Europe/London',
+  'Europe/Berlin',
+  'Asia/Kolkata',
+  'Asia/Tokyo',
+  'Australia/Sydney',
+];
+
 function PayTab() {
   const toast = useToast();
   const { data: periods = [] } = usePayPeriods();
@@ -1081,6 +1099,7 @@ function PayTab() {
           {config.cadence === 'by-date' && (
             <div className="md:col-span-2">
               <Field
+                as="div"
                 label="Pay dates"
                 hint="Days of the month each pay period closes on. Up to 8. Dates beyond a month's last day clamp to that month's end (e.g. picking 31 in February uses the 28th)."
               >
@@ -1116,8 +1135,39 @@ function PayTab() {
           <Field label="Processing buffer (days)">
             <Input type="number" min={0} defaultValue={config.processingBufferDays} onBlur={(e) => patch({ processingBufferDays: Number(e.target.value) || 0 })} />
           </Field>
-          <Field label="Auto-close at cutoff">
+          <Field as="div" label="Auto-close at cutoff">
             <div className="pt-2"><Checkbox label="Auto-close periods at the approval cutoff" checked={config.autoClose} onChange={(v) => patch({ autoClose: v })} /></div>
+          </Field>
+
+          <div className="md:col-span-2 border-t border-gray-100 pt-4 mt-1">
+            <div className="text-[13px] font-semibold text-gray-800">Reminder emails</div>
+            <p className="text-[12px] text-gray-500 mt-0.5">
+              On each period&apos;s processing day (pay date minus the {config.processingBufferDays}-day buffer,
+              shifted off weekends by the rule above), Hoppa can email employees in the morning to submit any
+              unsubmitted time, then email approvers at the end of the day to review it. Times use the workspace
+              timezone below.
+            </p>
+          </div>
+          <Field label="Workspace timezone" hint="Anchors when reminder emails go out.">
+            <Select value={config.timezone} onChange={(e) => patch({ timezone: e.target.value })}>
+              {(TIMEZONES.includes(config.timezone) ? TIMEZONES : [config.timezone, ...TIMEZONES]).map((tz) => (
+                <option key={tz} value={tz}>{tz.replace(/_/g, ' ')}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field as="div" label="Send reminders">
+            <div className="pt-2 space-y-2">
+              <Checkbox
+                label="Remind employees to submit time (morning)"
+                checked={config.remindEmployees}
+                onChange={(v) => patch({ remindEmployees: v })}
+              />
+              <Checkbox
+                label="Remind approvers to review time (end of day)"
+                checked={config.remindApprovers}
+                onChange={(v) => patch({ remindApprovers: v })}
+              />
+            </div>
           </Field>
 
           <div className="md:col-span-2">

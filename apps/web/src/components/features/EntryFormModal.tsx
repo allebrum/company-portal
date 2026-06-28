@@ -64,9 +64,10 @@ export function EntryFormModal({
   const [start, setStart] = useState(defaultStart());
   const [end, setEnd] = useState(plusHours(defaultStart(), 1));
   const [note, setNote] = useState('');
-  // Admins with `time_entry.edit` can log time on behalf of a teammate —
-  // the entry lands as that user's draft. Everyone else logs for themselves.
-  const canLogForOthers = can('time_entry.edit');
+  // Admins with `time_entry.edit` OR the narrower `time_entry.submit_on_behalf`
+  // can log time on behalf of a teammate — the entry lands as that user's
+  // draft. Everyone else logs for themselves.
+  const canLogForOthers = can('time_entry.edit') || can('time_entry.submit_on_behalf');
   const [forUserId, setForUserId] = useState('');
 
   useEffect(() => {

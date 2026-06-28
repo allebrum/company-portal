@@ -229,6 +229,9 @@ export type PayConfigRow = {
   processingBufferDays: number;
   autoClose: boolean;
   approverId: string | null;
+  timezone: string;
+  remindEmployees: boolean;
+  remindApprovers: boolean;
 };
 export type IntegrationRow = {
   kind: string;
