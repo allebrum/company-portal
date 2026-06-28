@@ -437,6 +437,98 @@ export async function sendTicketUpdateEmail(args: {
   await send(args.senderUserId, args.to, c.subject, html, text);
 }
 
+/**
+ * Reminder nudge to an employee on the processing day — they still have
+ * unsubmitted (draft) time in the open pay period. Sent from the workspace's
+ * system-sender Gmail (same account as password-reset); log-and-noop fallback
+ * when not connected.
+ */
+export async function sendTimeReminderEmail(args: {
+  senderUserId: string | null;
+  to: string;
+  name: string;
+  periodLabel: string;
+  draftCount: number;
+  draftMinutes: number;
+  /** Tenant-local processing day, e.g. "Fri, Jun 26". */
+  dueDateLabel: string;
+  timeUrl: string;
+}): Promise<void> {
+  const hrs = (args.draftMinutes / 60).toFixed(1);
+  const what = `${args.draftCount} unsubmitted ${args.draftCount === 1 ? 'entry' : 'entries'} (${hrs}h)`;
+  const subject = `Reminder: submit your time for ${args.periodLabel}`;
+  const text = [
+    `Hi ${args.name},`,
+    '',
+    `Today (${args.dueDateLabel}) is the processing day for the ${args.periodLabel} pay period.`,
+    `You still have ${what} sitting as drafts — please review and submit them so they can be approved in time for payroll.`,
+    '',
+    `Submit your time: ${args.timeUrl}`,
+    '',
+    '— The Allebrum portal',
+  ].join('\n');
+  const html = wrap(`
+    <h2 style="margin:0 0 12px 0;font-size:20px;color:#111;">Time to submit your hours</h2>
+    <p style="margin:0 0 16px 0;color:#374151;">
+      Hi ${esc(args.name)}, today (<strong>${esc(args.dueDateLabel)}</strong>) is the processing day for the
+      <strong>${esc(args.periodLabel)}</strong> pay period. You still have
+      <strong>${esc(what)}</strong> saved as drafts. Review and submit them so they make it into payroll.
+    </p>
+    ${button(args.timeUrl, 'Review & submit time')}
+    <p style="margin:24px 0 0 0;font-size:12px;color:#9ca3af;">
+      Already submitted everything? You can ignore this — it only counts drafts that haven't been sent for approval yet.
+    </p>
+  `);
+  await send(args.senderUserId, args.to, subject, html, text);
+}
+
+/**
+ * End-of-day prompt to the people who approve time (`time_entry.approve`, or
+ * the workspace owner as a fallback) on the processing day. One email to the
+ * whole approver set — first address To:, the rest Cc:.
+ */
+export async function sendApprovalReminderEmail(args: {
+  senderUserId: string | null;
+  to: string;
+  cc?: string | null;
+  periodLabel: string;
+  submittedCount: number;
+  draftCount: number;
+  /** Tenant-local processing day, e.g. "Fri, Jun 26". */
+  dueDateLabel: string;
+  approvalsUrl: string;
+}): Promise<void> {
+  const subject = `Time to approve: ${args.periodLabel}`;
+  const pending = `${args.submittedCount} ${args.submittedCount === 1 ? 'entry is' : 'entries are'} waiting for approval`;
+  const draftsNote =
+    args.draftCount > 0
+      ? `${args.draftCount} ${args.draftCount === 1 ? 'entry is' : 'entries are'} still in draft (not yet submitted).`
+      : 'All time has been submitted.';
+  const text = [
+    `Today (${args.dueDateLabel}) is the processing day for the ${args.periodLabel} pay period.`,
+    '',
+    `${pending}. ${draftsNote}`,
+    'Please approve, reject, or reopen the submitted entries so the period can be closed and sent to the bookkeeper.',
+    '',
+    `Open approvals: ${args.approvalsUrl}`,
+    '',
+    '— The Allebrum portal',
+  ].join('\n');
+  const html = wrap(`
+    <h2 style="margin:0 0 12px 0;font-size:20px;color:#111;">Time to approve ${esc(args.periodLabel)}</h2>
+    <p style="margin:0 0 8px 0;color:#374151;">
+      Today (<strong>${esc(args.dueDateLabel)}</strong>) is the processing day for this pay period.
+      <strong>${esc(pending)}</strong>.
+    </p>
+    <p style="margin:0 0 16px 0;color:#6b7280;font-size:13px;">${esc(draftsNote)}</p>
+    ${button(args.approvalsUrl, 'Review approvals')}
+    <p style="margin:24px 0 0 0;font-size:12px;color:#9ca3af;">
+      Once everything is approved you can close the period and send the payroll report to the bookkeeper.
+    </p>
+  `);
+  await send(args.senderUserId, args.to, subject, html, text, args.cc);
+}
+
 // ---- HTML helpers ----
 
 function wrap(body: string): string {

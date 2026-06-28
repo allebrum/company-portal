@@ -6,6 +6,12 @@ export const PERMISSIONS = [
   'time_entry.edit',
   'time_entry.delete',
   'time_entry.submit',
+  // Submit (and log) time on behalf of OTHER workspace members so an admin /
+  // bookkeeper can get everyone's hours into the approval queue when people
+  // forget. Deliberately narrower than `time_entry.edit`: it does NOT grant
+  // editing or deleting arbitrary entries — only creating + submitting them
+  // for a teammate. Routes accept either this or `time_entry.edit`.
+  'time_entry.submit_on_behalf',
   'time_entry.approve',
   'pay.manage',
   'users.manage',
@@ -37,6 +43,7 @@ export const PERMISSION_CATEGORIES: Record<string, Permission[]> = {
     'time_entry.edit',
     'time_entry.delete',
     'time_entry.submit',
+    'time_entry.submit_on_behalf',
     'time_entry.approve',
   ],
   Payroll: ['pay.manage'],
@@ -53,6 +60,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'time_entry.edit': 'Edit any time entry',
   'time_entry.delete': 'Delete any time entry',
   'time_entry.submit': 'Submit time for approval',
+  'time_entry.submit_on_behalf': "Submit / log time on behalf of others",
   'time_entry.approve': 'Approve / reject / reopen time',
   'pay.manage': 'Manage pay periods & pay config',
   'users.manage': 'Invite, edit, remove users',
@@ -79,7 +87,10 @@ export type SystemGroup = (typeof SYSTEM_GROUPS)[number];
 export const SYSTEM_GROUP_PERMISSIONS: Record<SystemGroup, Permission[]> = {
   Owner: [...PERMISSIONS],
   Admin: PERMISSIONS.filter((p) => p !== 'groups.manage'),
-  Bookkeeper: ['time_entry.view_all', 'pay.manage'],
+  // Bookkeepers chase missing time so payroll can run — give them the
+  // dedicated on-behalf submit power (they can log + submit a teammate's
+  // hours) without the broader edit/delete reach of an admin.
+  Bookkeeper: ['time_entry.view_all', 'time_entry.submit_on_behalf', 'pay.manage'],
   Member: [
     'time_entry.create',
     'time_entry.view_own',

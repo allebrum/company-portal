@@ -594,8 +594,39 @@ export const payConfig = pgTable('pay_config', {
   processingBufferDays: integer('processing_buffer_days').notNull().default(5),
   autoClose: boolean('auto_close').notNull().default(true),
   approverId: uuid('approver_id').references(() => users.id, { onDelete: 'set null' }),
+  // IANA timezone the workspace's payroll clock runs in. Anchors the reminder
+  // scheduler (jobs/timeReminders) — DB timestamps are UTC, so "the morning of
+  // the processing day" needs an explicit zone. Defaults to the prod region
+  // (DigitalOcean nyc). Self-host / other tenants change it in Pay settings.
+  timezone: text('timezone').notNull().default('America/New_York'),
+  // Reminder-email toggles. Both fire on the processing day (pay date minus
+  // processing buffer, weekend-rule adjusted): a morning nudge to employees
+  // with unsubmitted time, an end-of-day prompt to approvers.
+  remindEmployees: boolean('remind_employees').notNull().default(true),
+  remindApprovers: boolean('remind_approvers').notNull().default(true),
   updatedAt: updTs(),
 });
+
+// ---- Time-reminder idempotency log ----
+// One row per (tenant, period, kind, local send-date) marking that a reminder
+// batch already went out. The reminder sweep ticks several times an hour, so
+// this guard is what keeps it to a single send per day even across restarts
+// and (should the app ever scale past one instance) concurrent sweeps — the
+// unique index makes the "claim" an atomic INSERT ... ON CONFLICT DO NOTHING.
+export const timeReminderLog = pgTable('time_reminder_log', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRefNN(),
+  periodId: uuid('period_id').notNull().references(() => payPeriods.id, { onDelete: 'cascade' }),
+  // 'employee' (morning, to people with unsubmitted time) | 'approver'
+  // (end-of-day, to approvers / the workspace owner).
+  kind: text('kind').notNull(),
+  // The tenant-local calendar date (YYYY-MM-DD) the batch was sent for.
+  sentOn: date('sent_on').notNull(),
+  recipients: integer('recipients').notNull().default(0),
+  createdAt: ts(),
+}, (t) => ({
+  oncePerDay: uniqueIndex('time_reminder_log_once_idx').on(t.tenantId, t.periodId, t.kind, t.sentOn),
+}));
 
 // ---- Time entries ----
 export const timeEntries = pgTable('time_entries', {
@@ -922,6 +953,7 @@ export type Ticket = typeof tickets.$inferSelect;
 export type TicketMessage = typeof ticketMessages.$inferSelect;
 export type PayPeriod = typeof payPeriods.$inferSelect;
 export type PayConfig = typeof payConfig.$inferSelect;
+export type TimeReminderLog = typeof timeReminderLog.$inferSelect;
 export type TimeEntry = typeof timeEntries.$inferSelect;
 export type ActiveTimer = typeof activeTimers.$inferSelect;
 export type ActivityRow = typeof activityLog.$inferSelect;

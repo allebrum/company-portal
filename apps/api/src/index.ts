@@ -13,6 +13,7 @@ import { apiRouter } from './routes/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { initIO } from './realtime/io.js';
 import { startPayPeriodSweep } from './jobs/payPeriodSweep.js';
+import { startTimeReminderSweep } from './jobs/timeReminders.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -105,6 +106,11 @@ httpServer.listen(env.API_PORT, () => {
 // Keep every workspace's pay-period runway topped up without anyone having
 // to visit the Approvals page (boot + every 12h; idempotent per tenant).
 startPayPeriodSweep();
+
+// Payroll reminder emails: on each workspace's processing day, nudge
+// employees (morning) to submit time and approvers (end of day) to review it.
+// Idempotent per (tenant, period, kind, local-day); honors per-workspace tz.
+startTimeReminderSweep();
 
 // Billing (Stripe + the recurring-charge cron) lives in the separate marketing
 // service now; the portal only reads the tenant billing columns to gate.

@@ -10,6 +10,7 @@ export function Field({
   required,
   children,
   className,
+  as = 'label',
 }: {
   label?: string;
   hint?: string;
@@ -20,11 +21,21 @@ export function Field({
   required?: boolean;
   children: ReactNode;
   className?: string;
+  /**
+   * Element to render as. Defaults to `label` — correct when the field wraps a
+   * single labelable control (input/select/textarea). Use `div` when wrapping
+   * a CONTROL GROUP (e.g. removable chips, multiple checkboxes): a `<label>`
+   * forwards stray clicks in its whitespace to the first interactive descendant,
+   * which would, say, fire the first chip's remove button. `div` avoids that
+   * (and is the accessible choice, since one label can't point to many controls).
+   */
+  as?: 'label' | 'div';
 }) {
+  const Tag = as;
   return (
-    <label className={cn('block space-y-1.5', className)}>
+    <Tag className={cn('block space-y-1.5', className)}>
       {label && (
-        <span className="text-xs font-semibold uppercase tracking-wide text-gray-600">
+        <span className="text-xs font-semibold uppercase tracking-wide text-gray-600 block">
           {label}
           {required && <span className="text-red-500 ml-0.5" aria-hidden="true">*</span>}
         </span>
@@ -35,7 +46,7 @@ export function Field({
       ) : (
         hint && <span className="text-[11px] text-gray-500 block">{hint}</span>
       )}
-    </label>
+    </Tag>
   );
 }
 

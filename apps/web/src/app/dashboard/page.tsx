@@ -415,6 +415,7 @@ export default function DashboardPage() {
                     <Avatar user={u} size={24} />
                     <div className="flex-1 min-w-0">
                       <div className="text-sm text-gray-800 truncate">{a.target}</div>
+                      <ActivityChanges meta={a.meta} />
                       <div className="text-[11px] text-gray-500">{u?.name ?? 'Unknown'} · {relativeFromIso(a.createdAt)}</div>
                     </div>
                   </li>
@@ -527,6 +528,39 @@ function PlateRow({
  * Tag pill rendered on every PlateRow. Colors match the dashboard's
  * existing palette so the row reads as a single coherent line.
  */
+// Renders the before/after field diff captured on a `time.edit` activity row
+// (meta.changes). Times are formatted in the viewer's local timezone — the
+// same zone the entry was edited in — and duration in h/m.
+function ActivityChanges({ meta }: { meta: Record<string, unknown> | null }) {
+  const changes = (meta?.changes as Array<{ field: string; from: string; to: string }> | undefined) ?? null;
+  if (!changes || changes.length === 0) return null;
+  return (
+    <ul className="mt-1 mb-0.5 space-y-0.5">
+      {changes.map((c, i) => (
+        <li key={i} className="text-[11px] text-gray-500">
+          <span className="font-medium text-gray-600">{c.field}:</span>{' '}
+          <span className="text-gray-400 line-through">{fmtChangeVal(c.field, c.from)}</span>{' → '}
+          <span className="text-gray-700">{fmtChangeVal(c.field, c.to)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+function fmtChangeVal(field: string, v: string): string {
+  if (!v) return '—';
+  if (field === 'start' || field === 'end') {
+    const d = new Date(v);
+    return isNaN(d.getTime())
+      ? v
+      : d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  }
+  if (field === 'duration') {
+    const m = Number(v);
+    return isNaN(m) ? v : fmtMins(m);
+  }
+  return v.length > 48 ? `${v.slice(0, 48)}…` : v;
+}
+
 function KindPill({ kind }: { kind: 'todo' | 'goal' | 'team' | 'activity' }) {
   const config = {
     todo: { label: 'Todo', tone: 'bg-brand-50 text-brand-700', Icon: CheckSquare },

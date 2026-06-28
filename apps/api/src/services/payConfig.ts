@@ -29,6 +29,9 @@ export async function updateConfig(patch: Partial<PayConfigInput>, whoId: string
   if (patch.processingBufferDays !== undefined) upd.processingBufferDays = patch.processingBufferDays;
   if (patch.autoClose !== undefined) upd.autoClose = patch.autoClose;
   if (patch.approverId !== undefined) upd.approverId = patch.approverId;
+  if (patch.timezone !== undefined) upd.timezone = patch.timezone;
+  if (patch.remindEmployees !== undefined) upd.remindEmployees = patch.remindEmployees;
+  if (patch.remindApprovers !== undefined) upd.remindApprovers = patch.remindApprovers;
   const tenantId = currentTenantId();
   const [updated] = await db
     .update(payConfig)
@@ -39,13 +42,23 @@ export async function updateConfig(patch: Partial<PayConfigInput>, whoId: string
   emit.toOrg(EV.PAY_CONFIG_UPDATED, { id: tenantId, by: whoId, at: new Date().toISOString() });
   await appendActivity({ whoId, kind: 'period.config', target: 'Pay schedule updated' });
   // Regenerate future periods from the new schedule so admins never need
-  // to manually click "Generate". Errors logged but don't fail the save —
-  // the config row is already updated and a subsequent /pay-periods GET
-  // will lazy-fill via ensureFuturePeriods.
-  try {
-    await regenerateFuturePeriods({ whoId });
-  } catch (e) {
-    console.error('[pay-config] regenerateFuturePeriods failed', e);
+  // to manually click "Generate". Only the schedule-shaping fields move the
+  // dates — changing just the timezone or a reminder toggle shouldn't churn
+  // the period table. Errors logged but don't fail the save — the config row
+  // is already updated and a subsequent /pay-periods GET will lazy-fill via
+  // ensureFuturePeriods.
+  const scheduleChanged =
+    patch.cadence !== undefined ||
+    patch.payDates !== undefined ||
+    patch.weekendRule !== undefined ||
+    patch.anchor !== undefined ||
+    patch.processingBufferDays !== undefined;
+  if (scheduleChanged) {
+    try {
+      await regenerateFuturePeriods({ whoId });
+    } catch (e) {
+      console.error('[pay-config] regenerateFuturePeriods failed', e);
+    }
   }
   return updated;
 }
