@@ -406,6 +406,30 @@ authRouter.get('/handoff', async (req, res, next) => {
 // so an SSO-only org never emits reset links — and `verifyLogin`/the reset flow
 // already no-op for accounts with no password hash.
 
+/**
+ * Best-effort audit write for the UNAUTHENTICATED password flows. These run
+ * with no session, so there's no tenant in the AsyncLocalStorage context —
+ * calling appendActivity directly throws `currentTenantId() called outside a
+ * tenant context` and (because the password UPDATE already ran) turns a
+ * successful reset/accept into a 500. So: resolve the user's workspace, stamp
+ * the activity row to it, and swallow any failure — an audit log must never
+ * break the auth action that triggered it.
+ */
+async function safeAudit(
+  userId: string,
+  kind: string,
+  target: string,
+  knownTenantId?: string | null,
+): Promise<void> {
+  try {
+    const tenantId = knownTenantId ?? (await resolveLoginTenantId(userId));
+    if (!tenantId) return;
+    await withTenant(tenantId, () => appendActivity({ whoId: userId, kind, target }));
+  } catch (e) {
+    console.error(`[auth] activity log failed (${kind})`, e);
+  }
+}
+
 // "Forgot password" returns 200 unconditionally to defeat email-enumeration.
 // We perform a constant-time argon2 dummy hash on misses so timing doesn't
 // leak whether an email is registered.
@@ -443,7 +467,7 @@ authRouter.post(
           resetUrl,
           expiresAt,
         });
-        await appendActivity({ whoId: user.id, kind: 'auth.reset.request', target: user.email });
+        await safeAudit(user.id, 'auth.reset.request', user.email, tenantId);
       } else {
         // Spend ~the same wall-clock time as the hit branch so a clock-
         // wielding attacker can't enumerate emails by response timing.
@@ -479,7 +503,7 @@ authRouter.post(
         .update(users)
         .set({ passwordHash, updatedAt: new Date().toISOString() })
         .where(eq(users.id, userId));
-      await appendActivity({ whoId: userId, kind: 'auth.reset.complete', target: userId });
+      await safeAudit(userId, 'auth.reset.complete', userId);
       res.json({ ok: true });
     } catch (e) {
       next(e);
@@ -513,7 +537,7 @@ authRouter.post(
         .update(users)
         .set({ passwordHash, status: 'active', updatedAt: new Date().toISOString() })
         .where(eq(users.id, userId));
-      await appendActivity({ whoId: userId, kind: 'auth.invite.accept', target: userId });
+      await safeAudit(userId, 'auth.invite.accept', userId);
       res.json({ ok: true });
     } catch (e) {
       next(e);
