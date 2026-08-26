@@ -11,6 +11,7 @@ import {
 import type { AuthConfig, AuthMethods } from '@allebrum/shared';
 import { validate, getValidated } from '../middleware/validate.js';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { issueCsrfToken } from '../middleware/csrf.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { verifyLogin, getUser, findByEmail, findOrCreateGoogleUser } from '../services/users.js';
 import { getEffectivePermissions } from '../auth/permissions.js';
@@ -80,6 +81,15 @@ authRouter.get('/config', async (_req, res, next) => {
   } catch (e) {
     next(e);
   }
+});
+
+// Anti-CSRF token for cookie-carrying NON-browser clients (scripts, CLIs):
+// browsers prove same-siteness via Origin / Sec-Fetch-Site headers, but a
+// script driving the session cookie sends neither, so it fetches this token
+// once and echoes it as `x-csrf-token` on state-changing requests
+// (middleware/csrf.ts). Session-gated so anonymous hits can't mint sessions.
+authRouter.get('/csrf', requireAuth, (req, res) => {
+  res.json({ token: issueCsrfToken(req) });
 });
 
 // PostHog Support widget — identity verification. Signs the session user's

@@ -9,6 +9,7 @@ import compression from 'compression';
 import pinoHttp from 'pino-http';
 import { env, isProd } from './env.js';
 import { sessionMiddleware } from './session.js';
+import { csrfProtection } from './middleware/csrf.js';
 import { apiRouter } from './routes/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { initIO } from './realtime/io.js';
@@ -22,6 +23,12 @@ app.use(
   helmet({
     contentSecurityPolicy: false,
     crossOriginResourcePolicy: { policy: 'cross-origin' },
+    // Helmet's default `no-referrer` makes browsers send `Origin: null` on
+    // same-origin POSTs (the Origin header respects referrer policy for
+    // non-CORS requests), which would trip the CSRF origin check in the
+    // single-origin SERVE_WEB deployment. `same-origin` keeps Origin/Referer
+    // intact for our own pages while still hiding them from other sites.
+    referrerPolicy: { policy: 'same-origin' },
   }),
 );
 app.use(
@@ -53,6 +60,22 @@ app.use(
 );
 app.use(cookieParser());
 app.use(sessionMiddleware);
+// CSRF guard for every state-changing route behind the session cookie (prod
+// cookies are SameSite=None, so SameSite is no defense). Same-origin proof
+// via Sec-Fetch-Site / Origin / Referer, or the session's x-csrf-token for
+// non-browser clients — see middleware/csrf.ts. Exempt surfaces authenticate
+// without ambient cookies: /provisioning is HMAC-signed server-to-server,
+// /f is the public embedded-forms API (cookieless, cross-origin by design),
+// /q is the public QR scan surface, and the upload-QR `:token/files` drop is
+// capability-token-authenticated (its cookie-authed /sessions admin routes
+// stay guarded).
+app.use(
+  csrfProtection({
+    allowedOrigins: [env.WEB_ORIGIN],
+    exemptPrefixes: ['/api/provisioning', '/api/f', '/api/q'],
+    exemptPatterns: [/^\/api\/upload\/qr\/(?!sessions\b)[^/]+\/files$/],
+  }),
+);
 app.use(
   pinoHttp({
     transport: isProd ? undefined : { target: 'pino-pretty', options: { colorize: true, singleLine: true } },
