@@ -14,6 +14,10 @@ declare module 'express-session' {
     pending?: { userId: string; tenantId: string };
     // Transient WebAuthn challenge for register/authenticate ceremonies.
     webauthnChallenge?: string;
+    // Anti-CSRF token for cookie-carrying clients that send no Origin /
+    // Sec-Fetch-Site headers (non-browser scripts). Issued by
+    // GET /auth/csrf, checked in middleware/csrf.ts.
+    csrfToken?: string;
     // Google *login* OAuth state (auth.ts). Gmail + Drive connect each use
     // their own slots below so concurrent flows can't collide.
     oauthState?: string;
