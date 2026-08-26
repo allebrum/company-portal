@@ -27,6 +27,14 @@ const EnvSchema = z.object({
   // Gmail send (per-user OAuth for transactional invites + resets; reuses
   // the Google OAuth client and defaults the redirect like Drive does)
   GMAIL_OAUTH_REDIRECT_URL: z.string().url().optional(),
+  // QuickBooks Online (client invoicing). Own OAuth app — not Google. The
+  // integration stays dormant until both credentials are set; the redirect
+  // defaults to the API origin's quickbooks callback path (derived from
+  // OAUTH_REDIRECT_URL like Drive/Gmail, or set explicitly).
+  QUICKBOOKS_CLIENT_ID: z.string().optional(),
+  QUICKBOOKS_CLIENT_SECRET: z.string().optional(),
+  QUICKBOOKS_REDIRECT_URL: z.string().url().optional(),
+  QUICKBOOKS_ENVIRONMENT: z.enum(['sandbox', 'production']).default('production'),
   // Production bootstrap (consumed only by `db:init`; the API itself does
   // not require these, so they stay optional here and are validated there).
   ADMIN_EMAIL: z.string().email().optional(),
@@ -110,6 +118,19 @@ export const gmailOAuthConfigured = !!(
   env.GOOGLE_OAUTH_CLIENT_ID &&
   env.GOOGLE_OAUTH_CLIENT_SECRET &&
   gmailRedirectUrl
+);
+
+// QuickBooks OAuth — its own Intuit app (not the Google client). Redirect
+// derives from OAUTH_REDIRECT_URL's origin when not set explicitly.
+export const quickbooksRedirectUrl =
+  env.QUICKBOOKS_REDIRECT_URL ??
+  (env.OAUTH_REDIRECT_URL
+    ? env.OAUTH_REDIRECT_URL.replace(/\/api\/auth\/google\/callback$/, '/api/integrations/quickbooks/callback')
+    : undefined);
+export const quickbooksOAuthConfigured = !!(
+  env.QUICKBOOKS_CLIENT_ID &&
+  env.QUICKBOOKS_CLIENT_SECRET &&
+  quickbooksRedirectUrl
 );
 
 // The identity provisioning contract (marketing → portal) is only mounted when

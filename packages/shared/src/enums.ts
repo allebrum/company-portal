@@ -14,6 +14,11 @@ export const PERMISSIONS = [
   'time_entry.submit_on_behalf',
   'time_entry.approve',
   'pay.manage',
+  // Client invoicing — see which hours have/haven't been billed to a client,
+  // mark entries invoiced, and push invoices into QuickBooks. Separate from
+  // `pay.manage` (payroll) because billing clients and paying employees are
+  // different jobs, even when one person does both.
+  'invoices.manage',
   'users.manage',
   'groups.manage',
   'clients.manage',
@@ -47,6 +52,7 @@ export const PERMISSION_CATEGORIES: Record<string, Permission[]> = {
     'time_entry.approve',
   ],
   Payroll: ['pay.manage'],
+  Invoicing: ['invoices.manage'],
   People: ['users.manage', 'groups.manage'],
   Workspace: ['clients.manage', 'projects.manage', 'goals.manage', 'integrations.manage', 'media.manage'],
   'Client portal': ['portal.manage', 'tickets.manage'],
@@ -63,6 +69,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'time_entry.submit_on_behalf': "Submit / log time on behalf of others",
   'time_entry.approve': 'Approve / reject / reopen time',
   'pay.manage': 'Manage pay periods & pay config',
+  'invoices.manage': 'Mark time invoiced & create client invoices',
   'users.manage': 'Invite, edit, remove users',
   'groups.manage': 'Manage groups & permissions',
   'clients.manage': 'Create / edit clients',
@@ -90,7 +97,7 @@ export const SYSTEM_GROUP_PERMISSIONS: Record<SystemGroup, Permission[]> = {
   // Bookkeepers chase missing time so payroll can run — give them the
   // dedicated on-behalf submit power (they can log + submit a teammate's
   // hours) without the broader edit/delete reach of an admin.
-  Bookkeeper: ['time_entry.view_all', 'time_entry.submit_on_behalf', 'pay.manage'],
+  Bookkeeper: ['time_entry.view_all', 'time_entry.submit_on_behalf', 'pay.manage', 'invoices.manage'],
   Member: [
     'time_entry.create',
     'time_entry.view_own',

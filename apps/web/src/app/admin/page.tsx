@@ -31,6 +31,8 @@ import {
   useQrUploadSessionFiles,
   useRevokeQrUploadSession,
 } from '@/hooks/useQrUploadSession';
+import { useQboStatus, qboConnectUrl } from '@/hooks/useInvoicing';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   useUsers,
   useClients,
@@ -1398,6 +1400,8 @@ function IntegrationsTab() {
   const sync = useSyncDrive();
   const unlink = useUnlinkDriveFolder();
   const { data: driveStatus } = useDriveStatus();
+  const { data: qboStatus } = useQboStatus();
+  const qc = useQueryClient();
   const reconcile = useReconcileDriveFolders();
   const [linkOpen, setLinkOpen] = useState(false);
   const [reconcileReport, setReconcileReport] = useState<DriveReconciliationReport | null>(null);
@@ -1423,17 +1427,25 @@ function IntegrationsTab() {
           {(['drive', 'github', 'slack', 'quickbooks'] as const).map((kind) => {
             const i = byKind(kind);
             const isDrive = kind === 'drive';
-            const connected = isDrive ? driveConnected : !!i?.connected;
+            const isQbo = kind === 'quickbooks';
+            const qboConnected = !!qboStatus?.connected;
+            const connected = isDrive ? driveConnected : isQbo ? qboConnected : !!i?.connected;
             const accountLabel = isDrive
               ? (driveStatus?.account ?? (connected ? 'connected' : 'not connected'))
-              : (i?.account ?? (connected ? 'connected' : 'not connected'));
+              : isQbo
+                ? (qboStatus?.companyName ?? (connected ? 'connected' : qboStatus?.configured ? 'not connected' : 'not configured on this server'))
+                : (i?.account ?? (connected ? 'connected' : 'not connected'));
             const lastSyncLabel = isDrive ? i?.lastSyncAt : i?.lastSyncAt;
+            const title = kind === 'drive' ? 'Google Drive' : kind === 'quickbooks' ? 'QuickBooks' : kind;
             return (
               <Tile key={kind}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-sm font-bold text-gray-900 capitalize">{kind === 'drive' ? 'Google Drive' : kind}</div>
+                    <div className="text-sm font-bold text-gray-900 capitalize">{title}</div>
                     <div className="text-[12px] text-gray-500">{accountLabel}</div>
+                    {isQbo && qboStatus?.environment === 'sandbox' && (
+                      <div className="text-[11px] text-amber-600 mt-1">Sandbox environment</div>
+                    )}
                     {lastSyncLabel && <div className="text-[11px] text-gray-400 mt-1">Last sync {new Date(lastSyncLabel).toLocaleString()}</div>}
                   </div>
                   {connected ? (
@@ -1441,10 +1453,11 @@ function IntegrationsTab() {
                       variant="ghost"
                       size="sm"
                       onClick={() =>
-                        run(
-                          () => (isDrive ? disconnectDrive.mutateAsync() : disconnect.mutateAsync(kind)),
-                          `${kind} disconnected`,
-                        )
+                        run(async () => {
+                          if (isDrive) return disconnectDrive.mutateAsync();
+                          await disconnect.mutateAsync(kind);
+                          if (isQbo) qc.invalidateQueries({ queryKey: ['qboStatus'] });
+                        }, `${kind} disconnected`)
                       }
                     >
                       Disconnect
@@ -1452,6 +1465,16 @@ function IntegrationsTab() {
                   ) : (
                     isDrive ? (
                       <Button variant="primary" size="sm" onClick={() => window.location.assign(driveConnectUrl())}>
+                        Connect
+                      </Button>
+                    ) : isQbo ? (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        disabled={!qboStatus?.configured}
+                        title={qboStatus?.configured ? undefined : 'Set QUICKBOOKS_CLIENT_ID / QUICKBOOKS_CLIENT_SECRET on the server first.'}
+                        onClick={() => window.location.assign(qboConnectUrl('/admin?adminTab=integrations'))}
+                      >
                         Connect
                       </Button>
                     ) : (
