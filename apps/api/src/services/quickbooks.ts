@@ -27,6 +27,19 @@ function apiBase(): string {
     : 'https://quickbooks.api.intuit.com';
 }
 
+// Intuit company (realm) ids are numeric. The value arrives on the OAuth
+// callback query string, so gate it strictly everywhere it's interpolated
+// into a request URL — a crafted value must never be able to steer the
+// request (path traversal / query injection / SSRF).
+export function isValidRealmId(realmId: string): boolean {
+  return /^\d{1,32}$/.test(realmId);
+}
+
+function assertRealmId(realmId: string): string {
+  if (!isValidRealmId(realmId)) throw new HttpError(409, 'quickbooks_invalid_realm');
+  return realmId;
+}
+
 export function quickbooksConfigured(): boolean {
   return quickbooksOAuthConfigured;
 }
@@ -170,7 +183,7 @@ async function getRealmId(): Promise<string> {
   const integration = await getQboIntegrationRow();
   const realmId = ((integration?.config ?? {}) as { realmId?: string }).realmId;
   if (!realmId) throw new HttpError(409, 'quickbooks_not_connected');
-  return realmId;
+  return assertRealmId(realmId);
 }
 
 /** A valid access token, refreshing (and persisting the rotated refresh
@@ -217,9 +230,10 @@ async function qboFetch<T>(path: string, init?: { method?: string; body?: unknow
   return (await res.json()) as T;
 }
 
-// QBO query strings take single-quoted literals; escape embedded quotes.
+// QBO query strings take single-quoted literals; escape backslashes first,
+// then quotes, so an input backslash can never un-escape the quote we add.
 function q(value: string): string {
-  return value.replace(/\\/g, '').replace(/'/g, "\\'");
+  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
 async function qboQuery<T>(query: string): Promise<T | undefined> {
@@ -234,6 +248,7 @@ export type QboItem = { id: string; name: string };
 
 export async function getQboCompanyName(realmId: string, accessToken: string): Promise<string | null> {
   try {
+    if (!isValidRealmId(realmId)) return null;
     const url = new URL(`${apiBase()}/v3/company/${realmId}/companyinfo/${realmId}`);
     url.searchParams.set('minorversion', MINOR_VERSION);
     const res = await fetch(url, {

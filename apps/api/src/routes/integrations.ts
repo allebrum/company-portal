@@ -53,6 +53,7 @@ import {
   saveQboToken,
   getQboStatus,
   getQboCompanyName,
+  isValidRealmId,
   listQboCustomers,
   listQboServiceItems,
 } from '../services/quickbooks.js';
@@ -369,8 +370,10 @@ integrationsRouter.get('/quickbooks/callback', async (req, res) => {
     const code = typeof req.query.code === 'string' ? req.query.code : '';
     const state = typeof req.query.state === 'string' ? req.query.state : '';
     // Intuit appends the company (`realmId`) the user picked during consent.
+    // Realm ids are numeric — reject anything else so a crafted callback
+    // can't plant a value that later steers API request URLs.
     const realmId = typeof req.query.realmId === 'string' ? req.query.realmId : '';
-    if (!code || !state || !realmId || !stored || state !== stored.state) return back('bad_state', returnTo);
+    if (!code || !state || !isValidRealmId(realmId) || !stored || state !== stored.state) return back('bad_state', returnTo);
     delete req.session.qboOauthState;
     const tokens = await exchangeQboCode(code);
     await saveQboToken(me.userId, tokens);
