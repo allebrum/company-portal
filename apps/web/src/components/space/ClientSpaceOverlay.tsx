@@ -6,7 +6,7 @@ import {
   X, Layers, Target, CheckSquare, FileText, Play, Square,
   Upload, ExternalLink, Trash2, Link2, Plus, FolderOpen, Globe, Pencil, RefreshCw,
   MessageSquare, QrCode as QrCodeIcon,
-  FormInput,
+  FormInput, Receipt,
 } from 'lucide-react';
 import { useSpace } from '@/contexts/SpaceContext';
 import { useSpaceData, useUpdateSpaceFiles } from '@/hooks/useSpace';
@@ -45,6 +45,7 @@ import { EmbedDialog, type EmbedDialogValue } from './pickers/EmbedDialog';
 import { PortalTab } from './PortalTab';
 import { TicketsTab } from './TicketsTab';
 import { ProjectOverviewTab } from './ProjectOverviewTab';
+import { InvoicingTab } from './InvoicingTab';
 import { ClientOverviewTab } from './ClientOverviewTab';
 import { ItemComposer } from '@/components/features/ItemComposer';
 import { ProjectFormModal } from '@/components/features/ProjectFormModal';
@@ -74,9 +75,9 @@ function useSpaceModals(): SpaceModals {
 // Narrowed scope (the overlay never opens for 'all').
 type OpenScope = Exclude<Scope, { kind: 'all' }>;
 
-type TabKey = 'overview' | 'notes' | 'goals' | 'todos' | 'qr' | 'forms' | 'files' | 'portal' | 'tickets';
+type TabKey = 'overview' | 'notes' | 'goals' | 'todos' | 'qr' | 'forms' | 'files' | 'invoicing' | 'portal' | 'tickets';
 const SPACE_TAB_PARAM = 'spaceTab';
-const TAB_KEYS: ReadonlyArray<TabKey> = ['overview', 'notes', 'goals', 'todos', 'qr', 'forms', 'files', 'portal', 'tickets'];
+const TAB_KEYS: ReadonlyArray<TabKey> = ['overview', 'notes', 'goals', 'todos', 'qr', 'forms', 'files', 'invoicing', 'portal', 'tickets'];
 
 function readTabFromUrl(): TabKey | null {
   const raw = new URL(window.location.href).searchParams.get(SPACE_TAB_PARAM);
@@ -128,6 +129,13 @@ export function ClientSpaceOverlay() {
 
   useEffect(() => {
     if (tab === 'forms' && !can('forms.view')) {
+      setTab('notes');
+      if (openScope && openScope.kind !== 'all') writeTabToUrl('notes');
+    }
+  }, [tab, can, openScope]);
+
+  useEffect(() => {
+    if (tab === 'invoicing' && !can('invoices.manage')) {
       setTab('notes');
       if (openScope && openScope.kind !== 'all') writeTabToUrl('notes');
     }
@@ -224,6 +232,9 @@ export function ClientSpaceOverlay() {
             )}
             {tab === 'files' && (
               <FilesTab scope={narrowed} data={data} />
+            )}
+            {tab === 'invoicing' && can('invoices.manage') && (
+              <InvoicingTab scope={narrowed} clientId={data.clientId} projectId={data.projectId} />
             )}
             {tab === 'portal' && narrowed.kind === 'client' && data.client && (
               <PortalTab client={data.client} />
@@ -524,6 +535,7 @@ function SpaceTabs({
       <Tab k="qr" label="QR codes" icon={QrCodeIcon} count={scopedQrs.length} />
       {canViewForms && <Tab k="forms" label="Forms" icon={FormInput} count={scopedForms.length} />}
       <Tab k="files" label="Files" icon={Upload} count={filesCount} />
+      {can('invoices.manage') && <Tab k="invoicing" label="Invoicing" icon={Receipt} />}
       {showTicketsTab && <Tab k="tickets" label="Tickets" icon={MessageSquare} count={openTicketCount} />}
       {showPortalTab && <Tab k="portal" label="Portal" icon={Globe} />}
       {showOverviewTab && <Tab k="overview" label="Overview" icon={Layers} />}

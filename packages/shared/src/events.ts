@@ -33,6 +33,8 @@ export const EV = {
   ENTRY_APPROVED: 'entry:approved',
   ENTRY_REJECTED: 'entry:rejected',
   ENTRY_REOPENED: 'entry:reopened',
+  ENTRY_INVOICED: 'entry:invoiced',
+  ENTRY_UNINVOICED: 'entry:uninvoiced',
   // timer
   TIMER_STARTED: 'timer:started',
   TIMER_STOPPED: 'timer:stopped',
@@ -111,6 +113,8 @@ export interface ServerToClientEvents {
   [EV.ENTRY_APPROVED]: (p: IdPayload & { count: number }) => void;
   [EV.ENTRY_REJECTED]: (p: IdPayload & { count: number }) => void;
   [EV.ENTRY_REOPENED]: (p: IdPayload & { count: number }) => void;
+  [EV.ENTRY_INVOICED]: (p: IdPayload & { count: number }) => void;
+  [EV.ENTRY_UNINVOICED]: (p: IdPayload & { count: number }) => void;
   [EV.TIMER_STARTED]: (p: TimerPayload) => void;
   [EV.TIMER_STOPPED]: (p: TimerPayload & { durationMin: number; entryId: string }) => void;
   [EV.PAY_PERIOD_GENERATED]: (p: IdPayload & { count: number }) => void;

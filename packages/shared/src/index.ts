@@ -12,6 +12,7 @@ export * from './schemas/todo';
 export * from './schemas/epic';
 export * from './schemas/milestone';
 export * from './schemas/entry';
+export * from './schemas/invoicing';
 export * from './schemas/payPeriod';
 export * from './schemas/integration';
 export * from './schemas/space';

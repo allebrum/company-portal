@@ -113,6 +113,26 @@ async function main(): Promise<void> {
     }
   }
 
+  // 2b. Backfill NEW permissions onto every tenant's existing system groups.
+  //     Provisioned workspaces get their system groups at tenant creation
+  //     (services/tenants.ts), so a permission added to the catalog later
+  //     would never reach them without this sweep. Idempotent — insert
+  //     missing rows only, never drop (admins may have customised groups).
+  {
+    const systemGroups = await db
+      .select({ id: groups.id, name: groups.name, tenantId: groups.tenantId })
+      .from(groups)
+      .where(eq(groups.isSystem, true));
+    for (const g of systemGroups) {
+      const perms = SYSTEM_GROUP_PERMISSIONS[g.name as keyof typeof SYSTEM_GROUP_PERMISSIONS];
+      if (!perms || perms.length === 0) continue;
+      await db
+        .insert(groupPermissions)
+        .values(perms.map((perm) => ({ groupId: g.id, permissionKey: perm, tenantId: g.tenantId })))
+        .onConflictDoNothing();
+    }
+  }
+
   // 3. App-settings — one row per tenant (Phase 2 re-key dropped `id`).
   //    Create the default workspace's row only if missing (preserves any
   //    admin-customised settings on later deploys).

@@ -319,6 +319,9 @@ export const clients = pgTable('clients', {
   // non-null = published.
   portalSlug: text('portal_slug').unique(),
   portalPublishedAt: timestamp('portal_published_at', { withTimezone: true, mode: 'string' }),
+  // QuickBooks Online Customer id this client bills to. Remembered the first
+  // time an invoice is created so later invoices skip the customer picker.
+  quickbooksCustomerId: text('quickbooks_customer_id'),
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
@@ -653,11 +656,20 @@ export const timeEntries = pgTable('time_entries', {
   // block — lets the block recognize itself as the running one without
   // depending on note-text matching. Nullable; unused for non-Space starts.
   spaceBlockId: text('space_block_id'),
+  // Client-billing state — orthogonal to the payroll `status` workflow.
+  // null = not yet billed to the client; set = when/who/what reference
+  // (free text or a QuickBooks doc number) it was invoiced under.
+  invoicedAt: timestamp('invoiced_at', { withTimezone: true, mode: 'string' }),
+  invoicedBy: uuid('invoiced_by').references(() => users.id, { onDelete: 'set null' }),
+  invoiceRef: text('invoice_ref'),
   createdAt: ts(),
   updatedAt: updTs(),
 }, (t) => ({
   userStartIdx: index('time_entries_user_start_idx').on(t.userId, t.startIso),
   periodStatusIdx: index('time_entries_period_status_idx').on(t.payPeriodId, t.status),
+  // The invoicing tab lists entries per project (and per client via its
+  // projects) — without this every open of that tab seq-scans the table.
+  projectIdx: index('time_entries_project_idx').on(t.projectId),
 }));
 
 // ---- Active timers (one per user) ----

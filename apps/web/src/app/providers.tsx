@@ -53,6 +53,8 @@ function LiveEventBindings(): null {
     s.on(EV.ENTRY_APPROVED, () => invalidate([['entries']]));
     s.on(EV.ENTRY_REJECTED, () => invalidate([['entries']]));
     s.on(EV.ENTRY_REOPENED, () => invalidate([['entries']]));
+    s.on(EV.ENTRY_INVOICED, () => invalidate([['entries'], ['invoicing']]));
+    s.on(EV.ENTRY_UNINVOICED, () => invalidate([['entries'], ['invoicing']]));
 
     const onTimerStart = (p: TimerPayload) => {
       qc.setQueryData(qk.timers, (prev: TimerPayload[] | undefined) => {
@@ -74,7 +76,7 @@ function LiveEventBindings(): null {
     s.on(EV.PAY_PERIOD_CLOSED, () => invalidate([qk.payPeriods, ['entries']]));
     s.on(EV.PAY_CONFIG_UPDATED, () => invalidate([qk.payConfig]));
 
-    s.on(EV.INTEGRATION_UPDATED, () => invalidate([qk.integrations]));
+    s.on(EV.INTEGRATION_UPDATED, () => invalidate([qk.integrations, ['qboStatus']]));
     s.on(EV.DRIVE_FOLDER_LINKED, () => invalidate([qk.driveFolders]));
     s.on(EV.DRIVE_FOLDER_UNLINKED, () => invalidate([qk.driveFolders]));
 

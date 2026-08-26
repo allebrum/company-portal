@@ -13,6 +13,7 @@ import { EV } from '@allebrum/shared';
 import { emit } from '../realtime/emit.js';
 import { appendActivity } from './activity.js';
 import { disconnectDrive } from './drive.js';
+import { disconnectQuickBooks } from './quickbooks.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { tenantEq, stampTenant } from '../tenancy/scope.js';
 
@@ -75,7 +76,16 @@ export async function disconnect(kind: IntegrationKind, whoId: string): Promise<
   if (kind === 'drive') {
     await disconnectDrive();
   }
-  const row = await upsertIntegration(kind, { connected: false, account: null });
+  if (kind === 'quickbooks') {
+    // Revokes + deletes the tenant's token; the realm id in config is stale
+    // after this, so clear config too.
+    await disconnectQuickBooks();
+  }
+  const row = await upsertIntegration(kind, {
+    connected: false,
+    account: null,
+    ...(kind === 'quickbooks' ? { config: {} } : {}),
+  });
   emit.toOrg(EV.INTEGRATION_UPDATED, { id: kind, by: whoId, at: new Date().toISOString(), kind });
   await appendActivity({ whoId, kind: 'integration.disconnect', target: `${kind} disconnected` });
   return row;

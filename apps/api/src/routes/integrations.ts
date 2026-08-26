@@ -46,6 +46,16 @@ import {
   listGmailConnectedUserIds,
 } from '../services/gmail.js';
 import { listUsers } from '../services/users.js';
+import {
+  quickbooksConfigured,
+  buildQboConsentUrl,
+  exchangeQboCode,
+  saveQboToken,
+  getQboStatus,
+  getQboCompanyName,
+  listQboCustomers,
+  listQboServiceItems,
+} from '../services/quickbooks.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
 
@@ -301,6 +311,106 @@ integrationsRouter.patch(
 integrationsRouter.post('/drive/reconcile', requirePermission('integrations.manage'), async (_req, res, next) => {
   try {
     res.json(await reconcileFolders());
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ---- QuickBooks Online (workspace-wide OAuth, client invoicing) ----
+//
+// Same shape as Drive: an admin connects once, the credential is stamped to
+// the tenant, and the invoicing surface (invoices.manage) uses it to look up
+// customers/items and push invoices.
+
+// Billers open the invoicing tab too — status readable by either permission.
+const qboAccess = requireAnyPermission('integrations.manage', 'invoices.manage');
+
+integrationsRouter.get('/quickbooks/status', async (_req, res, next) => {
+  try {
+    res.json(await getQboStatus());
+  } catch (e) {
+    next(e);
+  }
+});
+
+integrationsRouter.get('/quickbooks/connect', requirePermission('integrations.manage'), async (req, res, next) => {
+  try {
+    if (!quickbooksConfigured()) {
+      res.status(404).json({ error: 'quickbooks_oauth_not_configured' });
+      return;
+    }
+    const state = randomBytes(16).toString('hex');
+    // Same-origin path-only return (see Drive connect above).
+    const rawReturnTo = typeof req.query.return_to === 'string' ? req.query.return_to : undefined;
+    const returnTo = rawReturnTo && rawReturnTo.startsWith('/') && !rawReturnTo.startsWith('//')
+      ? rawReturnTo
+      : undefined;
+    req.session.qboOauthState = { state, returnTo };
+    req.session.save((err) => {
+      if (err) return next(err);
+      res.redirect(buildQboConsentUrl(state));
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+integrationsRouter.get('/quickbooks/callback', async (req, res) => {
+  const back = (q: string, returnTo?: string) => {
+    const base = `${env.WEB_ORIGIN}${returnTo ?? '/admin?adminTab=integrations'}`;
+    const sep = base.includes('?') ? '&' : '?';
+    res.redirect(`${base}${sep}quickbooks=${encodeURIComponent(q)}`);
+  };
+  try {
+    const me = req.session.user;
+    const stored = req.session.qboOauthState;
+    const returnTo = stored?.returnTo;
+    if (!me) return back('error', returnTo);
+    const code = typeof req.query.code === 'string' ? req.query.code : '';
+    const state = typeof req.query.state === 'string' ? req.query.state : '';
+    // Intuit appends the company (`realmId`) the user picked during consent.
+    const realmId = typeof req.query.realmId === 'string' ? req.query.realmId : '';
+    if (!code || !state || !realmId || !stored || state !== stored.state) return back('bad_state', returnTo);
+    delete req.session.qboOauthState;
+    const tokens = await exchangeQboCode(code);
+    await saveQboToken(me.userId, tokens);
+    const companyName = await getQboCompanyName(realmId, tokens.access_token);
+    // Keep the generic Integrations tile consistent + persist the realm id.
+    await connect('quickbooks', { account: companyName ?? 'connected', config: { realmId } }, me.userId);
+    return back('connected', returnTo);
+  } catch {
+    return back('error', req.session.qboOauthState?.returnTo);
+  }
+});
+
+integrationsRouter.post('/quickbooks/disconnect', requirePermission('integrations.manage'), async (req, res, next) => {
+  try {
+    const me = req.session.user!;
+    await disconnect('quickbooks', me.userId);
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+const QboCustomerSearch = z.object({ search: z.string().trim().max(200).optional() });
+integrationsRouter.get(
+  '/quickbooks/customers',
+  qboAccess,
+  validate(QboCustomerSearch, 'query'),
+  async (req, res, next) => {
+    try {
+      const { search } = getValidated<typeof QboCustomerSearch._type>(req, 'query');
+      res.json(await listQboCustomers(search));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+integrationsRouter.get('/quickbooks/items', qboAccess, async (_req, res, next) => {
+  try {
+    res.json(await listQboServiceItems());
   } catch (e) {
     next(e);
   }

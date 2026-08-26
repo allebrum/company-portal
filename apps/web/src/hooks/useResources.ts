@@ -70,6 +70,8 @@ export type ClientRow = {
   portalSlug: string | null;
   /** ISO timestamp string; null = unpublished (slug exists but lookup 404s). */
   portalPublishedAt: string | null;
+  /** QuickBooks customer this client bills to; remembered on first invoice. */
+  quickbooksCustomerId: string | null;
 };
 export type ClientContactRow = {
   id: string;
@@ -209,6 +211,11 @@ export type EntryRow = {
   approvedBy: string | null;
   rejectionNote: string | null;
   todoId: string | null;
+  // Client-billing state (orthogonal to payroll `status`). null = not yet
+  // billed to the client.
+  invoicedAt: string | null;
+  invoicedBy: string | null;
+  invoiceRef: string | null;
 };
 export type PayPeriodRow = {
   id: string;
