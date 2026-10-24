@@ -6,6 +6,7 @@ import { Menu, Lock } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useBootstrap, useAuthConfig, useBillingInfo } from '@/hooks/useResources';
 import { api, ApiError } from '@/lib/api';
+import { loginUrl } from '@/lib/returnTo';
 import { Sidebar } from './Sidebar';
 import { TimerBar } from './TimerBar';
 import { ClientSpaceOverlay } from '@/components/space/ClientSpaceOverlay';
@@ -17,7 +18,7 @@ import { ShellSkeleton } from '@/components/ui/Skeleton';
 import { HoppaMark } from '@/components/ui/HoppaMark';
 
 export function AuthGate({ children }: { children: ReactNode }) {
-  const { me, loading } = useAuth();
+  const { me, loading, sessionExpired } = useAuth();
   const router = useRouter();
   const rawPathname = usePathname();
   // Normalize trailing slashes (next.config has trailingSlash:true for static export).
@@ -43,9 +44,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!loading && !me && !isPublic) {
-      router.replace('/login');
+      // One redirect, remembering where the user was so signing back in
+      // returns them there (the Space overlay + tab live in the query).
+      const here = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      router.replace(loginUrl(here, { expired: sessionExpired }));
     }
-  }, [loading, me, isPublic, router]);
+  }, [loading, me, isPublic, router, sessionExpired]);
 
   useEffect(() => {
     if (!loading && me && isRoot) {
@@ -97,17 +101,19 @@ export function AuthGate({ children }: { children: ReactNode }) {
 }
 
 function ShellWithBootstrap({ children }: { children: ReactNode }) {
-  const router = useRouter();
+  const { expire } = useAuth();
   const { isLoading, isError, error } = useBootstrap();
   const { data: cfg } = useAuthConfig();
   const pathname = usePathname();
   const [navOpen, setNavOpen] = useState(false);
 
   useEffect(() => {
-    if (isError && error instanceof ApiError && error.status === 401) {
-      router.replace('/login');
-    }
-  }, [isError, error, router]);
+    // Normally the API client already ended the session on this 401; this
+    // is the belt-and-braces path. Never navigate from here: AuthGate owns
+    // the single redirect (navigating here while `me` was still set is what
+    // used to ping-pong /login ↔ /dashboard).
+    if (isError && error instanceof ApiError && error.status === 401) expire();
+  }, [isError, error, expire]);
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
@@ -123,6 +129,9 @@ function ShellWithBootstrap({ children }: { children: ReactNode }) {
     // The 402 body carries billingStatus/trialEndsAt so the lockout screen
     // can explain WHY instead of a generic "subscription required".
     return <SubscriptionRequired info={error.body as LockoutInfo | undefined} />;
+  }
+  if (isError && error instanceof ApiError && error.status === 401) {
+    return <ShellSkeleton label="Signing you out" />;
   }
   if (isError) {
     return (

@@ -13,6 +13,7 @@ import { useAuthConfig, fetchAuthMethods } from '@/hooks/useResources';
 import { useTwoFactorChallenge, verifyTotpStep, verifyPasskeyStep } from '@/hooks/use2fa';
 import { ApiError } from '@/lib/api';
 import { API_URL } from '@/lib/env';
+import { safeReturnTo } from '@/lib/returnTo';
 
 // Messages for the `?error=` codes that auth redirects (Google OAuth + the
 // signup auto-login handoff) can land on the login page with.
@@ -65,6 +66,14 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
+  // Where to go after signing in (?next=, set when a session ended on an
+  // open page) and whether to say why the user is here.
+  const [returnTo, setReturnTo] = useState(() =>
+    typeof window === 'undefined'
+      ? '/dashboard'
+      : safeReturnTo(new URLSearchParams(window.location.search).get('next')) ?? '/dashboard',
+  );
+  const [expiredNotice, setExpiredNotice] = useState(false);
   // Two-step login: 'email' collects the address, 'method' shows the methods
   // that account actually supports, '2fa' is the post-password second factor.
   const [stage, setStage] = useState<'email' | 'method' | '2fa'>('email');
@@ -78,11 +87,13 @@ export default function LoginPage() {
     const e = params.get('error');
     if (e) setOauthError(OAUTH_ERRORS[e] ?? 'Sign-in failed.');
     if (params.get('mfa') === '1') setStage('2fa'); // Google flow needs a second factor
+    setReturnTo(safeReturnTo(params.get('next')) ?? '/dashboard');
+    setExpiredNotice(params.get('expired') === '1');
   }, []);
 
   useEffect(() => {
-    if (!loading && me) router.replace('/dashboard');
-  }, [loading, me, router]);
+    if (!loading && me) router.replace(returnTo);
+  }, [loading, me, router, returnTo]);
 
   // Step 1 → resolve this email's available methods, then advance to step 2.
   const onContinueEmail = async (e: React.FormEvent) => {
@@ -113,7 +124,7 @@ export default function LoginPage() {
         setStage('2fa');
         return;
       }
-      router.replace('/dashboard');
+      router.replace(returnTo);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) setError('Invalid email or password.');
       else if (err instanceof ApiError && err.status === 403) setError('Password sign-in is disabled for this workspace.');
@@ -129,7 +140,7 @@ export default function LoginPage() {
     try {
       await fn();
       await refresh();
-      router.replace('/dashboard');
+      router.replace(returnTo);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) setError('Incorrect code. Try again or use a recovery code.');
       else setError(err instanceof Error ? err.message : 'Verification failed.');
@@ -185,6 +196,11 @@ export default function LoginPage() {
           <p className="text-sm text-gray-500 truncate">{subtitle}</p>
         </div>
 
+        {expiredNotice && !error && !oauthError && (
+          <div className="text-sm text-gray-600 text-center" role="status">
+            Your session expired. Sign in to pick up where you left off.
+          </div>
+        )}
         {(error || oauthError) && (
           <div className="text-sm text-red-600 text-center">{error ?? oauthError}</div>
         )}

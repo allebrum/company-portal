@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/reac
 import { getSocket, disconnectSocket } from '@/lib/socket';
 import { qk } from '@/lib/queryKeys';
 import { EV, type ActivityPayload, type TimerPayload } from '@allebrum/shared';
-import { AuthProvider } from '@/hooks/useAuth';
+import { AuthProvider, useAuth } from '@/hooks/useAuth';
 import { ToastProvider } from '@/components/ui/Toast';
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import { SpaceProvider } from '@/contexts/SpaceContext';
@@ -14,8 +14,20 @@ import { PostHogBindings } from '@/components/analytics/PostHogBindings';
 
 function LiveEventBindings(): null {
   const qc = useQueryClient();
+  const { me, expire } = useAuth();
+  const userId = me?.id ?? null;
   useEffect(() => {
+    // Only connect while signed in: the API rejects the handshake without a
+    // session, and Socket.IO doesn't retry a rejected handshake, so a socket
+    // opened on /login would stay dead after signing in. Re-binds per user.
+    if (!userId) return;
     const s = getSocket();
+
+    // Handshake refused for auth: the session ended (e.g. the socket
+    // reconnected after sleep). End it cleanly instead of retrying.
+    s.on('connect_error', (err) => {
+      if (err?.message === 'unauthorized') expire();
+    });
 
     const invalidate = (keys: ReadonlyArray<readonly unknown[]>) => {
       for (const k of keys) qc.invalidateQueries({ queryKey: k as unknown[] });
@@ -85,10 +97,10 @@ function LiveEventBindings(): null {
     });
 
     return () => {
-      // Clean handler removal on hot-reload
+      // Clean handler removal on sign-out / user change / hot-reload
       s.removeAllListeners();
     };
-  }, [qc]);
+  }, [qc, userId, expire]);
 
   useEffect(() => () => disconnectSocket(), []);
 
