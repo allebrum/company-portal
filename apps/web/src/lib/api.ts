@@ -16,6 +16,8 @@ export class ApiError extends Error {
 export type RequestOptions = {
   /** Let the request outlive the page (pagehide/unload flushes). Body must be < ~64KB. */
   keepalive?: boolean;
+  /** Extra request headers (e.g. x-expected-updated-at for versioned saves). */
+  headers?: Record<string, string>;
 };
 
 async function request<T>(method: string, path: string, body?: unknown, opts: RequestOptions = {}): Promise<T> {
@@ -24,7 +26,9 @@ async function request<T>(method: string, path: string, body?: unknown, opts: Re
     method,
     credentials: 'include',
     keepalive: opts.keepalive || undefined,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers: body || opts.headers
+      ? { ...(body ? { 'Content-Type': 'application/json' } : {}), ...opts.headers }
+      : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const contentType = res.headers.get('content-type') ?? '';
@@ -34,6 +38,15 @@ async function request<T>(method: string, path: string, body?: unknown, opts: Re
     throw new ApiError(res.status, `[${method} ${path}] ${detail}`, payload, method, path, url);
   }
   return payload as T;
+}
+
+/** Header the API checks for optimistic concurrency (409 stale_update). */
+export const EXPECTED_UPDATED_AT_HEADER = 'x-expected-updated-at';
+
+/** True for the API's "someone saved this row after you loaded it" error. */
+export function isStaleUpdate(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 409 &&
+    (e.body as { error?: string } | undefined)?.error === 'stale_update';
 }
 
 export const api = {

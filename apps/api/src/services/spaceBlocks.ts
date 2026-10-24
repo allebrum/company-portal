@@ -58,6 +58,7 @@ export async function appendSpaceBlocks(kind: SpaceKind, id: string, input: Appe
     by: whoId,
     at: new Date().toISOString(),
   });
+  emit.spaceBlocksUpdated({ kind, id: row.id, updatedAt: String(row.updatedAt), by: whoId, source: 'append' });
   await appendActivity({ whoId, kind: `${kind}.update`, target: `${row.name} notes updated` });
   return { id: row.id, appended: blocks, total: Number(row.total), updatedAt: row.updatedAt };
 }

@@ -4,6 +4,7 @@
  * detection. Kept DOM-free so they can be unit tested with `node --test`.
  */
 import type { SpaceBlock } from '@allebrum/shared';
+import { mergeBlocks } from './merge';
 
 export type BlockType = SpaceBlock['type'];
 
@@ -34,7 +35,9 @@ export type Action =
   | { type: 'insertBefore'; before: string; block: SpaceBlock }
   | { type: 'remove'; id: string }
   | { type: 'patch'; id: string; patch: Partial<SpaceBlock> }
-  | { type: 'move'; id: string; target: string; position: 'before' | 'after' };
+  | { type: 'move'; id: string; target: string; position: 'before' | 'after' }
+  /** Fold a newer server copy into the live state (see notes/merge.ts). */
+  | { type: 'merge'; base: SpaceBlock[]; server: SpaceBlock[] };
 
 export function reducer(state: SpaceBlock[], action: Action): SpaceBlock[] {
   switch (action.type) {
@@ -71,6 +74,8 @@ export function reducer(state: SpaceBlock[], action: Action): SpaceBlock[] {
       rest.splice(action.position === 'before' ? ti : ti + 1, 0, moving);
       return rest;
     }
+    case 'merge':
+      return mergeBlocks(action.base, state, action.server);
     default:
       return state;
   }

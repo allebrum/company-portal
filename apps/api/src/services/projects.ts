@@ -123,6 +123,9 @@ export async function updateProject(
     throw new HttpError(404, 'project_not_found');
   }
   emit.toOrg(EV.PROJECT_UPDATED, { id: row.id, by: whoId, at: new Date().toISOString() });
+  if (patch.spaceBlocks !== undefined) {
+    emit.spaceBlocksUpdated({ kind: 'project', id: row.id, updatedAt: String(row.updatedAt), by: whoId, source: 'patch' });
+  }
   await appendActivity({ whoId, kind: 'project.update', target: `${row.name} updated` });
   const [hydrated] = await withProjectMetrics([row]);
   if (!hydrated) throw new Error('project hydration failed');

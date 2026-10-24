@@ -27,6 +27,9 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Popover } from '@/components/ui/Popover';
 import { API_URL } from '@/lib/env';
+import { isStaleUpdate } from '@/lib/api';
+import { getSocket } from '@/lib/socket';
+import { EV, type SpaceBlocksUpdatedPayload } from '@allebrum/shared';
 import { fmtTimer, PRIORITY_DOT } from '@/lib/formatters';
 import { rollupProgress } from '@/lib/roadmap';
 import type { SpaceBlock, SpaceFile } from '@allebrum/shared';
@@ -53,12 +56,18 @@ type SlashOpen = { rect: { x: number; y: number; top: number }; query: string; t
 
 export function NotesTab({ scope }: { scope: Scope }) {
   const data = useSpaceData(scope);
-  const save = useUpdateSpaceBlocks(scope);
+  const [blocks, dispatch] = useReducer(reducer, [] as SpaceBlock[]);
+  // Versioned saves + live merge: when the server copy moved on (a bot
+  // append, another tab), fold it into the live doc. The reducer merges
+  // against the current state, so nothing typed meanwhile is lost, and
+  // existing blocks keep their identity, so focus and caret stay put.
+  const sync = useUpdateSpaceBlocks(scope, {
+    onRemote: (_ref, base, server) => dispatch({ type: 'merge', base, server }),
+  });
   const saveFiles = useUpdateSpaceFiles(scope);
   const { me } = useAuth();
   const toast = useToast();
   const uploadMgr = useUploadManager();
-  const [blocks, dispatch] = useReducer(reducer, [] as SpaceBlock[]);
   const initialized = useRef(false);
   // The exact array dispatched on load. The save effect skips it so merely
   // opening a space (or migrating its blocks in memory) never writes.
@@ -112,6 +121,8 @@ export function NotesTab({ scope }: { scope: Scope }) {
     setSlash(null);
     if (scope.kind === 'all') return;
     if (data.loading) return;
+    // The loaded copy is the merge base for this editor's saves.
+    sync.hydrate(scope, data.spaceBlocks, (data.project ?? data.client)?.updatedAt);
     let initial: SpaceBlock[];
     if (data.spaceBlocks.length === 0) {
       // First open — seed welcome blocks.
@@ -122,7 +133,7 @@ export function NotesTab({ scope }: { scope: Scope }) {
         emptyText(),
       ];
       initial = seed;
-      save(seed);
+      sync.save(seed);
     } else {
       // One line per block: split legacy multi-line text blocks in memory.
       // Persisted with the next real edit.
@@ -131,19 +142,53 @@ export function NotesTab({ scope }: { scope: Scope }) {
     initBlocksRef.current = initial;
     dispatch({ type: 'init', blocks: initial });
     initialized.current = true;
+    // The cached row may predate a bot write; catch up once on open.
+    void sync.pull();
     // The scope.id key is what changes on client→project hop; data.loading
     // changes on first arrival. We deliberately depend only on those.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope.kind === 'all' ? null : scope.id, data.loading]);
 
+  // ----- live updates -----
+  // Watch this Space's room; a SPACE_BLOCKS_UPDATED notice (bot append or a
+  // save from another tab) triggers a pull + merge unless it is our own
+  // save echoing back. Reconnects and returning to the tab also pull (see
+  // useUpdateSpaceBlocks), so a missed notice only delays the merge — the
+  // versioned save path still catches it with a 409.
+  const watchKey = scope.kind === 'all' ? null : `${scope.kind}:${scope.id}`;
+  useEffect(() => {
+    if (scope.kind === 'all') return;
+    const ref = { kind: scope.kind, id: scope.id } as const;
+    const socket = getSocket();
+    let connectedBefore = socket.connected;
+    const watch = () => {
+      socket.emit('space:watch', ref);
+      if (connectedBefore) void sync.pull(); // reconnect: we may have missed notices
+      connectedBefore = true;
+    };
+    const onUpdated = (p: SpaceBlocksUpdatedPayload) => {
+      if (p.kind === ref.kind && p.id === ref.id) void sync.pull(p.updatedAt);
+    };
+    if (socket.connected) socket.emit('space:watch', ref);
+    socket.on('connect', watch);
+    socket.on(EV.SPACE_BLOCKS_UPDATED, onUpdated);
+    return () => {
+      socket.off('connect', watch);
+      socket.off(EV.SPACE_BLOCKS_UPDATED, onUpdated);
+      socket.emit('space:unwatch', ref);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchKey, sync]);
+
   // ----- save-state indicator (S2.6) -----
-  // Purely observational — the save itself stays the 250ms trailing debounce
-  // in useUpdateSpaceBlocks (fire-and-forget full-replace PATCH on the
-  // client/project row, no automatic retry). We watch those mutations in the
-  // React Query mutation cache and timestamp local edits so the header can
-  // show the debounce gap ("Unsaved changes") plus the real mutation
-  // lifecycle. The only retry path is the next edit, which re-sends the
-  // whole doc — the error copy reflects that.
+  // Purely observational — the save itself is the 250ms trailing debounce
+  // in useUpdateSpaceBlocks (versioned full-replace PATCH on the
+  // client/project row). We watch those mutations in the React Query
+  // mutation cache and timestamp local edits so the header can show the
+  // debounce gap ("Unsaved changes") plus the real mutation lifecycle. A
+  // 409 stale_update is not a failure — it is merged and retried — so it
+  // reads as "saving". Other errors are retried by the next edit, which
+  // re-sends the whole doc — the error copy reflects that.
   const scopeId = scope.kind === 'all' ? null : scope.id;
   const [lastEditAt, setLastEditAt] = useState(0);
   const blockSaves = useMutationState({
@@ -155,7 +200,10 @@ export function NotesTab({ scope }: { scope: Scope }) {
         return vars.id === scopeId && 'spaceBlocks' in vars.patch;
       },
     },
-    select: (m) => ({ status: m.state.status, submittedAt: m.state.submittedAt }),
+    select: (m) => ({
+      status: m.state.status === 'error' && isStaleUpdate(m.state.error) ? 'pending' as const : m.state.status,
+      submittedAt: m.state.submittedAt,
+    }),
   });
   const latestSave = blockSaves[blockSaves.length - 1] ?? null;
   // Older cache entries are GC'd after a few idle minutes; remember the
@@ -183,8 +231,7 @@ export function NotesTab({ scope }: { scope: Scope }) {
       return;
     }
     if (!hydratedRef.current) return;
-    save(blocks);
-    setLastEditAt(Date.now());
+    if (sync.save(blocks)) setLastEditAt(Date.now());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blocks]);
 

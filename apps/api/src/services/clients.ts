@@ -80,6 +80,9 @@ export async function updateClient(
     throw new HttpError(404, 'client_not_found');
   }
   emit.toOrg(EV.CLIENT_UPDATED, { id: row.id, by: whoId, at: new Date().toISOString() });
+  if (patch.spaceBlocks !== undefined) {
+    emit.spaceBlocksUpdated({ kind: 'client', id: row.id, updatedAt: String(row.updatedAt), by: whoId, source: 'patch' });
+  }
   await appendActivity({ whoId, kind: 'client.update', target: `${row.name} updated` });
   return row;
 }
