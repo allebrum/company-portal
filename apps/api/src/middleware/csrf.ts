@@ -29,6 +29,12 @@ export interface CsrfOptions {
   exemptPrefixes: string[];
   /** Regexes for finer-grained exemptions (e.g. token-authenticated public uploads). */
   exemptPatterns?: RegExp[];
+  /**
+   * Per-request exemption for requests that are not cookie-authenticated
+   * (e.g. a verified `Authorization: Bearer` personal access token — a
+   * cross-site page cannot attach that header, so CSRF doesn't apply).
+   */
+  exemptWhen?: (req: Request) => boolean;
 }
 
 function isExempt(path: string, opts: CsrfOptions): boolean {
@@ -59,7 +65,7 @@ export function csrfProtection(opts: CsrfOptions): RequestHandler {
       next();
       return;
     }
-    if (isExempt(req.path, opts)) {
+    if (isExempt(req.path, opts) || opts.exemptWhen?.(req)) {
       next();
       return;
     }

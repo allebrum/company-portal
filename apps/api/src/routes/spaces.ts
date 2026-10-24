@@ -11,6 +11,8 @@ import {
 } from '../services/spaceFiles.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import { withTenant } from '../tenancy/context.js';
+import { AppendSpaceBlocksSchema, type AppendSpaceBlocksInput } from '@allebrum/shared';
+import { appendSpaceBlocks, getSpaceBlocks, isUuid, parseSpaceKind } from '../services/spaceBlocks.js';
 
 // Same 100 MB cap as the generic Drive upload route.
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
@@ -116,6 +118,52 @@ spacesRouter.post('/:scopeKind/:scopeId/files/refresh-drive-names', uploadAccess
       }
       const out = await refreshSpaceFileNamesFromDrive({ scopeKind, scopeId, whoId: me.userId });
       res.json(out);
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ---- Notes blocks (read + append-only write) --------------------------
+//
+// Used by personal access tokens (docs/BOT_API.md) but also session-usable.
+// Same access rule as the Notes PATCH on clients/projects: any authenticated
+// teammate in the workspace. Append never rewrites existing blocks.
+
+spacesRouter.get('/:scopeKind/:scopeId/blocks', async (req, res, next) => {
+  try {
+    const kind = parseSpaceKind(req.params.scopeKind);
+    if (!kind) {
+      res.status(400).json({ error: 'invalid_scope_kind' });
+      return;
+    }
+    if (!isUuid(req.params.scopeId)) {
+      res.status(404).json({ error: `${kind}_not_found` });
+      return;
+    }
+    await withRequestTenant(req, async () => {
+      res.json(await getSpaceBlocks(kind, req.params.scopeId!));
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+spacesRouter.post('/:scopeKind/:scopeId/blocks', validate(AppendSpaceBlocksSchema), async (req, res, next) => {
+  try {
+    const kind = parseSpaceKind(req.params.scopeKind);
+    if (!kind) {
+      res.status(400).json({ error: 'invalid_scope_kind' });
+      return;
+    }
+    if (!isUuid(req.params.scopeId)) {
+      res.status(404).json({ error: `${kind}_not_found` });
+      return;
+    }
+    const input = getValidated<AppendSpaceBlocksInput>(req);
+    await withRequestTenant(req, async () => {
+      const out = await appendSpaceBlocks(kind, req.params.scopeId!, input.blocks, req.session.user!.userId);
+      res.status(201).json(out);
     });
   } catch (e) {
     next(e);

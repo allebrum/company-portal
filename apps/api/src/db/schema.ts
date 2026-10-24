@@ -239,6 +239,30 @@ export const authTokens = pgTable('auth_tokens', {
   contactKindIdx: index('auth_tokens_contact_kind_idx').on(t.contactId, t.kind, t.usedAt),
 }));
 
+// ---- Personal access tokens (bot / script API access) ----
+//
+// Per-user, per-workspace bearer tokens with explicit scopes. Only the
+// SHA-256 hash is stored; the raw token is shown once at creation. A token
+// acts as its user in its workspace (same RBAC), restricted further by
+// `scopes` and a server-side route allow-list (middleware/bearerAuth.ts).
+export const apiTokens = pgTable('api_tokens', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  // Display-only leading characters of the raw token (e.g. "hpat_AbC1").
+  prefix: text('prefix').notNull(),
+  scopes: text('scopes').array().notNull().default(sql`'{}'::text[]`),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true, mode: 'string' }),
+  expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'string' }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'string' }),
+  createdAt: ts(),
+}, (t) => ({
+  hashIdx: uniqueIndex('api_tokens_token_hash_idx').on(t.tokenHash),
+  userIdx: index('api_tokens_tenant_user_idx').on(t.tenantId, t.userId),
+}));
+
 // ---- RBAC: permissions catalog, groups, membership, overrides ----
 export const permissions = pgTable('permissions', {
   key: text('key').primaryKey(),
@@ -968,6 +992,7 @@ export type PayConfig = typeof payConfig.$inferSelect;
 export type TimeReminderLog = typeof timeReminderLog.$inferSelect;
 export type TimeEntry = typeof timeEntries.$inferSelect;
 export type ActiveTimer = typeof activeTimers.$inferSelect;
+export type ApiToken = typeof apiTokens.$inferSelect;
 export type ActivityRow = typeof activityLog.$inferSelect;
 export type Integration = typeof integrations.$inferSelect;
 export type DriveFolder = typeof driveLinkedFolders.$inferSelect;

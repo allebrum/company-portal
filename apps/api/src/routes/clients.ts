@@ -16,6 +16,7 @@ import {
   updateContact,
   deleteContact,
 } from '../services/clientContacts.js';
+import { EXPECTED_UPDATED_AT_HEADER, readExpectedUpdatedAt } from '../middleware/expectedUpdatedAt.js';
 
 export const clientsRouter = Router();
 
@@ -51,7 +52,11 @@ clientsRouter.patch('/:id', validate(UpdateClientSchema), async (req, res, next)
       res.status(403).json({ error: 'forbidden' });
       return;
     }
-    const row = await updateClient(req.params.id!, patch, me.userId);
+    // Opt-in optimistic concurrency: send the `updatedAt` you last read in
+    // `x-expected-updated-at` and a concurrent write yields 409 stale_update
+    // instead of silently overwriting (e.g. bot-appended notes).
+    const expectedUpdatedAt = readExpectedUpdatedAt(req.get(EXPECTED_UPDATED_AT_HEADER));
+    const row = await updateClient(req.params.id!, patch, me.userId, { expectedUpdatedAt });
     res.json(row);
   } catch (e) {
     next(e);

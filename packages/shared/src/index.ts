@@ -16,6 +16,7 @@ export * from './schemas/invoicing';
 export * from './schemas/payPeriod';
 export * from './schemas/integration';
 export * from './schemas/space';
+export * from './schemas/apiToken';
 export * from './schemas/portal';
 export * from './schemas/qr';
 export * from './schemas/forms';

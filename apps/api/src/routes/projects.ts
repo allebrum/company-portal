@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/requireAuth.js';
 import { userCan } from '../auth/permissions.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import { listProjects, createProject, updateProject } from '../services/projects.js';
+import { EXPECTED_UPDATED_AT_HEADER, readExpectedUpdatedAt } from '../middleware/expectedUpdatedAt.js';
 
 export const projectsRouter = Router();
 
@@ -40,7 +41,11 @@ projectsRouter.patch('/:id', validate(UpdateProjectSchema), async (req, res, nex
       res.status(403).json({ error: 'forbidden' });
       return;
     }
-    const row = await updateProject(req.params.id!, patch, me.userId);
+    // Opt-in optimistic concurrency: send the `updatedAt` you last read in
+    // `x-expected-updated-at` and a concurrent write yields 409 stale_update
+    // instead of silently overwriting (e.g. bot-appended notes).
+    const expectedUpdatedAt = readExpectedUpdatedAt(req.get(EXPECTED_UPDATED_AT_HEADER));
+    const row = await updateProject(req.params.id!, patch, me.userId, { expectedUpdatedAt });
     res.json(row);
   } catch (e) {
     next(e);

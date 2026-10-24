@@ -8,6 +8,7 @@ import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { isConnected as driveIsConnected, ensureProjectFolder } from './drive.js';
 import { tenantEq, stampTenant } from '../tenancy/scope.js';
+import { throwIfStale } from './concurrency.js';
 
 export type ProjectWithMetrics = Project & {
   timeSpentMin: number;
@@ -91,6 +92,7 @@ export async function updateProject(
   id: string,
   patch: UpdateProjectInput,
   whoId: string,
+  opts: { expectedUpdatedAt?: string } = {},
 ): Promise<ProjectWithMetrics> {
   const upd: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   if (patch.clientId !== undefined) upd.clientId = patch.clientId;
@@ -105,8 +107,21 @@ export async function updateProject(
   if (patch.statuses !== undefined) upd.statuses = patch.statuses;
   if (patch.spaceBlocks !== undefined) upd.spaceBlocks = patch.spaceBlocks;
   if (patch.spaceFiles !== undefined) upd.spaceFiles = patch.spaceFiles;
-  const [row] = await db.update(projects).set(upd).where(and(eq(projects.id, id), tenantEq(projects.tenantId))).returning();
-  if (!row) throw new HttpError(404, 'project_not_found');
+  const [row] = await db
+    .update(projects)
+    .set(upd)
+    .where(
+      and(
+        eq(projects.id, id),
+        tenantEq(projects.tenantId),
+        opts.expectedUpdatedAt ? sql`${projects.updatedAt} = ${opts.expectedUpdatedAt}::timestamptz` : undefined,
+      ),
+    )
+    .returning();
+  if (!row) {
+    if (opts.expectedUpdatedAt) await throwIfStale(projects, id, 'project_not_found');
+    throw new HttpError(404, 'project_not_found');
+  }
   emit.toOrg(EV.PROJECT_UPDATED, { id: row.id, by: whoId, at: new Date().toISOString() });
   await appendActivity({ whoId, kind: 'project.update', target: `${row.name} updated` });
   const [hydrated] = await withProjectMetrics([row]);
