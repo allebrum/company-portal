@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   useClients,
   useProjects,
@@ -11,6 +11,7 @@ import {
 } from '@/hooks/useResources';
 import type { SpaceBlock, SpaceFile } from '@allebrum/shared';
 import type { Scope } from '@/lib/roadmap';
+import { api } from '@/lib/api';
 
 /**
  * Resolves a Space scope to the underlying ClientRow / ProjectRow plus the
@@ -85,26 +86,67 @@ export function useUpdateSpaceBlocks(scope: Scope | null) {
   const updateClient = useUpdateClient();
   const updateProject = useUpdateProject();
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pending = useRef<SpaceBlock[] | null>(null);
+  // The pending payload remembers which scope it belongs to, so a flush
+  // after a client→project hop still writes to the right row.
+  const pending = useRef<{ scope: Scope; blocks: SpaceBlock[] } | null>(null);
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+  const mutators = useRef({ updateClient, updateProject });
+  mutators.current = { updateClient, updateProject };
 
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
+  const send = useCallback((opts: { keepalive?: boolean } = {}) => {
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+    const p = pending.current;
+    pending.current = null;
+    if (!p || p.scope.kind === 'all') return;
+    const path = p.scope.kind === 'client' ? `/clients/${p.scope.id}` : `/projects/${p.scope.id}`;
+    const body = { spaceBlocks: p.blocks };
+    if (opts.keepalive) {
+      // Page is going away: React Query may never see the response, so use
+      // a keepalive fetch directly (browsers cap keepalive bodies ~64KB).
+      const size = JSON.stringify(body).length;
+      if (size < 60_000) {
+        void api.patch(path, body, { keepalive: true }).catch(() => undefined);
+        return;
+      }
+    }
+    const { updateClient: uc, updateProject: up } = mutators.current;
+    const m = p.scope.kind === 'client' ? uc : up;
+    void m.mutateAsync({ id: p.scope.id, patch: body }).catch(() => undefined);
   }, []);
 
-  return (next: SpaceBlock[]) => {
-    pending.current = next;
+  // Flush (never drop) a pending save when the scope changes or the canvas
+  // unmounts, and when the tab is hidden or the page is being unloaded.
+  const scopeKey = scope && scope.kind !== 'all' ? `${scope.kind}:${scope.id}` : null;
+  useEffect(() => () => send(), [scopeKey, send]);
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') send({ keepalive: true });
+    };
+    const onPageHide = () => send({ keepalive: true });
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('pagehide', onPageHide);
+    };
+  }, [send]);
+
+  return useCallback((next: SpaceBlock[]) => {
+    const s = scopeRef.current;
+    if (!s || s.kind === 'all') return;
+    // A pending save for a different scope goes out first.
+    if (pending.current && pending.current.scope !== s &&
+        (pending.current.scope.kind !== s.kind || (pending.current.scope as { id: string }).id !== s.id)) {
+      send();
+    }
+    pending.current = { scope: s, blocks: next };
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      const payload = pending.current;
-      if (!scope || scope.kind === 'all' || !payload) return;
-      if (scope.kind === 'client') {
-        void updateClient.mutateAsync({ id: scope.id, patch: { spaceBlocks: payload } });
-      } else {
-        void updateProject.mutateAsync({ id: scope.id, patch: { spaceBlocks: payload } });
-      }
-      pending.current = null;
-    }, 250);
-  };
+    timer.current = setTimeout(() => send(), 250);
+  }, [send]);
 }
 
 /** Immediate full-replace writer for the active Space's `spaceFiles`. */

@@ -13,11 +13,17 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+export type RequestOptions = {
+  /** Let the request outlive the page (pagehide/unload flushes). Body must be < ~64KB. */
+  keepalive?: boolean;
+};
+
+async function request<T>(method: string, path: string, body?: unknown, opts: RequestOptions = {}): Promise<T> {
   const url = `${API_URL}/api${path}`;
   const res = await fetch(url, {
     method,
     credentials: 'include',
+    keepalive: opts.keepalive || undefined,
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
@@ -33,7 +39,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export const api = {
   get: <T>(path: string) => request<T>('GET', path),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
-  patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),
+  patch: <T>(path: string, body?: unknown, opts?: RequestOptions) => request<T>('PATCH', path, body, opts),
   put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),
   del: <T>(path: string) => request<T>('DELETE', path),
 };
