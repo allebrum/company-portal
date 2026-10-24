@@ -3,6 +3,9 @@ import argon2 from 'argon2';
 import { db } from '../db/client.js';
 import { users, groups, userGroups, userPermissionOverrides, tenantMembers, type User } from '../db/schema.js';
 import { HttpError } from '../middleware/errorHandler.js';
+import { PUBLIC_USER_COLUMNS, toPublicUser, type PublicUser } from './publicUser.js';
+
+export { PUBLIC_USER_COLUMNS, toPublicUser, type PublicUser };
 import { appendActivity } from './activity.js';
 import { emit } from '../realtime/emit.js';
 import { EV } from '@allebrum/shared';
@@ -32,14 +35,13 @@ function initialsFrom(name: string): string {
  * the Gmail "system sender" dropdown, and the CSV export, so scoping it here
  * closes all of those at once. Runs inside a request tenant context.
  */
-export async function listUsers(): Promise<User[]> {
-  const rows = await db
-    .select()
+export async function listUsers(): Promise<PublicUser[]> {
+  return db
+    .select(PUBLIC_USER_COLUMNS)
     .from(users)
     .innerJoin(tenantMembers, eq(tenantMembers.userId, users.id))
     .where(tenantEq(tenantMembers.tenantId))
     .orderBy(asc(users.name));
-  return rows.map((r) => r.users);
 }
 
 export async function getUser(id: string): Promise<User | undefined> {
@@ -65,7 +67,7 @@ export async function inviteUser(args: {
   /** When true (default), issue an invite token + email an accept link.
    *  Pass false for Google-only teammates who'll sign in via OAuth. */
   sendInvite?: boolean;
-}): Promise<{ user: User; reused: boolean }> {
+}): Promise<{ user: PublicUser; reused: boolean }> {
   const inviteTenantId = currentTenantId();
 
   // `users` is a global identity. If this email already exists, it may belong
@@ -107,7 +109,7 @@ export async function inviteUser(args: {
       kind: 'user.invite',
       target: `${existing.email} added to workspace`,
     });
-    return { user: existing, reused: true };
+    return { user: toPublicUser(existing), reused: true };
   }
 
   // Brand-new identity. We never accept a password on invite — the invitee sets
@@ -125,7 +127,7 @@ export async function inviteUser(args: {
       billable: String(args.billable ?? 150),
       status: 'invited',
     })
-    .returning();
+    .returning(PUBLIC_USER_COLUMNS);
   if (!row) throw new Error('user insert failed');
   // Hoppa: enroll the invited user in the inviting admin's workspace so they
   // can resolve a tenant at login. The user row itself is global (one
@@ -193,7 +195,7 @@ export async function updateUser(
     password: string;
   }>,
   whoId: string,
-): Promise<User> {
+): Promise<PublicUser> {
   const upd: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   if (patch.name !== undefined) {
     upd.name = patch.name;
@@ -204,7 +206,7 @@ export async function updateUser(
   if (patch.color !== undefined) upd.color = patch.color;
   if (patch.initials !== undefined) upd.initials = patch.initials;
   if (patch.password !== undefined) upd.passwordHash = await argon2.hash(patch.password);
-  const [row] = await db.update(users).set(upd).where(eq(users.id, id)).returning();
+  const [row] = await db.update(users).set(upd).where(eq(users.id, id)).returning(PUBLIC_USER_COLUMNS);
   if (!row) throw new HttpError(404, 'user_not_found');
   emit.toOrg(EV.USER_UPDATED, { id: row.id, by: whoId, at: new Date().toISOString() });
   return row;
