@@ -14,7 +14,7 @@ import {
   ChevronRight,
   Pencil,
 } from 'lucide-react';
-import { Card, Section, Empty, Pill } from '@/components/ui';
+import { Card, Section, Empty } from '@/components/ui';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';

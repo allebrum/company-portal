@@ -304,7 +304,6 @@ export type BootstrapData = {
 
 /** Billing info straight from the cached bootstrap payload (no extra fetch). */
 export function useBillingInfo(): BillingInfo | null {
-  const qc = useQueryClient();
   return useQuery({
     queryKey: qk.bootstrap,
     enabled: false, // bootstrap is fetched by the shell; just read the cache

@@ -212,7 +212,7 @@ export default function DashboardPage() {
       <div className="flex items-end justify-between">
         <div>
           <div className="eyebrow">Dashboard</div>
-          <h1 className="text-2xl font-bold text-gray-900">Hi {me?.name?.split(' ')[0]} — here's the week</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Hi {me?.name?.split(' ')[0]} — here&apos;s the week</h1>
           <p className="text-sm text-gray-500">A snapshot of where the team is spending time.</p>
         </div>
         <div className="flex items-center gap-2">

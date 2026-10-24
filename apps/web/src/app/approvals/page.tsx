@@ -2,11 +2,11 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Download } from 'lucide-react';
-import { Card, Pill, Empty, Section } from '@/components/ui';
+import { Card, Pill, Empty } from '@/components/ui';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
-import { Field, Select, Textarea } from '@/components/ui/Field';
+import { Textarea } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import {
   useEntries,
@@ -40,7 +40,7 @@ import {
 import { toCsv, downloadCsv } from '@/lib/csv';
 
 export default function ApprovalsPage() {
-  const { me, can } = useAuth();
+  const { can } = useAuth();
   const toast = useToast();
   const { data: entries = [] } = useEntries();
   const { data: users = [] } = useUsers();
@@ -550,7 +550,7 @@ function PeriodReviewModal({
 
         {!bookkeeperEmail && !isClosed && canPayManage && (
           <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-900">
-            No bookkeeper email is set. You can still close the period, but the report won't be emailed.
+            No bookkeeper email is set. You can still close the period, but the report won&apos;t be emailed.
             Add one in <span className="font-semibold">Admin → Pay periods</span>.
           </div>
         )}
@@ -848,8 +848,8 @@ function PeriodReviewModal({
             </div>
             <p className="mt-2 text-[12px] text-gray-500">
               Click an employee row to expand entry-by-entry timestamps.
-              "Close" auto-approves any remaining submitted entries.
-              "Close &amp; send" additionally emails this per-employee table to{' '}
+              &quot;Close&quot; auto-approves any remaining submitted entries.
+              &quot;Close &amp; send&quot; additionally emails this per-employee table to{' '}
               <strong>{bookkeeperEmail ?? '—'}</strong> from your connected Gmail.
             </p>
           </div>

@@ -37,11 +37,6 @@ const SPACE_TAB_PARAM = 'spaceTab';
 
 const Ctx = createContext<SpaceCtx | null>(null);
 
-function toUrlScope(scope: Scope): string | null {
-  if (scope.kind === 'all') return null;
-  return `${scope.kind}:${scope.id}`;
-}
-
 function fromUrlScope(raw: string | null): Scope | null {
   if (!raw) return null;
   const [kind, id] = raw.split(':');

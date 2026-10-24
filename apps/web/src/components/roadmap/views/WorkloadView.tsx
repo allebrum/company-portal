@@ -37,8 +37,8 @@ export function WorkloadView(props: ViewProps) {
         const atRisk = active.filter((g) => g.health === 'at-risk' || g.health === 'off-track').length;
         return { u, active: active.length, weight, segs, openTodos, overdue, atRisk };
       })
-      .filter(Boolean)
-      .sort((a, b) => b!.weight - a!.weight) as NonNullable<ReturnType<() => any>>[];
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+      .sort((a, b) => b.weight - a.weight);
   }, [users, goals, clients, todos]);
 
   if (rows.length === 0) return <Empty title="No workload to show" description="Assign owners to goals to see capacity." />;

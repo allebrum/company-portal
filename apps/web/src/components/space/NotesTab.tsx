@@ -9,9 +9,8 @@ import { EmbedDialog, type EmbedDialogValue } from './pickers/EmbedDialog';
 import { LinkPicker } from './pickers/LinkPicker';
 import { MentionPicker } from './pickers/MentionPicker';
 import {
-  useGoals, useTodos, useUsers, useProjects, useCreateGoal, useCreateTodo,
+  useGoals, useTodos, useProjects, useCreateGoal, useCreateTodo,
   useStartTimer, useStopTimer,
-  type GoalRow, type TodoRow,
 } from '@/hooks/useResources';
 import { useMyTimer } from '@/hooks/useTimer';
 import { useAuth } from '@/hooks/useAuth';
@@ -103,7 +102,6 @@ export function NotesTab({ scope }: { scope: Scope }) {
   // Sync from server on first load + scope change. After that, the local
   // reducer is the source of truth and we push out via debounced save.
   useEffect(() => {
-    const scopeKey = scope.kind === 'all' ? null : scope.id;
     initialized.current = false;
     if (scope.kind === 'all') return;
     if (data.loading) return;
@@ -622,14 +620,6 @@ export function NotesTab({ scope }: { scope: Scope }) {
     setEmbedOpen(null);
   };
 
-  if (data.loading || scope.kind === 'all') return null;
-
-  const filteredSpaceFiles = data.spaceFiles.filter((f) => {
-    const q = spaceFileQuery.trim().toLowerCase();
-    if (!q) return true;
-    return f.title.toLowerCase().includes(q) || f.url.toLowerCase().includes(q);
-  });
-
   const headings = useMemo(
     () => blocks
       .filter((b) => b.type === 'h1' || b.type === 'h2' || b.type === 'h3')
@@ -641,6 +631,14 @@ export function NotesTab({ scope }: { scope: Scope }) {
       .filter((h) => h.label.length > 0),
     [blocks],
   );
+
+  if (data.loading || scope.kind === 'all') return null;
+
+  const filteredSpaceFiles = data.spaceFiles.filter((f) => {
+    const q = spaceFileQuery.trim().toLowerCase();
+    if (!q) return true;
+    return f.title.toLowerCase().includes(q) || f.url.toLowerCase().includes(q);
+  });
 
   const focusHeading = (id: string) => {
     const el = document.querySelector<HTMLElement>(`[data-block-id="${id}"]`);
@@ -1270,7 +1268,7 @@ function caretRect(): { x: number; y: number } | null {
 // Specialized block cards
 // ============================================================================
 
-function TodoBlockCard({ block, onConvert }: { block: SpaceBlock; onConvert: (p: Partial<SpaceBlock>) => void }) {
+function TodoBlockCard({ block }: { block: SpaceBlock; onConvert: (p: Partial<SpaceBlock>) => void }) {
   const { data: todos = [] } = useTodos();
   const todo = block.todoId ? todos.find((t) => t.id === block.todoId) : null;
   if (!todo) {
@@ -1294,7 +1292,7 @@ function TodoBlockCard({ block, onConvert }: { block: SpaceBlock; onConvert: (p:
   );
 }
 
-function GoalBlockCard({ block, onConvert }: { block: SpaceBlock; onConvert: (p: Partial<SpaceBlock>) => void }) {
+function GoalBlockCard({ block }: { block: SpaceBlock; onConvert: (p: Partial<SpaceBlock>) => void }) {
   const { data: goals = [] } = useGoals();
   const { data: todos = [] } = useTodos();
   const goal = block.goalId ? goals.find((g) => g.id === block.goalId) : null;
