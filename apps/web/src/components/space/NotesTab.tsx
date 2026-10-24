@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { SlashMenu, type SlashCommandId } from './SlashMenu';
+import { NotesShortcutsHelp } from './NotesShortcutsHelp';
+import { TURN_INTO_OPTIONS } from './notes/commands';
 import { EmbedDialog, type EmbedDialogValue } from './pickers/EmbedDialog';
 import { LinkPicker } from './pickers/LinkPicker';
 import { MentionPicker } from './pickers/MentionPicker';
@@ -966,8 +968,11 @@ export function NotesTab({ scope }: { scope: Scope }) {
 
       <div className="max-w-3xl w-full">
         {/* S2.6 — autosave status. Fixed-height strip so state flips don't shift the canvas. */}
-        <div className="h-5 flex items-center justify-end" aria-live="polite">
-          <SaveStatus state={saveState} savedKey={latestSave?.submittedAt ?? 0} />
+        <div className="h-5 flex items-center justify-end gap-2">
+          <div aria-live="polite">
+            <SaveStatus state={saveState} savedKey={latestSave?.submittedAt ?? 0} />
+          </div>
+          <NotesShortcutsHelp />
         </div>
         <div>
           {blocks.map((b, i) => (
@@ -1437,17 +1442,11 @@ function BlockRow({
   );
 }
 
-const TURN_INTO: { type: BlockType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { type: 'text',     label: 'Text',          icon: Pilcrow },
-  { type: 'h1',       label: 'Heading 1',     icon: Heading1 },
-  { type: 'h2',       label: 'Heading 2',     icon: Heading2 },
-  { type: 'h3',       label: 'Heading 3',     icon: Heading3 },
-  { type: 'bullet',   label: 'Bulleted list', icon: List },
-  { type: 'numbered', label: 'Numbered list', icon: ListOrdered },
-  { type: 'checkbox', label: 'Checkbox',      icon: CheckSquare },
-  { type: 'quote',    label: 'Quote',         icon: Quote },
-  { type: 'callout',  label: 'Callout',       icon: Sparkles },
-];
+const TURN_INTO_ICONS: Partial<Record<BlockType, React.ComponentType<{ className?: string }>>> = {
+  text: Pilcrow, h1: Heading1, h2: Heading2, h3: Heading3,
+  bullet: List, numbered: ListOrdered, checkbox: CheckSquare, quote: Quote, callout: Sparkles,
+};
+const TURN_INTO = TURN_INTO_OPTIONS.map((o) => ({ ...o, icon: TURN_INTO_ICONS[o.type] ?? Pilcrow }));
 
 function BlockMenu({
   open,

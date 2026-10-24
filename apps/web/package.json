@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test src/components/space/notes/__tests__/blocks.test.ts src/components/space/notes/__tests__/merge.test.ts"
+    "test": "node --import tsx --test src/components/space/notes/__tests__/blocks.test.ts src/components/space/notes/__tests__/merge.test.ts src/components/space/notes/__tests__/help.test.ts"
   },
   "dependencies": {
     "@allebrum/shared": "workspace:*",

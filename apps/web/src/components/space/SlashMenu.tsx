@@ -9,49 +9,21 @@ import {
   Target, CheckCircle, Timer, Link as LinkIcon, Image as EmbedIcon, AtSign, Upload,
 } from 'lucide-react';
 import { fuzzyScore } from './notes/blocks';
+import { SLASH_COMMANDS, SLASH_GROUP_LABELS, type SlashCommand, type SlashCommandId } from './notes/commands';
 
-export type SlashCommandId =
-  | 'text' | 'h1' | 'h2' | 'h3'
-  | 'bullet' | 'numbered' | 'checkbox'
-  | 'quote' | 'callout' | 'divider'
-  | 'todo' | 'goal' | 'timer' | 'link' | 'embed' | 'mention' | 'upload';
+export type { SlashCommandId } from './notes/commands';
 
-type CommandDef = {
-  id: SlashCommandId;
-  label: string;
-  hint: string;
-  group: 'create' | 'heading' | 'block';
-  keywords: string[];
-  icon: typeof Pilcrow;
+type CommandDef = SlashCommand & { icon: typeof Pilcrow };
+
+// Exhaustive by construction: adding a command id without an icon fails typecheck.
+const ICONS: Record<SlashCommandId, typeof Pilcrow> = {
+  todo: CheckCircle, goal: Target, timer: Timer, link: LinkIcon, embed: EmbedIcon, mention: AtSign, upload: Upload,
+  h1: Heading1, h2: Heading2, h3: Heading3,
+  text: Pilcrow, bullet: List, numbered: ListOrdered, checkbox: CheckSquare, quote: Quote, callout: Sparkles, divider: Minus,
 };
 
-const COMMANDS: CommandDef[] = [
-  { id: 'todo',     label: 'To-do',          hint: 'Create a real to-do, auto-linked',  group: 'create',  keywords: ['todo','task','do'],     icon: CheckCircle },
-  { id: 'goal',     label: 'Goal',           hint: 'Create a roadmap goal, auto-linked', group: 'create', keywords: ['goal','milestone'],     icon: Target },
-  { id: 'timer',    label: 'Timer',          hint: 'Start a timer for this scope',       group: 'create', keywords: ['timer','track','time'], icon: Timer },
-  { id: 'link',     label: 'Link to item',   hint: 'Reference an existing goal/todo/file',group: 'create',keywords: ['link','ref','to'],      icon: LinkIcon },
-  { id: 'embed',    label: 'Embed',          hint: 'Embed a URL (Figma, Drive, GitHub…)',group: 'create', keywords: ['embed','url','iframe'], icon: EmbedIcon },
-  { id: 'mention',  label: 'Mention a teammate', hint: 'Insert @FirstName',              group: 'create', keywords: ['mention','at','user'],  icon: AtSign },
-  { id: 'upload',   label: 'Image/file', hint: 'Insert via modal: computer, QR, or space files', group: 'create', keywords: ['upload','file','image','photo'], icon: Upload },
-
-  { id: 'h1',       label: 'Heading 1',      hint: 'Big section title',                  group: 'heading', keywords: ['h1','heading','title'],   icon: Heading1 },
-  { id: 'h2',       label: 'Heading 2',      hint: 'Subsection title',                   group: 'heading', keywords: ['h2','heading'],           icon: Heading2 },
-  { id: 'h3',       label: 'Heading 3',      hint: 'Sub-subsection',                     group: 'heading', keywords: ['h3','heading'],           icon: Heading3 },
-
-  { id: 'text',     label: 'Text',           hint: 'Plain paragraph',                    group: 'block', keywords: ['text','paragraph','p'],   icon: Pilcrow },
-  { id: 'bullet',   label: 'Bulleted list',  hint: '• item',                             group: 'block', keywords: ['bullet','list','ul'],     icon: List },
-  { id: 'numbered', label: 'Numbered list',  hint: '1. item',                            group: 'block', keywords: ['numbered','list','ol'],   icon: ListOrdered },
-  { id: 'checkbox', label: 'Checkbox',       hint: 'Visual checkbox row',                group: 'block', keywords: ['check','box','task'],     icon: CheckSquare },
-  { id: 'quote',    label: 'Quote',          hint: 'Italic, left-bordered block',        group: 'block', keywords: ['quote','blockquote'],     icon: Quote },
-  { id: 'callout',  label: 'Callout',        hint: 'Purple-tinted note',                 group: 'block', keywords: ['callout','note','tip'],   icon: Sparkles },
-  { id: 'divider',  label: 'Divider',        hint: 'Horizontal rule',                    group: 'block', keywords: ['divider','hr','line'],    icon: Minus },
-];
-
-const GROUP_LABELS: Record<CommandDef['group'], string> = {
-  create: 'Create & link',
-  heading: 'Headings',
-  block: 'Blocks',
-};
+const COMMANDS: CommandDef[] = SLASH_COMMANDS.map((c) => ({ ...c, icon: ICONS[c.id] }));
+const GROUP_LABELS = SLASH_GROUP_LABELS;
 
 /**
  * Slash-command popover. Anchored to the caret when the user types `/`.
