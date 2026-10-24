@@ -15,6 +15,7 @@ import {
   useRegisterPasskey,
   useDeletePasskey,
 } from '@/hooks/use2fa';
+import { ApiTokensSection } from '@/components/security/ApiTokensSection';
 
 function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void }) {
   return (
@@ -94,7 +95,7 @@ export default function SecurityPage() {
       <div>
         <div className="eyebrow">Account</div>
         <h1 className="text-2xl font-bold text-gray-900">Security</h1>
-        <p className="text-sm text-gray-500">Add a second factor to protect your account.</p>
+        <p className="text-sm text-gray-500">Add a second factor to protect your account, and manage API tokens for bots.</p>
       </div>
 
       {status?.required && (
@@ -216,6 +217,8 @@ export default function SecurityPage() {
           )}
         </Card>
       </Section>
+
+      <ApiTokensSection />
     </div>
   );
 }
