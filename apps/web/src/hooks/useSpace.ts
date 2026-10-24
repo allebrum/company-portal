@@ -11,7 +11,16 @@ import {
 } from '@/hooks/useResources';
 import type { SpaceBlock, SpaceFile } from '@allebrum/shared';
 import type { Scope } from '@/lib/roadmap';
-import { api, isStaleUpdate, EXPECTED_UPDATED_AT_HEADER } from '@/lib/api';
+import {
+  api,
+  isStaleUpdate,
+  isSessionLost,
+  isUnauthorized,
+  onUnauthorized,
+  EXPECTED_UPDATED_AT_HEADER,
+} from '@/lib/api';
+import { useAuth } from '@/hooks/useAuth';
+import { draftKey, saveDraft } from '@/components/space/notes/drafts';
 import { isNewerVersion, mergeBlocks, sameBlocks } from '@/components/space/notes/merge';
 
 /**
@@ -106,6 +115,10 @@ export type SpaceBlocksSync = {
  *
  * `pull()` does the same merge without a save, for Socket.IO change notices.
  *
+ * When the session ends (a 401 here or anywhere else), nothing is retried:
+ * edits that didn't reach the server are stashed in localStorage
+ * (notes/drafts.ts) and merged back in after the user signs in again.
+ *
  * Files-tab writes don't use this — those are discrete user actions
  * (upload, paste link, remove) and warrant immediate writes via
  * useUpdateSpaceFiles.
@@ -131,6 +144,35 @@ export function useUpdateSpaceBlocks(
   optsRef.current = opts;
   const mutators = useRef({ updateClient, updateProject });
   mutators.current = { updateClient, updateProject };
+  // Remember who is editing: by the time a 401 lands, `me` may be clearing.
+  const { me } = useAuth();
+  const userIdRef = useRef<string | null>(null);
+  if (me?.id) userIdRef.current = me.id;
+
+  // Session over: keep unsent edits on this device instead of sending them.
+  // Newest blocks stashed per Space, so a later, older in-flight copy
+  // (the request that got the 401) never overwrites them.
+  const stashed = useRef(new Map<string, SpaceBlock[]>());
+  const stash = (key: string, ref: SpaceRef, blocks: SpaceBlock[]) => {
+    stashed.current.set(key, blocks);
+    const uid = userIdRef.current;
+    const base = synced.current.get(key);
+    if (!uid || (base && sameBlocks(blocks, base.blocks))) return;
+    saveDraft(draftKey(uid, ref.kind, ref.id), {
+      blocks,
+      base: base?.blocks ?? [],
+      baseUpdatedAt: base?.updatedAt ?? null,
+    });
+  };
+  const stashPending = () => {
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+    for (const [key, p] of pending.current) stash(key, p.scope, p.blocks);
+    pending.current.clear();
+    pullWanted.current = null;
+  };
 
   const setSynced = (key: string, v: Synced) => {
     synced.current.set(key, v);
@@ -147,6 +189,10 @@ export function useUpdateSpaceBlocks(
     if (timer.current) {
       clearTimeout(timer.current);
       timer.current = null;
+    }
+    if (isSessionLost()) {
+      stashPending(); // never send while signed out (incl. unmount/pagehide flushes)
+      return;
     }
     if (inFlight.current) {
       // Page going away mid-save: the loop below can't run again, so push
@@ -191,13 +237,26 @@ export function useUpdateSpaceBlocks(
           setSynced(key, { blocks: p.blocks, updatedAt: row.updatedAt ?? null });
           conflicts = 0;
         } catch (e) {
+          if (isUnauthorized(e)) {
+            // Session ended: keep the newest edits locally and stop.
+            stash(key, p.scope, pending.current.get(key)?.blocks ?? stashed.current.get(key) ?? p.blocks);
+            pending.current.delete(key);
+            stashPending();
+            break;
+          }
           if (!isStaleUpdate(e) || conflicts >= 5) continue; // fire-and-forget as before; the next edit resends
           conflicts++;
           // Someone saved after us. Merge their copy with ours and retry.
           let server: ServerBlocks;
           try {
             server = await fetchServer(p.scope);
-          } catch {
+          } catch (fe) {
+            if (isUnauthorized(fe)) {
+              stash(key, p.scope, pending.current.get(key)?.blocks ?? stashed.current.get(key) ?? p.blocks);
+              pending.current.delete(key);
+              stashPending();
+              break;
+            }
             continue;
           }
           const baseBlocks = base?.blocks ?? [];
@@ -211,17 +270,20 @@ export function useUpdateSpaceBlocks(
     } finally {
       inFlight.current = false;
     }
-    if (pending.current.size > 0) void send(); // queued while the last response was in flight
+    if (isSessionLost()) stashPending();
+    else if (pending.current.size > 0) void send(); // queued while the last response was in flight
     else if (pullWanted.current) {
       const { hint } = pullWanted.current;
       pullWanted.current = null;
       void pullRef.current(hint ?? undefined);
     }
+    // stash/stashPending only touch refs, so the stable identity is safe.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const pull = useCallback<SpaceBlocksSync['pull']>(async (hint) => {
     const ref = asRef(scopeRef.current);
-    if (!ref) return;
+    if (!ref || isSessionLost()) return;
     const key = keyOf(ref);
     const before = synced.current.get(key);
     if (!before) return; // not hydrated yet
@@ -259,6 +321,9 @@ export function useUpdateSpaceBlocks(
   // Flush (never drop) a pending save when the scope changes or the canvas
   // unmounts, and when the tab is hidden or the page is being unloaded.
   const scopeKey = scope && scope.kind !== 'all' ? `${scope.kind}:${scope.id}` : null;
+  // Any staff 401 (not just ours) ends the session: stash what's queued.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => onUnauthorized(() => stashPending()), []);
   useEffect(() => () => void send(), [scopeKey, send]);
   useEffect(() => {
     const onHide = () => {
@@ -278,6 +343,10 @@ export function useUpdateSpaceBlocks(
     const ref = asRef(scopeRef.current);
     if (!ref) return false;
     const key = keyOf(ref);
+    if (isSessionLost()) {
+      stash(key, ref, next); // signed out: keep it for after sign-in
+      return false;
+    }
     const base = synced.current.get(key);
     if (!inFlight.current && base && sameBlocks(next, base.blocks)) {
       pending.current.delete(key); // e.g. a remote merge with no local edits

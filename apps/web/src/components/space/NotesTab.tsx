@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { SlashMenu, type SlashCommandId } from './SlashMenu';
+import { NotesShortcutsHelp } from './NotesShortcutsHelp';
+import { TURN_INTO_OPTIONS } from './notes/commands';
 import { useBlockSelection } from './useBlockSelection';
 import { selectAllEscalates, shiftArrowLeavesBlock } from './notes/selection';
 import { EmbedDialog, type EmbedDialogValue } from './pickers/EmbedDialog';
@@ -31,6 +33,7 @@ import { Popover } from '@/components/ui/Popover';
 import { API_URL } from '@/lib/env';
 import { isStaleUpdate } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
+import { applyDraft, draftKey, takeDraft } from './notes/drafts';
 import { EV, type SpaceBlocksUpdatedPayload } from '@allebrum/shared';
 import { fmtTimer, PRIORITY_DOT } from '@/lib/formatters';
 import { rollupProgress } from '@/lib/roadmap';
@@ -140,6 +143,15 @@ export function NotesTab({ scope }: { scope: Scope }) {
       // One line per block: split legacy multi-line text blocks in memory.
       // Persisted with the next real edit.
       initial = migrateBlocks(data.spaceBlocks);
+    }
+    // Edits that were stranded when the session ended (stashed by
+    // useUpdateSpaceBlocks): merge them onto the current copy and save.
+    const draft = me ? takeDraft(draftKey(me.id, scope.kind, scope.id)) : null;
+    const restored = draft ? applyDraft(draft, initial) : null;
+    if (restored) {
+      initial = restored;
+      sync.save(restored);
+      toast.success('Restored notes you hadn’t saved before your session ended.');
     }
     initBlocksRef.current = initial;
     dispatch({ type: 'init', blocks: initial });
@@ -972,8 +984,11 @@ export function NotesTab({ scope }: { scope: Scope }) {
 
       <div className="max-w-3xl w-full">
         {/* S2.6 — autosave status. Fixed-height strip so state flips don't shift the canvas. */}
-        <div className="h-5 flex items-center justify-end" aria-live="polite">
-          <SaveStatus state={saveState} savedKey={latestSave?.submittedAt ?? 0} />
+        <div className="h-5 flex items-center justify-end gap-2">
+          <div aria-live="polite">
+            <SaveStatus state={saveState} savedKey={latestSave?.submittedAt ?? 0} />
+          </div>
+          <NotesShortcutsHelp />
         </div>
         <div
           ref={canvasRef}
@@ -1465,17 +1480,11 @@ function BlockRow({
   );
 }
 
-const TURN_INTO: { type: BlockType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { type: 'text',     label: 'Text',          icon: Pilcrow },
-  { type: 'h1',       label: 'Heading 1',     icon: Heading1 },
-  { type: 'h2',       label: 'Heading 2',     icon: Heading2 },
-  { type: 'h3',       label: 'Heading 3',     icon: Heading3 },
-  { type: 'bullet',   label: 'Bulleted list', icon: List },
-  { type: 'numbered', label: 'Numbered list', icon: ListOrdered },
-  { type: 'checkbox', label: 'Checkbox',      icon: CheckSquare },
-  { type: 'quote',    label: 'Quote',         icon: Quote },
-  { type: 'callout',  label: 'Callout',       icon: Sparkles },
-];
+const TURN_INTO_ICONS: Partial<Record<BlockType, React.ComponentType<{ className?: string }>>> = {
+  text: Pilcrow, h1: Heading1, h2: Heading2, h3: Heading3,
+  bullet: List, numbered: ListOrdered, checkbox: CheckSquare, quote: Quote, callout: Sparkles,
+};
+const TURN_INTO = TURN_INTO_OPTIONS.map((o) => ({ ...o, icon: TURN_INTO_ICONS[o.type] ?? Pilcrow }));
 
 function BlockMenu({
   open,
