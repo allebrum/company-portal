@@ -29,6 +29,7 @@ import { Popover } from '@/components/ui/Popover';
 import { API_URL } from '@/lib/env';
 import { isStaleUpdate } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
+import { applyDraft, draftKey, takeDraft } from './notes/drafts';
 import { EV, type SpaceBlocksUpdatedPayload } from '@allebrum/shared';
 import { fmtTimer, PRIORITY_DOT } from '@/lib/formatters';
 import { rollupProgress } from '@/lib/roadmap';
@@ -138,6 +139,15 @@ export function NotesTab({ scope }: { scope: Scope }) {
       // One line per block: split legacy multi-line text blocks in memory.
       // Persisted with the next real edit.
       initial = migrateBlocks(data.spaceBlocks);
+    }
+    // Edits that were stranded when the session ended (stashed by
+    // useUpdateSpaceBlocks): merge them onto the current copy and save.
+    const draft = me ? takeDraft(draftKey(me.id, scope.kind, scope.id)) : null;
+    const restored = draft ? applyDraft(draft, initial) : null;
+    if (restored) {
+      initial = restored;
+      sync.save(restored);
+      toast.success('Restored notes you hadn’t saved before your session ended.');
     }
     initBlocksRef.current = initial;
     dispatch({ type: 'init', blocks: initial });
