@@ -137,13 +137,19 @@ Deleting, submitting, and approving entries are deliberately **not** available t
 
 ## 5. Things to know
 
-- **An open browser tab can overwrite bot notes.** The web editor saves the
-  whole Notes list. If someone has that Space's Notes open while a bot
-  appends, their next keystroke can save over the bot's blocks. The API now
-  supports a conflict check (`x-expected-updated-at` header on
-  `PATCH /clients/:id` and `/projects/:id` → `409 stale_update`), but the web
-  editor doesn't send it yet. That's a planned follow-up. Until then, have
-  bots append when the Space isn't open for editing, or re-check with
-  `GET …/blocks`.
+- **Open browser tabs and bots can both write.** The web editor sends the
+  version it last synced (`x-expected-updated-at`) with every Notes save. If
+  a bot appended in between, the save gets `409 stale_update`. The editor then
+  fetches `GET …/blocks`, merges, and retries, so the bot's blocks survive.
+  Editors that have the Space open also get a live `space:blocks-updated`
+  Socket.IO notice after each append or save, and merge the new blocks in
+  as they arrive.
+  - **Merge rules:** the user's edits win on the same block, and blocks the
+    user deleted stay deleted.
+  - **Placement:** appended blocks keep their server position, or go at the
+    end.
+  - **Bots that rewrite blocks:** append is still the safe write. If a bot
+    must rewrite blocks with `PATCH`, send `x-expected-updated-at` with the
+    `updatedAt` it read, and on a 409 re-read and retry.
 - Tokens are stored hashed (SHA-256). Lost tokens can't be recovered. Revoke them and create a new one.
 - Each user can have up to 20 active tokens.

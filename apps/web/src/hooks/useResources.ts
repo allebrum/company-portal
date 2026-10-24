@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, EXPECTED_UPDATED_AT_HEADER } from '@/lib/api';
 import { API_URL } from '@/lib/env';
 import { qk } from '@/lib/queryKeys';
 import type {
@@ -72,6 +72,8 @@ export type ClientRow = {
   portalPublishedAt: string | null;
   /** QuickBooks customer this client bills to; remembered on first invoice. */
   quickbooksCustomerId: string | null;
+  /** Row version; Notes saves send it back as x-expected-updated-at. */
+  updatedAt?: string;
 };
 export type ClientContactRow = {
   id: string;
@@ -89,6 +91,8 @@ export type ProjectRow = {
   id: string;
   clientId: string;
   name: string;
+  /** Row version; Notes saves send it back as x-expected-updated-at. */
+  updatedAt?: string;
   code: string;
   opportunityStatus: 'pipeline' | 'won' | 'lost' | 'on-hold';
   opportunityValue: number | null;
@@ -369,6 +373,18 @@ export function useClients() {
   return useQuery({ queryKey: qk.clients, queryFn: () => api.get<ClientRow[]>('/clients') });
 }
 /** True for the Notes autosave shape: `{ spaceBlocks }` and nothing else. */
+/** Mutation variables for client/project PATCHes. `expectedUpdatedAt` opts
+ *  into the API's 409 stale_update check; `keepalive` lets a save outlive
+ *  the page (pagehide flush). */
+type SpacePatchVars<P> = { id: string; patch: P; expectedUpdatedAt?: string; keepalive?: boolean };
+
+function versionedOpts(expectedUpdatedAt?: string, keepalive?: boolean) {
+  return {
+    keepalive,
+    headers: expectedUpdatedAt ? { [EXPECTED_UPDATED_AT_HEADER]: expectedUpdatedAt } : undefined,
+  };
+}
+
 function isSpaceBlocksOnly(patch: object): patch is { spaceBlocks: NonNullable<UpdateClientInput['spaceBlocks']> } {
   const keys = Object.keys(patch);
   return keys.length === 1 && keys[0] === 'spaceBlocks';
@@ -384,8 +400,8 @@ export function useCreateClient() {
 export function useUpdateClient() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: UpdateClientInput }) =>
-      api.patch<ClientRow>(`/clients/${id}`, patch),
+    mutationFn: ({ id, patch, expectedUpdatedAt, keepalive }: SpacePatchVars<UpdateClientInput>) =>
+      api.patch<ClientRow>(`/clients/${id}`, patch, versionedOpts(expectedUpdatedAt, keepalive)),
     // Notes autosaves fire every few hundred ms; patch the cached row in
     // place instead of refetching the whole list after each one.
     onMutate: ({ id, patch }) => {
@@ -394,8 +410,14 @@ export function useUpdateClient() {
         rows?.map((r) => (r.id === id ? { ...r, spaceBlocks: patch.spaceBlocks! } : r)),
       );
     },
-    onSuccess: (_row, { patch }) => {
-      if (isSpaceBlocksOnly(patch)) return;
+    onSuccess: (row, { id, patch }) => {
+      if (isSpaceBlocksOnly(patch)) {
+        // Keep the cached version current so a reopened canvas starts from it.
+        qc.setQueryData<ClientRow[]>(qk.clients, (rows) =>
+          rows?.map((r) => (r.id === id ? { ...r, updatedAt: row.updatedAt } : r)),
+        );
+        return;
+      }
       return qc.invalidateQueries({ queryKey: qk.clients });
     },
     onError: () => qc.invalidateQueries({ queryKey: qk.clients }),
@@ -457,8 +479,8 @@ export function useCreateProject() {
 export function useUpdateProject() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: UpdateProjectInput }) =>
-      api.patch<ProjectRow>(`/projects/${id}`, patch),
+    mutationFn: ({ id, patch, expectedUpdatedAt, keepalive }: SpacePatchVars<UpdateProjectInput>) =>
+      api.patch<ProjectRow>(`/projects/${id}`, patch, versionedOpts(expectedUpdatedAt, keepalive)),
     // Notes autosaves fire every few hundred ms; patch the cached row in
     // place instead of refetching the whole list after each one.
     onMutate: ({ id, patch }) => {
@@ -467,8 +489,14 @@ export function useUpdateProject() {
         rows?.map((r) => (r.id === id ? { ...r, spaceBlocks: patch.spaceBlocks! } : r)),
       );
     },
-    onSuccess: (_row, { patch }) => {
-      if (isSpaceBlocksOnly(patch)) return;
+    onSuccess: (row, { id, patch }) => {
+      if (isSpaceBlocksOnly(patch)) {
+        // Keep the cached version current so a reopened canvas starts from it.
+        qc.setQueryData<ProjectRow[]>(qk.projects, (rows) =>
+          rows?.map((r) => (r.id === id ? { ...r, updatedAt: row.updatedAt } : r)),
+        );
+        return;
+      }
       return qc.invalidateQueries({ queryKey: qk.projects });
     },
     onError: () => qc.invalidateQueries({ queryKey: qk.projects }),
