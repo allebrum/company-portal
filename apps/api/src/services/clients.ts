@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { clients, type Client } from '../db/schema.js';
 import type { CreateClientInput, UpdateClientInput } from '@allebrum/shared';
@@ -8,6 +8,7 @@ import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { isConnected as driveIsConnected, ensureClientFolder } from './drive.js';
 import { tenantEq, stampTenant } from '../tenancy/scope.js';
+import { throwIfStale } from './concurrency.js';
 
 export async function listClients(): Promise<Client[]> {
   return db.select().from(clients).where(tenantEq(clients.tenantId)).orderBy(asc(clients.name));
@@ -48,6 +49,7 @@ export async function updateClient(
   id: string,
   patch: UpdateClientInput,
   whoId: string,
+  opts: { expectedUpdatedAt?: string } = {},
 ): Promise<Client> {
   const upd: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   if (patch.name !== undefined) upd.name = patch.name;
@@ -65,9 +67,18 @@ export async function updateClient(
   const [row] = await db
     .update(clients)
     .set(upd)
-    .where(and(eq(clients.id, id), tenantEq(clients.tenantId)))
+    .where(
+      and(
+        eq(clients.id, id),
+        tenantEq(clients.tenantId),
+        opts.expectedUpdatedAt ? sql`${clients.updatedAt} = ${opts.expectedUpdatedAt}::timestamptz` : undefined,
+      ),
+    )
     .returning();
-  if (!row) throw new HttpError(404, 'client_not_found');
+  if (!row) {
+    if (opts.expectedUpdatedAt) await throwIfStale(clients, id, 'client_not_found');
+    throw new HttpError(404, 'client_not_found');
+  }
   emit.toOrg(EV.CLIENT_UPDATED, { id: row.id, by: whoId, at: new Date().toISOString() });
   await appendActivity({ whoId, kind: 'client.update', target: `${row.name} updated` });
   return row;
