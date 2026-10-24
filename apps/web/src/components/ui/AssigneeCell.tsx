@@ -37,11 +37,6 @@ function groupColor(id: string): string {
   return `hsl(${hue} 55% 42%)`;
 }
 
-function groupInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).slice(0, 2);
-  return parts.map((p) => p[0]?.toUpperCase() ?? '').join('') || '?';
-}
-
 const AVATAR_SIZES: Record<NonNullable<AssigneeCellProps['size']>, number> = {
   sm: 20,
   md: 24,

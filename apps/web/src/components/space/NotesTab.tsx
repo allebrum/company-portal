@@ -13,9 +13,8 @@ import { EmbedDialog, type EmbedDialogValue } from './pickers/EmbedDialog';
 import { LinkPicker } from './pickers/LinkPicker';
 import { MentionPicker } from './pickers/MentionPicker';
 import {
-  useGoals, useTodos, useUsers, useProjects, useCreateGoal, useCreateTodo,
+  useGoals, useTodos, useProjects, useCreateGoal, useCreateTodo,
   useStartTimer, useStopTimer,
-  type GoalRow, type TodoRow,
 } from '@/hooks/useResources';
 import { useMyTimer } from '@/hooks/useTimer';
 import { useAuth } from '@/hooks/useAuth';
@@ -1815,7 +1814,7 @@ function placeholderFor(block: SpaceBlock, focused: boolean): string {
 // Specialized block cards
 // ============================================================================
 
-function TodoBlockCard({ block, onConvert }: { block: SpaceBlock; onConvert: (p: Partial<SpaceBlock>) => void }) {
+function TodoBlockCard({ block }: { block: SpaceBlock; onConvert: (p: Partial<SpaceBlock>) => void }) {
   const { data: todos = [] } = useTodos();
   const todo = block.todoId ? todos.find((t) => t.id === block.todoId) : null;
   if (!todo) {
@@ -1839,7 +1838,7 @@ function TodoBlockCard({ block, onConvert }: { block: SpaceBlock; onConvert: (p:
   );
 }
 
-function GoalBlockCard({ block, onConvert }: { block: SpaceBlock; onConvert: (p: Partial<SpaceBlock>) => void }) {
+function GoalBlockCard({ block }: { block: SpaceBlock; onConvert: (p: Partial<SpaceBlock>) => void }) {
   const { data: goals = [] } = useGoals();
   const { data: todos = [] } = useTodos();
   const goal = block.goalId ? goals.find((g) => g.id === block.goalId) : null;

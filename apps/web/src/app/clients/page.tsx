@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowRight, Briefcase, CheckCircle2, FolderKanban, Layers, Plus, Search } from 'lucide-react';
-import { Card, Section, Empty } from '@/components/ui';
+import { Card, Empty } from '@/components/ui';
 import { Button } from '@/components/ui/Button';
 import { AvatarStack, type AvatarUser } from '@/components/ui/Avatar';
 import { ClientFormModal } from '@/components/features/ClientFormModal';
