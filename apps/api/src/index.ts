@@ -14,12 +14,17 @@ import { bearerAuth, isTokenRequest } from './middleware/bearerAuth.js';
 import { patFailedAuthLimiter, patPerTokenLimiter } from './middleware/rateLimiters.js';
 import { apiRouter } from './routes/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { secretsReplacer } from './lib/redact.js';
 import { initIO } from './realtime/io.js';
 import { startPayPeriodSweep } from './jobs/payPeriodSweep.js';
 import { startTimeReminderSweep } from './jobs/timeReminders.js';
 
 const app = express();
 app.set('trust proxy', 1);
+// Backstop: strip password hashes, token hashes, OAuth tokens, TOTP secrets
+// etc. from EVERY res.json() body, even if a route returns a raw DB row.
+// Services already select only public columns; see lib/redact.ts.
+app.set('json replacer', secretsReplacer);
 
 app.use(
   helmet({

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/requireAuth.js';
-import { listUsers, getUser } from '../services/users.js';
+import { listUsers, getUser, toPublicUser } from '../services/users.js';
 import { listClients } from '../services/clients.js';
 import { listProjects } from '../services/projects.js';
 import { listGoals } from '../services/goals.js';
@@ -60,7 +60,7 @@ bootstrapRouter.get('/', async (req, res, next) => {
       getTenant(me.tenantId),
     ]);
     res.json({
-      me: meRow ? { ...meRow, permissions: [...permSet], groupIds } : null,
+      me: meRow ? { ...toPublicUser(meRow), permissions: [...permSet], groupIds } : null,
       users,
       clients,
       projects,
