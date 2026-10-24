@@ -11,6 +11,7 @@ import { env, isProd } from './env.js';
 import { sessionMiddleware } from './session.js';
 import { csrfProtection } from './middleware/csrf.js';
 import { bearerAuth, isTokenRequest } from './middleware/bearerAuth.js';
+import { patFailedAuthLimiter, patPerTokenLimiter } from './middleware/rateLimiters.js';
 import { apiRouter } from './routes/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { initIO } from './realtime/io.js';
@@ -64,7 +65,7 @@ app.use(cookieParser());
 // request with `Authorization: Bearer` is authenticated by token only (never
 // by cookie), restricted to an allow-list of routes + scopes, and gets a
 // non-persistent session object so express-session skips the store.
-app.use('/api', bearerAuth);
+app.use('/api', patFailedAuthLimiter, patPerTokenLimiter, bearerAuth);
 app.use(sessionMiddleware);
 // CSRF guard for every state-changing route behind the session cookie (prod
 // cookies are SameSite=None, so SameSite is no defense). Same-origin proof

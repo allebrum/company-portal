@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { CreateApiTokenSchema, type CreateApiTokenInput } from '@allebrum/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { validate, getValidated } from '../middleware/validate.js';
-import { rateLimit } from '../middleware/rateLimit.js';
+import { apiTokenCreateLimiter, apiTokensRouteLimiter } from '../middleware/rateLimiters.js';
 import { createToken, listTokens, revokeToken } from '../services/apiTokens.js';
 import { isTokenRequest } from '../middleware/bearerAuth.js';
 
@@ -16,6 +16,7 @@ import { isTokenRequest } from '../middleware/bearerAuth.js';
  * route: a bot's "who am I / what can I do".
  */
 export const apiTokensRouter = Router();
+apiTokensRouter.use(apiTokensRouteLimiter);
 apiTokensRouter.use(requireAuth);
 
 apiTokensRouter.get('/current', (req, res) => {
@@ -49,7 +50,7 @@ apiTokensRouter.get('/', sessionOnly, async (req, res, next) => {
 apiTokensRouter.post(
   '/',
   sessionOnly,
-  rateLimit({ key: 'pat-create', max: 10, windowSec: 3600 }),
+  apiTokenCreateLimiter,
   validate(CreateApiTokenSchema),
   async (req, res, next) => {
     try {

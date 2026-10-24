@@ -1,6 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
 import type { ApiTokenScope } from '@allebrum/shared';
-import { redisSession } from '../redis.js';
 import { authenticateToken, touchToken } from '../services/apiTokens.js';
 import { checkTokenRoute, parseBearer } from './tokenPolicy.js';
 
@@ -15,7 +14,8 @@ export { checkTokenRoute, parseBearer, TOKEN_ROUTES } from './tokenPolicy.js';
  *     we never fall back to a cookie session on the same request),
  *   - the method + path must be on the allow-list below and the token must
  *     hold the matching scope (default-deny → 403),
- *   - per-token rate limiting applies.
+ *   - rate limits (middleware/rateLimiters.ts, mounted just before this):
+ *     120 req/min per token, 20 failed auths / 10 min per IP.
  * On success we attach a non-persistent `req.session` carrying the same
  * `{ userId, tenantId }` a browser session would, so tenantContext, RBAC
  * (`userCan`), subscription gating, and every service behave identically.
@@ -39,32 +39,6 @@ declare global {
 
 export function isTokenRequest(req: Request): boolean {
   return req.authVia === 'token';
-}
-
-const PER_TOKEN_MAX = 120; // requests / minute / token
-const FAIL_MAX = 20; // failed token attempts / 10 min / IP
-const FAIL_WINDOW = 600;
-
-function clientIp(req: Request): string {
-  return (req.ip ?? req.socket.remoteAddress ?? 'unknown').replace(/[^a-zA-Z0-9.:_-]/g, '');
-}
-
-async function incr(key: string, windowSec: number): Promise<number> {
-  try {
-    const n = await redisSession.incr(key);
-    if (n === 1) await redisSession.expire(key, windowSec);
-    return n;
-  } catch {
-    return 0; // fail open, like middleware/rateLimit.ts
-  }
-}
-
-async function peek(key: string): Promise<number> {
-  try {
-    return Number((await redisSession.get(key)) ?? 0);
-  } catch {
-    return 0;
-  }
 }
 
 function fakeSession(userId: string, tenantId: string, tokenId: string): Request['session'] {
@@ -92,14 +66,8 @@ export async function bearerAuth(req: Request, res: Response, next: NextFunction
     return;
   }
   try {
-    const failKey = `rl:pat-fail:${clientIp(req)}`;
-    if ((await peek(failKey)) >= FAIL_MAX) {
-      res.status(429).json({ error: 'rate_limited' });
-      return;
-    }
     const tok = raw ? await authenticateToken(raw) : null;
     if (!tok) {
-      await incr(failKey, FAIL_WINDOW);
       res.setHeader('WWW-Authenticate', 'Bearer error="invalid_token"');
       res.status(401).json({ error: 'invalid_token' });
       return;
@@ -109,13 +77,6 @@ export async function bearerAuth(req: Request, res: Response, next: NextFunction
     const decision = checkTokenRoute(req.method, fullPath, tok.scopes);
     if (!decision.ok) {
       res.status(decision.status).json(decision.scope ? { error: decision.error, scope: decision.scope } : { error: decision.error });
-      return;
-    }
-
-    const n = await incr(`rl:pat:${tok.id}`, 60);
-    if (n > PER_TOKEN_MAX) {
-      res.setHeader('Retry-After', '60');
-      res.status(429).json({ error: 'rate_limited' });
       return;
     }
 
