@@ -11,6 +11,7 @@ import { Avatar } from '../ui/Avatar';
 import { Button } from '../ui/Button';
 import { HoppaMark } from '../ui/HoppaMark';
 import { useToast } from '../ui/Toast';
+import { InstallAppButton } from '../pwa/InstallAppButton';
 import { cn } from '@/lib/utils';
 
 const NAV: { id: string; href: string; label: string; Icon: typeof Home; anyPerm?: Permission[] }[] = [
@@ -166,6 +167,9 @@ export function Sidebar() {
         </div>
       </nav>
 
+      <div className="px-3 pb-1">
+        <InstallAppButton />
+      </div>
       <div className="border-t border-gray-200 p-3 flex items-center gap-2">
         <Link
           href="/security"

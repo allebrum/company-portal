@@ -169,7 +169,7 @@ export function OnboardingChecklist() {
   return (
     <>
       {show && display === 'pill' && (
-        <div className="fixed bottom-6 right-6 z-40 group flex items-center">
+        <div className="fixed bottom-6 right-6 mb-[env(safe-area-inset-bottom)] mr-[env(safe-area-inset-right)] z-40 group flex items-center">
           <button
             onClick={() => setAndPersist('open')}
             className="flex items-center gap-2 rounded-full bg-white border border-gray-200 shadow-lg pl-3 pr-3.5 py-2 hover:shadow-xl hover:border-brand-300"
@@ -191,7 +191,7 @@ export function OnboardingChecklist() {
       )}
 
       {show && display === 'open' && (
-        <div className="fixed bottom-6 right-6 z-40 w-80 max-w-[calc(100vw-2rem)] rounded-2xl bg-white border border-gray-200 shadow-xl">
+        <div className="fixed bottom-6 right-6 mb-[env(safe-area-inset-bottom)] mr-[env(safe-area-inset-right)] z-40 w-80 max-w-[calc(100vw-2rem)] rounded-2xl bg-white border border-gray-200 shadow-xl">
           <div className="flex items-start justify-between gap-2 px-4 pt-4">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-brand-50 text-brand-600 grid place-items-center shrink-0">

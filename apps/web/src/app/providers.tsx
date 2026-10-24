@@ -11,6 +11,7 @@ import { ConfirmProvider } from '@/components/ui/ConfirmDialog';
 import { SpaceProvider } from '@/contexts/SpaceContext';
 import { UploadManagerProvider } from '@/contexts/UploadManagerContext';
 import { PostHogBindings } from '@/components/analytics/PostHogBindings';
+import { PwaUpdateToast } from '@/components/pwa/PwaUpdateToast';
 
 function LiveEventBindings(): null {
   const qc = useQueryClient();
@@ -131,6 +132,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
               <LiveEventBindings />
               <PostHogBindings />
               {children}
+              <PwaUpdateToast />
             </UploadManagerProvider>
           </SpaceProvider>
         </AuthProvider>

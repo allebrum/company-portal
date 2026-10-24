@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Providers } from './providers';
 import { AuthGate } from '@/components/shell/AuthGate';
+import { EARLY_INSTALL_SCRIPT } from '@/lib/pwa/install';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -21,16 +22,29 @@ export const metadata: Metadata = {
     apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
   },
   manifest: '/site.webmanifest',
-  appleWebApp: { title: 'Hoppa' },
+  // iOS home-screen app: full-screen, white status bar with dark text (the
+  // app's top bars are white), and the short home-screen title.
+  appleWebApp: { capable: true, title: 'Hoppa', statusBarStyle: 'default' },
+  applicationName: 'Hoppa',
+  other: { 'mobile-web-app-capable': 'yes' },
 };
 
 export const viewport: Viewport = {
   themeColor: '#9333ea',
+  width: 'device-width',
+  initialScale: 1,
+  // Let the app draw under notches/home indicator; the shell pads itself
+  // with env(safe-area-inset-*) (see .pwa-safe-shell in globals.css).
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        {/* Catch `beforeinstallprompt` even if it fires before hydration. */}
+        <script dangerouslySetInnerHTML={{ __html: EARLY_INSTALL_SCRIPT }} />
+      </head>
       <body>
         <Providers>
           <AuthGate>{children}</AuthGate>

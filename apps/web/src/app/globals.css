@@ -30,6 +30,20 @@
 
 @layer utilities {
   .tabular-nums { font-variant-numeric: tabular-nums; }
+  /* Installed-app (viewport-fit=cover) safe areas: keep the shell clear of
+     the notch in landscape and the home indicator. All insets are 0 in a
+     normal browser tab, so this is a no-op there. The top inset is handled
+     by iOS itself with the 'default' status-bar style. */
+  .pwa-safe-shell {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .pwa-safe-drawer {
+    padding-top: env(safe-area-inset-top);
+    padding-left: env(safe-area-inset-left);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
 }
 
 /* Respect the OS accessibility preference: collapse animations and
