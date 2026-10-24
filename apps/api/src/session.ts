@@ -34,6 +34,9 @@ declare module 'express-session' {
   }
 }
 
+/** Idle timeout: a session ends after this long without a request. */
+export const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
 const store = new RedisStore({ client: redisSession, prefix: 'sess:' });
 
 export const sessionMiddleware = session({
@@ -42,12 +45,19 @@ export const sessionMiddleware = session({
   secret: env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
+  // Sliding expiry: every authenticated response re-issues the cookie with a
+  // fresh maxAge (and connect-redis's touch() refreshes the Redis TTL), so
+  // the 7 days count from the user's last request, not from sign-in. Without
+  // this, the Redis TTL slid but the browser cookie still died 7 days after
+  // login, logging active users out mid-session. Bearer-token requests set
+  // req.session before this middleware runs, so they never get a cookie.
+  rolling: true,
   proxy: isProd,
   cookie: {
     httpOnly: true,
     secure: isProd,
     sameSite: isProd ? 'none' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    maxAge: SESSION_MAX_AGE_MS,
     domain: env.COOKIE_DOMAIN,
   },
 });

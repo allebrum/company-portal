@@ -1,0 +1,2 @@
+<!-- Hoppa favicon: brand tile (#9333ea) + the hop mark from components/ui/HoppaMark.tsx, drawn heavier so it reads at 16px. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect rx="7.04" fill="#9333ea"/><g transform="translate(4.48 5.4016) scale(0.88615)"><path d="M3 22 C 7 6, 19 6, 23 22" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-dasharray="2.9 4.2" fill="none"/><circle cx="13" cy="7.5" r="3.2" fill="#fff"/></g></svg>
