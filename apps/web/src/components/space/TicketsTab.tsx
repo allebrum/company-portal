@@ -198,7 +198,7 @@ export function TicketsTab({ client }: { client: ClientRow }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-gray-500">
-          Requests from {client.name}'s portal. Each ticket has a linked triage to-do — completing
+          Requests from {client.name}&apos;s portal. Each ticket has a linked triage to-do — completing
           the to-do resolves the ticket.
         </p>
         <label className="flex items-center gap-1.5 text-[12px] text-gray-500 shrink-0">

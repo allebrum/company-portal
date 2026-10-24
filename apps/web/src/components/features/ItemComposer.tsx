@@ -800,7 +800,7 @@ export function ItemComposer(props: ItemComposerProps) {
                   <Upload className="w-4 h-4 inline-block mr-1.5 -mt-0.5" />
                   Drop files here, or click to upload
                   <div className="text-[11px] text-gray-400 mt-0.5">
-                    Lands in the parent project's Drive folder.
+                    Lands in the parent project&apos;s Drive folder.
                   </div>
                   <button
                     type="button"
@@ -892,7 +892,7 @@ export function ItemComposer(props: ItemComposerProps) {
                   <Upload className="w-4 h-4 inline-block mr-1.5 -mt-0.5" />
                   {uploadRes.isPending ? 'Uploading…' : 'Drop files here, or click to upload'}
                   <div className="text-[11px] text-gray-400 mt-0.5">
-                    Goes straight to the project's Drive folder.
+                    Goes straight to the project&apos;s Drive folder.
                   </div>
                   <button
                     type="button"

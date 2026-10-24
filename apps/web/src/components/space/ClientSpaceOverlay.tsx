@@ -12,10 +12,10 @@ import { useSpace } from '@/contexts/SpaceContext';
 import { useSpaceData, useUpdateSpaceFiles } from '@/hooks/useSpace';
 import { useAuth } from '@/hooks/useAuth';
 import {
-  useGoals, useTodos, useUsers, useGroups, useProjects, useEpics, useCreateGoal, useCreateTodo,
-  useUpdateGoal, useUpdateTodo, useStartTimer, useStopTimer,
+  useGoals, useTodos, useUsers, useGroups, useProjects, useCreateGoal, useCreateTodo,
+  useUpdateTodo, useStartTimer, useStopTimer,
   useRenameGoalResource,
-  type GoalRow, type TodoRow, type ProjectRow, type ClientRow,
+  type GoalRow, type TodoRow, type ClientRow, type UserRow,
 } from '@/hooks/useResources';
 import {
   useDriveStatus,
@@ -33,9 +33,8 @@ import { useMyTimer } from '@/hooks/useTimer';
 import { useToast } from '@/components/ui/Toast';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
-import { Avatar } from '@/components/ui/Avatar';
 import { AssigneeCell } from '@/components/ui/AssigneeCell';
-import { fmtTimer, parseLocalDate, PRIORITY_DOT, relativeFromIso } from '@/lib/formatters';
+import { fmtTimer, PRIORITY_DOT } from '@/lib/formatters';
 import { rollupProgress, HEALTH_TONE } from '@/lib/roadmap';
 import type { SpaceFile } from '@allebrum/shared';
 import type { Scope } from '@/lib/roadmap';
@@ -616,7 +615,7 @@ function ProjectsStrip({ client }: { client: ClientRow }) {
     <div className="px-6 py-3 border-b border-gray-100 bg-gray-50/40">
       <div className="text-[11px] uppercase tracking-widest font-bold text-gray-400 mb-2">
         Projects · {clientProjects.length}
-        <span className="ml-2 text-gray-400 normal-case tracking-normal font-normal italic">Click to open this project's own space</span>
+        <span className="ml-2 text-gray-400 normal-case tracking-normal font-normal italic">Click to open this project&apos;s own space</span>
       </div>
       <div className="flex items-stretch gap-2 overflow-x-auto pb-1">
         {clientProjects.map((p) => {
@@ -672,7 +671,6 @@ function goalInScope(g: GoalRow, data: ReturnType<typeof useSpaceData>): boolean
 }
 
 function GoalsTab({
-  scope,
   clientId,
   projectId,
 }: {
@@ -766,7 +764,7 @@ function GoalsTab({
   );
 }
 
-function SpaceGoalCard({ goal, todos, users }: { goal: GoalRow; todos: TodoRow[]; users: any[] }) {
+function SpaceGoalCard({ goal, todos, users }: { goal: GoalRow; todos: TodoRow[]; users: UserRow[] }) {
   const modals = useSpaceModals();
   const { data: groups = [] } = useGroups();
   const owner = goal.ownerId ? users.find((u) => u.id === goal.ownerId) : null;
@@ -820,7 +818,6 @@ function todoInScope(t: TodoRow, data: ReturnType<typeof useSpaceData>): boolean
 }
 
 function TodosTab({
-  scope,
   clientId,
   projectId,
 }: {

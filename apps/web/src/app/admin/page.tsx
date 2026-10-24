@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronRight, Plus, Search, Trash2, Download, Mail, Users as UsersIcon, X, Link2, Copy } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Search, Trash2, Download, Mail, X, Link2, Copy } from 'lucide-react';
 import { API_URL } from '@/lib/env';
 import { Card, Section, Pill, Empty, Tile } from '@/components/ui';
 import {
@@ -10,7 +10,7 @@ import {
   useConnectedGmailUsers,
   gmailConnectUrl,
 } from '@/hooks/useGmail';
-import { Avatar, AvatarStack } from '@/components/ui/Avatar';
+import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Popover } from '@/components/ui/Popover';
 import { Field, Input, Select, Checkbox } from '@/components/ui/Field';
@@ -249,14 +249,15 @@ function GroupsTab() {
     }
   };
 
-  if (!canManage) {
-    return <Empty title="Permission required" description="You need the 'Manage groups & permissions' permission." />;
-  }
-
   const visibleGroups = useMemo(() => {
     const q = filter.trim().toLowerCase();
     return q ? groups.filter((g) => g.name.toLowerCase().includes(q)) : groups;
   }, [groups, filter]);
+
+  // Early return must come after every hook (rules-of-hooks).
+  if (!canManage) {
+    return <Empty title="Permission required" description="You need the 'Manage groups & permissions' permission." />;
+  }
 
   return (
     <Section
@@ -405,7 +406,7 @@ function GroupCard({
               />
             </div>
             {group.permissions.length === 0 ? (
-              <div className="text-[12px] text-gray-400 italic">No permissions yet — click "+ Add" to grant the first.</div>
+              <div className="text-[12px] text-gray-400 italic">No permissions yet — click &quot;+ Add&quot; to grant the first.</div>
             ) : (
               <PermissionPillCloud
                 permissions={group.permissions}
@@ -573,7 +574,6 @@ function AddPermissionButton({
 }
 
 function AddMemberButton({
-  groupId,
   users,
   memberIds,
   onAdd,
@@ -1258,7 +1258,7 @@ function PayTab() {
         <Card className="p-5">
           <p className="text-sm text-gray-600 mb-3">
             Download a CSV of every time entry whose start date falls in the picked range.
-            Use this for off-cycle exports or audits that don't line up with a pay period.
+            Use this for off-cycle exports or audits that don&apos;t line up with a pay period.
           </p>
           <div className="flex flex-wrap items-end gap-3">
             <Field label="From">
@@ -1408,7 +1408,6 @@ function IntegrationsTab() {
   const [reportOpen, setReportOpen] = useState(false);
 
   const byKind = (k: string) => integrations.find((i) => i.kind === k);
-  const drive = byKind('drive');
   const driveConnected = !!driveStatus?.connected;
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {
@@ -1594,10 +1593,6 @@ function ActiveQrUploadLinksPanel() {
   const [expiringSoonOnly, setExpiringSoonOnly] = useState(false);
   const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
 
-  if (!canManageIntegrations) {
-    return null;
-  }
-
   const copy = async (url: string) => {
     try {
       await navigator.clipboard.writeText(url);
@@ -1645,6 +1640,11 @@ function ActiveQrUploadLinksPanel() {
       return haystack.includes(q);
     });
   }, [sessions, query, kindFilter, creatorFilter, expiringSoonOnly]);
+
+  // Early return must come after every hook (rules-of-hooks).
+  if (!canManageIntegrations) {
+    return null;
+  }
 
   const fmtSize = (sizeBytes: number) => {
     if (!Number.isFinite(sizeBytes) || sizeBytes < 0) return '0 B';
@@ -1875,7 +1875,7 @@ function ReconcileReportDetails({ report }: { report: DriveReconciliationReport 
               <Row key={`d-${r.scope}-${r.id}`}>
                 <strong>{r.name}</strong> kept <Id id={r.canonicalFolderId} />; duplicates:{' '}
                 {r.duplicateFolderIds.map((id) => <Id key={id} id={id} />).reduce(
-                  (acc, el, i) => acc.length ? [...acc, ', ', el] : [el],
+                  (acc, el) => acc.length ? [...acc, ', ', el] : [el],
                   [] as React.ReactNode[],
                 )}
               </Row>
