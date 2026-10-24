@@ -116,3 +116,23 @@ test('exemptions do not leak onto adjacent cookie-authed routes', () => {
   assert.equal(run({ path: '/api/upload/qr/sessions', headers: {} }).allowed, false);
   assert.equal(run({ path: '/api/upload/qr/sessions/xyz/revoke', headers: {} }).allowed, false);
 });
+
+test('exemptWhen skips the check for token-authenticated requests only', () => {
+  const tokenGuard = csrfProtection({
+    allowedOrigins: [WEB_ORIGIN],
+    exemptPrefixes: [],
+    exemptWhen: (req) => (req as unknown as { authVia?: string }).authVia === 'token',
+  });
+  const mk = (authVia?: string) => {
+    let nextCalled = false;
+    let status = 200;
+    const req = { method: 'POST', path: '/api/entries', protocol: 'https', authVia, get: () => undefined, session: {} };
+    const res = { status(c: number) { status = c; return res; }, json() { return res; } };
+    tokenGuard(req as unknown as Request, res as unknown as Response, () => { nextCalled = true; });
+    return { nextCalled, status };
+  };
+  assert.equal(mk('token').nextCalled, true);
+  const cookie = mk(undefined);
+  assert.equal(cookie.nextCalled, false);
+  assert.equal(cookie.status, 403);
+});
