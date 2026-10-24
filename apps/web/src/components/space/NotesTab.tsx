@@ -620,6 +620,7 @@ export function NotesTab({ scope }: { scope: Scope }) {
     setEmbedOpen(null);
   };
 
+  // Hooks must run unconditionally — keep this memo above the early return.
   const headings = useMemo(
     () => blocks
       .filter((b) => b.type === 'h1' || b.type === 'h2' || b.type === 'h3')
