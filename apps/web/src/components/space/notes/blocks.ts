@@ -5,6 +5,7 @@
  */
 import type { SpaceBlock } from '@allebrum/shared';
 import { mergeBlocks } from './merge';
+import { replaceSelection } from './selection';
 
 export type BlockType = SpaceBlock['type'];
 
@@ -36,6 +37,9 @@ export type Action =
   | { type: 'remove'; id: string }
   | { type: 'patch'; id: string; patch: Partial<SpaceBlock> }
   | { type: 'move'; id: string; target: string; position: 'before' | 'after' }
+  /** Swap a run of selected blocks for `insert` (cut/delete/type-over/paste-over). */
+  | { type: 'replaceRange'; ids: string[]; insert: SpaceBlock[]; fallback: SpaceBlock }
+  | { type: 'removeMany'; ids: string[] }
   /** Fold a newer server copy into the live state (see notes/merge.ts). */
   | { type: 'merge'; base: SpaceBlock[]; server: SpaceBlock[] };
 
@@ -73,6 +77,12 @@ export function reducer(state: SpaceBlock[], action: Action): SpaceBlock[] {
       if (ti === -1) return state;
       rest.splice(action.position === 'before' ? ti : ti + 1, 0, moving);
       return rest;
+    }
+    case 'replaceRange':
+      return replaceSelection(state, action.ids, action.insert, () => action.fallback).blocks;
+    case 'removeMany': {
+      const set = new Set(action.ids);
+      return state.filter((b) => !set.has(b.id));
     }
     case 'merge':
       return mergeBlocks(action.base, state, action.server);

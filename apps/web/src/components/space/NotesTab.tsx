@@ -11,6 +11,8 @@ import { QRCodeCanvas } from 'qrcode.react';
 import { SlashMenu, type SlashCommandId } from './SlashMenu';
 import { NotesShortcutsHelp } from './NotesShortcutsHelp';
 import { TURN_INTO_OPTIONS } from './notes/commands';
+import { useBlockSelection } from './useBlockSelection';
+import { selectAllEscalates, shiftArrowLeavesBlock } from './notes/selection';
 import { EmbedDialog, type EmbedDialogValue } from './pickers/EmbedDialog';
 import { LinkPicker } from './pickers/LinkPicker';
 import { MentionPicker } from './pickers/MentionPicker';
@@ -305,6 +307,8 @@ export function NotesTab({ scope }: { scope: Scope }) {
       focusBlock(id, pos);
     });
   };
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const blockSel = useBlockSelection({ blocks, blocksRef, dispatch, focusAfterRender, canvasRef });
   const insertAfter = (afterId: string | null, b?: Partial<SpaceBlock>) => {
     const block: SpaceBlock = { id: blockId(), type: 'text', content: '', ...b };
     dispatch({ type: 'insert', after: afterId, block });
@@ -941,6 +945,8 @@ export function NotesTab({ scope }: { scope: Scope }) {
       }
       setSlash({ blockId: id, ...next });
     },
+    selectFromEdge: blockSel.selectFromEdge,
+    selectAll: blockSel.selectAll,
     dragStart: onDragStartBlock,
     dragOver: onDragOverBlock,
     drop: onDropBlock,
@@ -984,7 +990,13 @@ export function NotesTab({ scope }: { scope: Scope }) {
           </div>
           <NotesShortcutsHelp />
         </div>
-        <div>
+        <div
+          ref={canvasRef}
+          onMouseDownCapture={blockSel.onCanvasMouseDownCapture}
+          data-block-selecting={blockSel.selecting ? 'true' : undefined}
+          // While whole blocks are selected, hide any leftover text highlight.
+          className={blockSel.selecting ? '[&_*::selection]:bg-transparent' : undefined}
+        >
           {blocks.map((b, i) => (
             <BlockRow
               key={b.id}
@@ -994,9 +1006,11 @@ export function NotesTab({ scope }: { scope: Scope }) {
               api={editorApi}
               slashOpen={slash?.blockId === b.id}
               dropHint={dropHint?.id === b.id ? dropHint.pos : null}
+              selected={blockSel.selectedSet.has(b.id)}
             />
           ))}
         </div>
+        {blockSel.sink}
         <button
           type="button"
           onClick={focusOrAppendLine}
@@ -1295,6 +1309,10 @@ type EditorApi = {
   navigate: (id: string, dir: 'up' | 'down' | 'left' | 'right', x: number) => boolean;
   insertAfter: (id: string) => void;
   openSlash: (id: string, next: SlashOpen | null) => void;
+  /** Shift+↑/↓ crossed a block edge → select whole blocks. */
+  selectFromEdge: (id: string, dir: 'up' | 'down') => void;
+  /** Second Cmd/Ctrl+A → select every block. */
+  selectAll: () => void;
   dragStart: (id: string, e: React.DragEvent) => void;
   dragOver: (id: string, e: React.DragEvent) => void;
   drop: (id: string, e: React.DragEvent) => void;
@@ -1369,6 +1387,7 @@ function BlockRow({
   api,
   slashOpen,
   dropHint,
+  selected = false,
 }: {
   block: SpaceBlock;
   index: number;
@@ -1376,6 +1395,7 @@ function BlockRow({
   api: EditorApi;
   slashOpen: boolean;
   dropHint: 'before' | 'after' | null;
+  selected?: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const handleRef = useRef<HTMLDivElement>(null);
@@ -1388,7 +1408,15 @@ function BlockRow({
       className="group/row relative pl-14 -ml-14 py-0.5"
       onDragOver={(e) => api.dragOver(block.id, e)}
       onDrop={(e) => api.drop(block.id, e)}
+      data-selected={selected ? 'true' : undefined}
+      aria-selected={selected || undefined}
     >
+      {selected && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 left-14 -right-1 rounded-md bg-brand-500/15 ring-1 ring-inset ring-brand-300/60"
+        />
+      )}
       {dropHint === 'before' && (
         <div className="pointer-events-none absolute left-14 right-0 -top-px h-0.5 rounded bg-brand-400" />
       )}
@@ -1519,6 +1547,16 @@ function CardShell({ block, api, children }: { block: SpaceBlock; api: EditorApi
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget) return; // inputs/buttons inside the card
     const x = e.currentTarget.getBoundingClientRect().left;
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      api.selectAll();
+      return;
+    }
+    if (e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      api.selectFromEdge(block.id, e.key === 'ArrowUp' ? 'up' : 'down');
+      return;
+    }
     switch (e.key) {
       case 'ArrowUp':
       case 'ArrowLeft':
@@ -1690,6 +1728,25 @@ function EditableBlock({
     const off = getOffsets(el) ?? { start: text.length, end: text.length };
     const collapsed = off.start === off.end;
     const mod = e.metaKey || e.ctrlKey || e.altKey;
+
+    // Cmd/Ctrl+A: first press selects this block's text (native), the next
+    // one selects every block.
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'a') {
+      if (selectAllEscalates(text.length, off.start, off.end)) {
+        e.preventDefault();
+        api.selectAll();
+      }
+      return;
+    }
+    // Shift+↑/↓ past the block's edge selects whole blocks.
+    if (e.shiftKey && !mod && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      const dir = e.key === 'ArrowUp' ? 'up' : 'down';
+      if (shiftArrowLeavesBlock(dir, text.length, off.start, off.end)) {
+        e.preventDefault();
+        api.selectFromEdge(block.id, dir);
+      }
+      return;
+    }
 
     switch (e.key) {
       case 'Enter': {
