@@ -4,7 +4,9 @@ import { createAdapter } from '@socket.io/redis-adapter';
 import type { RequestHandler } from 'express';
 import { redisPub, redisSub } from '../redis.js';
 import { env } from '../env.js';
-import { ORG_ROOM, APPROVERS_ROOM, roomForUser, roomForTenant } from './rooms.js';
+import {
+  ORG_ROOM, APPROVERS_ROOM, MAX_SPACE_ROOMS_PER_SOCKET, parseSpaceRef, roomForUser, roomForTenant, roomForSpace,
+} from './rooms.js';
 import { getEffectivePermissions } from '../auth/permissions.js';
 import type { ServerToClientEvents, ClientToServerEvents } from '@allebrum/shared';
 
@@ -47,6 +49,23 @@ export function initIO(httpServer: HttpServer, sessionMiddleware: RequestHandler
     if (user.tenantId) socket.join(roomForTenant(user.tenantId));
     socket.join(ORG_ROOM);
     socket.join(roomForUser(user.userId));
+    // Notes editors watch the Space they have open. The room is namespaced
+    // by the session's tenant, so ids from another workspace never match
+    // anything that workspace emits.
+    const tenantId = user.tenantId;
+    socket.on('space:watch', (raw) => {
+      const ref = parseSpaceRef(raw);
+      if (!ref || !tenantId) return;
+      const room = roomForSpace(tenantId, ref.kind, ref.id);
+      const watching = [...socket.rooms].filter((r) => r.startsWith(`tenant:${tenantId}:space:`));
+      if (!watching.includes(room) && watching.length >= MAX_SPACE_ROOMS_PER_SOCKET) return;
+      void socket.join(room);
+    });
+    socket.on('space:unwatch', (raw) => {
+      const ref = parseSpaceRef(raw);
+      if (!ref || !tenantId) return;
+      void socket.leave(roomForSpace(tenantId, ref.kind, ref.id));
+    });
     if (user.tenantId) {
       void getEffectivePermissions(user.userId, user.tenantId)
         .then((perms) => {

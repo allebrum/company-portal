@@ -1,7 +1,7 @@
 import { getIO } from './io.js';
-import { ORG_ROOM, APPROVERS_ROOM, roomForUser, roomForTenant } from './rooms.js';
+import { ORG_ROOM, APPROVERS_ROOM, roomForUser, roomForTenant, roomForSpace } from './rooms.js';
 import { currentTenantIdOrNull } from '../tenancy/context.js';
-import type { EventName } from '@allebrum/shared';
+import { EV, type EventName, type SpaceBlocksUpdatedPayload } from '@allebrum/shared';
 
 export const emit = {
   // Hoppa: "org" broadcasts are tenant-scoped. We derive the tenant from the
@@ -15,6 +15,13 @@ export const emit = {
   /** Explicit-tenant variant for emits outside a request context. */
   toTenant(tenantId: string, event: EventName, payload: unknown): void {
     getIO().to(roomForTenant(tenantId)).emit(event as any, payload as any);
+  },
+  /** Notes change notice to editors watching this Space in the current
+   *  tenant. No tenant context → no-op (Space rooms are tenant-scoped). */
+  spaceBlocksUpdated(payload: SpaceBlocksUpdatedPayload): void {
+    const tenantId = currentTenantIdOrNull();
+    if (!tenantId) return;
+    getIO().to(roomForSpace(tenantId, payload.kind, payload.id)).emit(EV.SPACE_BLOCKS_UPDATED, payload);
   },
   toUser(userId: string, event: EventName, payload: unknown): void {
     getIO().to(roomForUser(userId)).emit(event as any, payload as any);

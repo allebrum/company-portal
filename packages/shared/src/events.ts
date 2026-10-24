@@ -11,6 +11,9 @@ export const EV = {
   CLIENT_UPDATED: 'client:updated',
   PROJECT_CREATED: 'project:created',
   PROJECT_UPDATED: 'project:updated',
+  // Notes canvas: a Space's blocks changed (bot append or editor save).
+  // Delivered only to sockets watching that Space (see 'space:watch').
+  SPACE_BLOCKS_UPDATED: 'space:blocks-updated',
   // goals
   GOAL_CREATED: 'goal:created',
   GOAL_UPDATED: 'goal:updated',
@@ -78,10 +81,24 @@ export type ActivityPayload = {
   createdAt: string;
 };
 
+export type SpaceRef = { kind: 'client' | 'project'; id: string };
+
+/** Notes-canvas change notice. Carries the new row version, not the blocks:
+ *  editors compare `updatedAt` with what they last synced and fetch
+ *  GET /spaces/:kind/:id/blocks only when it differs. */
+export type SpaceBlocksUpdatedPayload = SpaceRef & {
+  updatedAt: string;
+  by: string;
+  source: 'append' | 'patch';
+};
+
 // Client → Server events (room management)
 export interface ClientToServerEvents {
   'room:join': (roomId: string) => void;
   'room:leave': (roomId: string) => void;
+  /** Subscribe to SPACE_BLOCKS_UPDATED for one Space in the caller's workspace. */
+  'space:watch': (space: SpaceRef) => void;
+  'space:unwatch': (space: SpaceRef) => void;
 }
 
 // Server → Client events (subscribe-side)
@@ -95,6 +112,7 @@ export interface ServerToClientEvents {
   [EV.CLIENT_UPDATED]: (p: IdPayload) => void;
   [EV.PROJECT_CREATED]: (p: IdPayload) => void;
   [EV.PROJECT_UPDATED]: (p: IdPayload) => void;
+  [EV.SPACE_BLOCKS_UPDATED]: (p: SpaceBlocksUpdatedPayload) => void;
   [EV.GOAL_CREATED]: (p: IdPayload) => void;
   [EV.GOAL_UPDATED]: (p: IdPayload) => void;
   [EV.GOAL_MOVED]: (p: IdPayload) => void;
