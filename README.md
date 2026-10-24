@@ -112,6 +112,10 @@ Test cards (Stripe test mode): `4242 4242 4242 4242` (success),
 `4000 0025 0000 3155` (SCA-required), `4000 0000 0000 0002` (decline). Full
 detail + the data model live in `STRIPE_BILLING_REWORK.md`.
 
+## Bot / script API
+
+Personal access tokens (Security → API tokens) let bots append Space notes and track time. See [docs/BOT_API.md](docs/BOT_API.md).
+
 ## Manual end-to-end test
 
 Log in as Senica in one browser window and Marcus in another, then exercise the live update flow: have Marcus start a timer / log time, submit it, and watch it appear in Senica's Approvals tab in real time. Approve it and confirm Marcus's view updates without a refresh. Private to-dos created by one user must not appear for another.
