@@ -368,6 +368,12 @@ export function useDeleteUser() {
 export function useClients() {
   return useQuery({ queryKey: qk.clients, queryFn: () => api.get<ClientRow[]>('/clients') });
 }
+/** True for the Notes autosave shape: `{ spaceBlocks }` and nothing else. */
+function isSpaceBlocksOnly(patch: object): patch is { spaceBlocks: NonNullable<UpdateClientInput['spaceBlocks']> } {
+  const keys = Object.keys(patch);
+  return keys.length === 1 && keys[0] === 'spaceBlocks';
+}
+
 export function useCreateClient() {
   const qc = useQueryClient();
   return useMutation({
@@ -380,7 +386,19 @@ export function useUpdateClient() {
   return useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: UpdateClientInput }) =>
       api.patch<ClientRow>(`/clients/${id}`, patch),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.clients }),
+    // Notes autosaves fire every few hundred ms; patch the cached row in
+    // place instead of refetching the whole list after each one.
+    onMutate: ({ id, patch }) => {
+      if (!isSpaceBlocksOnly(patch)) return;
+      qc.setQueryData<ClientRow[]>(qk.clients, (rows) =>
+        rows?.map((r) => (r.id === id ? { ...r, spaceBlocks: patch.spaceBlocks! } : r)),
+      );
+    },
+    onSuccess: (_row, { patch }) => {
+      if (isSpaceBlocksOnly(patch)) return;
+      return qc.invalidateQueries({ queryKey: qk.clients });
+    },
+    onError: () => qc.invalidateQueries({ queryKey: qk.clients }),
   });
 }
 
@@ -441,7 +459,19 @@ export function useUpdateProject() {
   return useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: UpdateProjectInput }) =>
       api.patch<ProjectRow>(`/projects/${id}`, patch),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.projects }),
+    // Notes autosaves fire every few hundred ms; patch the cached row in
+    // place instead of refetching the whole list after each one.
+    onMutate: ({ id, patch }) => {
+      if (!isSpaceBlocksOnly(patch)) return;
+      qc.setQueryData<ProjectRow[]>(qk.projects, (rows) =>
+        rows?.map((r) => (r.id === id ? { ...r, spaceBlocks: patch.spaceBlocks! } : r)),
+      );
+    },
+    onSuccess: (_row, { patch }) => {
+      if (isSpaceBlocksOnly(patch)) return;
+      return qc.invalidateQueries({ queryKey: qk.projects });
+    },
+    onError: () => qc.invalidateQueries({ queryKey: qk.projects }),
   });
 }
 
