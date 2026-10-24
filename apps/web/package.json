@@ -4,11 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
-    "build": "next build",
+    "build": "next build && node scripts/build-sw.mjs",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test src/components/space/notes/__tests__/blocks.test.ts src/components/space/notes/__tests__/merge.test.ts src/components/space/notes/__tests__/drafts.test.ts src/components/space/notes/__tests__/help.test.ts src/components/space/notes/__tests__/selection.test.ts src/lib/__tests__/returnTo.test.ts src/lib/__tests__/api.test.ts"
+    "test": "node --import tsx --test src/components/space/notes/__tests__/blocks.test.ts src/components/space/notes/__tests__/merge.test.ts src/components/space/notes/__tests__/drafts.test.ts src/components/space/notes/__tests__/help.test.ts src/components/space/notes/__tests__/selection.test.ts src/lib/__tests__/returnTo.test.ts src/lib/__tests__/api.test.ts src/lib/pwa/__tests__/sw.test.ts src/lib/pwa/__tests__/install.test.ts src/lib/pwa/__tests__/manifest.test.ts"
   },
   "dependencies": {
     "@allebrum/shared": "workspace:*",

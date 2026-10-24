@@ -142,7 +142,7 @@ function ShellWithBootstrap({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="h-screen overflow-hidden flex bg-gray-50">
+    <div className="h-screen h-[100dvh] overflow-hidden flex bg-gray-50 pwa-safe-shell">
       {/* Desktop sidebar */}
       <div className="hidden lg:flex">
         <Sidebar />
@@ -155,7 +155,7 @@ function ShellWithBootstrap({ children }: { children: ReactNode }) {
             className="absolute inset-0 bg-gray-900/40 backdrop-blur-sm"
             onClick={() => setNavOpen(false)}
           />
-          <div className="absolute inset-y-0 left-0 w-64 max-w-[80vw] shadow-2xl">
+          <div className="absolute inset-y-0 left-0 w-64 max-w-[80vw] shadow-2xl pwa-safe-drawer bg-white">
             <Sidebar />
           </div>
         </div>

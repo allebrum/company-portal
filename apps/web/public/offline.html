@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#9333ea">
+<title>Offline · Hoppa</title>
+<link rel="icon" href="/favicon.ico">
+<style>
+  :root { color-scheme: light; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #f9fafb; color: #111827; display: grid; place-items: center;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    box-sizing: border-box;
+  }
+  .card { max-width: 22rem; margin: 1rem; padding: 2rem; background: #fff; border: 1px solid #e5e7eb; border-radius: 1rem; text-align: center; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  img { width: 56px; height: 56px; border-radius: 14px; }
+  h1 { font-size: 1.25rem; margin: 1rem 0 .5rem; }
+  p { font-size: .875rem; color: #6b7280; margin: 0 0 1.5rem; line-height: 1.5; }
+  button { font: inherit; font-weight: 600; font-size: .875rem; color: #fff; background: #9333ea; border: 0; border-radius: .5rem; padding: .625rem 1.25rem; cursor: pointer; }
+  button:hover { background: #7e22ce; }
+</style>
+</head>
+<body>
+  <main class="card" data-testid="offline-page">
+    <img src="/android-chrome-192x192.png" alt="">
+    <h1>You’re offline</h1>
+    <p>Hoppa needs a connection to load your workspace. Check your internet and try again. Nothing you saved has been lost.</p>
+    <button type="button" onclick="location.reload()">Try again</button>
+  </main>
+  <script>
+    // Come back on its own as soon as the connection returns.
+    window.addEventListener('online', function () { location.reload(); });
+  </script>
+</body>
+</html>

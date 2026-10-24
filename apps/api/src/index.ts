@@ -15,6 +15,7 @@ import { patFailedAuthLimiter, patPerTokenLimiter } from './middleware/rateLimit
 import { apiRouter } from './routes/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { secretsReplacer } from './lib/redact.js';
+import { staticCacheHeaders } from './lib/staticHeaders.js';
 import { initIO } from './realtime/io.js';
 import { startPayPeriodSweep } from './jobs/payPeriodSweep.js';
 import { startTimeReminderSweep } from './jobs/timeReminders.js';
@@ -107,7 +108,17 @@ if (env.SERVE_WEB) {
   const webDir =
     env.WEB_DIST_DIR ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/out');
   const webRoot = path.resolve(webDir);
-  app.use(express.static(webRoot, { index: false }));
+  app.use(
+    express.static(webRoot, {
+      index: false,
+      // We set Cache-Control ourselves (sw.js must never be long-cached).
+      cacheControl: false,
+      setHeaders: (res, filePath) => {
+        const rel = '/' + path.relative(webRoot, filePath).split(path.sep).join('/');
+        for (const [k, v] of Object.entries(staticCacheHeaders(rel))) res.setHeader(k, v);
+      },
+    }),
+  );
   // Next static export emits <route>/index.html (trailingSlash:true). Resolve
   // any non-API GET to its index.html, falling back to the export's 404 page.
   app.get('*', (req, res, next) => {
@@ -121,6 +132,7 @@ if (env.SERVE_WEB) {
       res.status(404).end();
       return;
     }
+    res.setHeader('Cache-Control', 'no-cache');
     res.sendFile(abs, (err) => {
       if (err) res.status(404).sendFile(path.join(webRoot, '404.html'), () => res.end());
     });
