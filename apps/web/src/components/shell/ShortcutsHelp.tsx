@@ -28,6 +28,8 @@ export function ShortcutsHelp() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== '?' || e.metaKey || e.ctrlKey || e.altKey) return;
+      // A page-level reference (e.g. Notes) already handled it.
+      if (e.defaultPrevented) return;
       const target = e.target as HTMLElement | null;
       if (target && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)) return;
       e.preventDefault();
