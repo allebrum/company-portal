@@ -4,7 +4,7 @@ import { apiTokens, users, type ApiToken } from '../db/schema.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { isMember } from './tenants.js';
 import { DISPLAY_PREFIX_LEN, generateRawToken, hashToken, hashesEqual, looksLikeToken } from '../auth/patFormat.js';
-import type { ApiTokenScope, ApiTokenSummary, CreatedApiToken, CreateApiTokenInput } from '@allebrum/shared';
+import { FULL_ACCESS_SCOPE, type ApiTokenScope, type ApiTokenSummary, type CreatedApiToken, type CreateApiTokenInput } from '@allebrum/shared';
 
 /**
  * Personal access tokens — create/list/revoke + bearer resolution. Token
@@ -55,7 +55,10 @@ export async function createToken(
   if (n >= MAX_ACTIVE_TOKENS_PER_USER) throw new HttpError(400, 'too_many_tokens');
 
   const raw = generateRawToken();
-  const scopes: string[] = Array.from(new Set<string>(input.scopes));
+  // `full` already implies everything; store it alone so the list reads cleanly.
+  const scopes: string[] = input.scopes.includes(FULL_ACCESS_SCOPE)
+    ? [FULL_ACCESS_SCOPE]
+    : Array.from(new Set<string>(input.scopes));
   const expiresAt = input.expiresInDays
     ? new Date(Date.now() + input.expiresInDays * 86_400_000).toISOString()
     : null;
@@ -93,6 +96,8 @@ export async function revokeToken(userId: string, tenantId: string, id: string):
 
 export interface AuthenticatedToken {
   id: string;
+  name: string;
+  expiresAt: string | null;
   userId: string;
   tenantId: string;
   scopes: ApiTokenScope[];
@@ -103,7 +108,9 @@ export interface AuthenticatedToken {
  * Resolve a raw bearer token to its owner. Returns null for unknown,
  * revoked, or expired tokens, and when the user is no longer active or no
  * longer a member of the token's workspace (removing someone from a
- * workspace implicitly kills their tokens there).
+ * workspace implicitly kills their tokens there). Runs on EVERY request (no
+ * caching), and the owner's permissions are loaded live by RBAC downstream,
+ * so demoting the owner immediately demotes their tokens too.
  */
 export async function authenticateToken(raw: string): Promise<AuthenticatedToken | null> {
   if (!looksLikeToken(raw)) return null;
@@ -122,6 +129,8 @@ export async function authenticateToken(raw: string): Promise<AuthenticatedToken
   if (!(await isMember(t.userId, t.tenantId))) return null;
   return {
     id: t.id,
+    name: t.name,
+    expiresAt: t.expiresAt,
     userId: t.userId,
     tenantId: t.tenantId,
     scopes: t.scopes as ApiTokenScope[],

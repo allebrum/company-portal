@@ -2,18 +2,24 @@
 
 import { useState } from 'react';
 import { Bot, Copy, Trash2 } from 'lucide-react';
-import { API_TOKEN_SCOPES, type ApiTokenScope, type ApiTokenSummary } from '@allebrum/shared';
+import {
+  API_TOKEN_SCOPES,
+  API_TOKEN_SCOPE_INFO,
+  FULL_ACCESS_SCOPE,
+  type ApiTokenScope,
+  type ApiTokenSummary,
+} from '@allebrum/shared';
 import { Card, Section, Pill, Empty } from '@/components/ui';
 import { Button } from '@/components/ui/Button';
 import { Checkbox, Field, Input, Select } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { useApiTokens, useCreateApiToken, useRevokeApiToken } from '@/hooks/useApiTokens';
 
-const SCOPE_LABEL: Record<ApiTokenScope, string> = {
-  read: 'Read clients, projects, notes & time',
-  'notes:write': 'Add notes to client/project Spaces (append-only)',
-  'time:write': 'Start/stop timers and log time',
-};
+const CUSTOM_SCOPES = API_TOKEN_SCOPES.filter((s) => s !== FULL_ACCESS_SCOPE);
+
+type Preset = 'full' | 'custom';
+
+const scopeLabel = (s: ApiTokenScope) => API_TOKEN_SCOPE_INFO[s]?.label ?? s;
 
 function tokenState(t: ApiTokenSummary): { label: string; tone: 'green' | 'gray' | 'red' } {
   if (t.revokedAt) return { label: 'Revoked', tone: 'gray' };
@@ -22,6 +28,18 @@ function tokenState(t: ApiTokenSummary): { label: string; tone: 'green' | 'gray'
 }
 
 const day = (s: string | null) => (s ? s.slice(0, 10) : '—');
+
+/** "3 min ago" / "2 days ago" — last-used is more useful relative than as a date. */
+function relTime(s: string): string {
+  const t = new Date(s.replace(' ', 'T')).getTime();
+  if (Number.isNaN(t)) return day(s);
+  const mins = Math.max(0, Math.round((Date.now() - t) / 60_000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 48) return `${hrs} h ago`;
+  return `${Math.round(hrs / 24)} days ago`;
+}
 
 /**
  * Personal access tokens for bots/scripts (see docs/BOT_API.md). Tokens act
@@ -34,6 +52,7 @@ export function ApiTokensSection() {
   const revoke = useRevokeApiToken();
 
   const [name, setName] = useState('');
+  const [preset, setPreset] = useState<Preset>('custom');
   const [scopes, setScopes] = useState<ApiTokenScope[]>(['read', 'notes:write', 'time:write']);
   const [expires, setExpires] = useState<string>('90');
   const [secret, setSecret] = useState<string | null>(null);
@@ -45,7 +64,7 @@ export function ApiTokensSection() {
     try {
       const created = await create.mutateAsync({
         name: name.trim(),
-        scopes,
+        scopes: preset === 'full' ? [FULL_ACCESS_SCOPE] : scopes,
         expiresInDays: expires === 'never' ? null : Number(expires),
       });
       setSecret(created.token);
@@ -69,8 +88,9 @@ export function ApiTokensSection() {
     <Section title="API tokens">
       <Card className="p-5 space-y-4 max-w-xl">
         <p className="text-sm text-gray-600">
-          Let a bot or script add notes and track time as you. Tokens can only reach a few endpoints, never more than
-          you can do yourself.
+          Let a bot or script act as you. A token can never do more than your own role allows — if your permissions
+          change, its do too. Creating/revoking tokens and password, 2FA &amp; sign-in changes always need you signed
+          in.
         </p>
 
         {secret ? (
@@ -110,12 +130,55 @@ export function ApiTokensSection() {
                 </Select>
               </Field>
             </div>
-            <div className="flex flex-col gap-1.5">
-              {API_TOKEN_SCOPES.map((s) => (
-                <Checkbox key={s} label={SCOPE_LABEL[s]} checked={scopes.includes(s)} onChange={(v) => toggle(s, v)} />
-              ))}
+            <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Token access">
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name="token-preset"
+                  className="mt-1"
+                  checked={preset === 'full'}
+                  onChange={() => setPreset('full')}
+                />
+                <span>
+                  <span className="font-medium text-gray-900">{API_TOKEN_SCOPE_INFO.full.label}</span>
+                  <span className="block text-[12px] text-gray-500">{API_TOKEN_SCOPE_INFO.full.description}</span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name="token-preset"
+                  className="mt-1"
+                  checked={preset === 'custom'}
+                  onChange={() => setPreset('custom')}
+                />
+                <span className="font-medium text-gray-900">Choose scopes</span>
+              </label>
             </div>
-            <Button variant="primary" onClick={submit} disabled={!name.trim() || scopes.length === 0 || create.isPending}>
+            {preset === 'full' ? (
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
+                Anyone holding this token can do anything you can in Hoppa (including deleting data). Prefer an
+                expiry and revoke it when it&apos;s no longer needed.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-2 pl-6">
+                {CUSTOM_SCOPES.map((s) => (
+                  <div key={s}>
+                    <Checkbox
+                      label={`${scopeLabel(s)} (${s})`}
+                      checked={scopes.includes(s)}
+                      onChange={(v) => toggle(s, v)}
+                    />
+                    <div className="pl-6 text-[11px] text-gray-500">{API_TOKEN_SCOPE_INFO[s].description}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <Button
+              variant="primary"
+              onClick={submit}
+              disabled={!name.trim() || (preset === 'custom' && scopes.length === 0) || create.isPending}
+            >
               <Bot className="w-4 h-4" /> Create token
             </Button>
           </div>
@@ -140,8 +203,9 @@ export function ApiTokensSection() {
                       <Pill tone={st.tone}>{st.label}</Pill>
                     </div>
                     <div className="text-[11px] text-gray-500">
-                      <span className="font-mono">{t.prefix}…</span> · {t.scopes.join(', ')} · created {day(t.createdAt)} ·
-                      last used {day(t.lastUsedAt)}
+                      <span className="font-mono">{t.prefix}…</span> ·{' '}
+                      {t.scopes.includes(FULL_ACCESS_SCOPE) ? 'Full access' : t.scopes.join(', ')} · created{' '}
+                      {day(t.createdAt)} · last used {t.lastUsedAt ? relTime(t.lastUsedAt) : 'never'}
                       {t.expiresAt ? ` · expires ${day(t.expiresAt)}` : ''}
                     </div>
                   </div>

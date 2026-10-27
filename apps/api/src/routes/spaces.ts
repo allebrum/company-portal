@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/requireAuth.js';
@@ -11,8 +11,13 @@ import {
 } from '../services/spaceFiles.js';
 import { validate, getValidated } from '../middleware/validate.js';
 import { withTenant } from '../tenancy/context.js';
-import { AppendSpaceBlocksSchema, type AppendSpaceBlocksInput } from '@allebrum/shared';
-import { appendSpaceBlocks, getSpaceBlocks, isUuid, parseSpaceKind } from '../services/spaceBlocks.js';
+import {
+  AppendSpaceBlocksSchema,
+  UpdateSpaceBlockSchema,
+  type AppendSpaceBlocksInput,
+  type UpdateSpaceBlockInput,
+} from '@allebrum/shared';
+import { appendSpaceBlocks, getSpaceBlocks, isUuid, mutateSpaceBlock, parseSpaceKind } from '../services/spaceBlocks.js';
 
 // Same 100 MB cap as the generic Drive upload route.
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
@@ -124,11 +129,14 @@ spacesRouter.post('/:scopeKind/:scopeId/files/refresh-drive-names', uploadAccess
   }
 });
 
-// ---- Notes blocks (read + append-only write) --------------------------
+// ---- Notes blocks (read, append, edit/delete one block) ---------------
 //
 // Used by personal access tokens (docs/BOT_API.md) but also session-usable.
 // Same access rule as the Notes PATCH on clients/projects: any authenticated
-// teammate in the workspace. Append never rewrites existing blocks.
+// teammate in the workspace. Append never rewrites existing blocks; the
+// per-block PATCH/DELETE touch only the addressed block (CAS on updated_at).
+// Reordering / bulk rewrites go through PATCH /clients|projects/:id
+// { spaceBlocks } with x-expected-updated-at.
 
 spacesRouter.get('/:scopeKind/:scopeId/blocks', async (req, res, next) => {
   try {
@@ -164,6 +172,50 @@ spacesRouter.post('/:scopeKind/:scopeId/blocks', validate(AppendSpaceBlocksSchem
     await withRequestTenant(req, async () => {
       const out = await appendSpaceBlocks(kind, req.params.scopeId!, input.blocks, req.session.user!.userId);
       res.status(201).json(out);
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+const BLOCK_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
+
+function blockTarget(params: Record<string, string | undefined>, res: Response) {
+  const kind = parseSpaceKind(params.scopeKind);
+  if (!kind) {
+    res.status(400).json({ error: 'invalid_scope_kind' });
+    return null;
+  }
+  if (!isUuid(params.scopeId)) {
+    res.status(404).json({ error: `${kind}_not_found` });
+    return null;
+  }
+  if (!params.blockId || !BLOCK_ID_RE.test(params.blockId)) {
+    res.status(404).json({ error: 'block_not_found' });
+    return null;
+  }
+  return { kind, scopeId: params.scopeId, blockId: params.blockId };
+}
+
+spacesRouter.patch('/:scopeKind/:scopeId/blocks/:blockId', validate(UpdateSpaceBlockSchema), async (req, res, next) => {
+  try {
+    const t = blockTarget(req.params, res);
+    if (!t) return;
+    const patch = getValidated<UpdateSpaceBlockInput>(req);
+    await withRequestTenant(req, async () => {
+      res.json(await mutateSpaceBlock(t.kind, t.scopeId, t.blockId, { kind: 'update', patch }, req.session.user!.userId));
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+spacesRouter.delete('/:scopeKind/:scopeId/blocks/:blockId', async (req, res, next) => {
+  try {
+    const t = blockTarget(req.params, res);
+    if (!t) return;
+    await withRequestTenant(req, async () => {
+      res.json(await mutateSpaceBlock(t.kind, t.scopeId, t.blockId, { kind: 'delete' }, req.session.user!.userId));
     });
   } catch (e) {
     next(e);

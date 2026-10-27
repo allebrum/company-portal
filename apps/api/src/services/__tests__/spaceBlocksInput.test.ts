@@ -53,3 +53,14 @@ test('x-expected-updated-at accepts ISO and Postgres text timestamps', () => {
   assert.throws(() => readExpectedUpdatedAt('yesterday'), /invalid_expected_updated_at/);
   assert.throws(() => readExpectedUpdatedAt('2026-10-23'), /invalid_expected_updated_at/);
 });
+
+test('applyBlockPatch edits one block in place and keeps its id', async () => {
+  const { applyBlockPatch } = await import('../spaceBlocksInput.js');
+  const b = applyBlockPatch({ id: 'b1', type: 'text', content: 'old' }, { content: 'new' });
+  assert.deepEqual(b, { id: 'b1', type: 'text', content: 'new' });
+  const c = applyBlockPatch({ id: 'b2', type: 'text', content: 'task' }, { type: 'checkbox', checked: true });
+  assert.deepEqual(c, { id: 'b2', type: 'checkbox', content: 'task', checked: true });
+  assert.throws(() => applyBlockPatch({ id: 'b3', type: 'todo', todoId: null }, { content: 'x' }), /linked_block_not_editable/);
+  assert.throws(() => applyBlockPatch({ id: 'b4', type: 'text', content: '' }, { content: 'a\nb' }), /single_line_content_required/);
+  assert.throws(() => applyBlockPatch({ id: 'b5', type: 'text' }, { type: 'embed', embedUrl: 'javascript:alert(1)' }), /invalid_embed_url/);
+});

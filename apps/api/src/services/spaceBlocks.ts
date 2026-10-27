@@ -1,8 +1,8 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { clients, projects } from '../db/schema.js';
-import { EV, type AppendSpaceBlocksInput, type SpaceBlock } from '@allebrum/shared';
-import { MAX_SPACE_BLOCKS, normalizeAppendBlocks, type SpaceKind } from './spaceBlocksInput.js';
+import { EV, type AppendSpaceBlocksInput, type SpaceBlock, type UpdateSpaceBlockInput } from '@allebrum/shared';
+import { MAX_SPACE_BLOCKS, applyBlockPatch, normalizeAppendBlocks, type SpaceKind } from './spaceBlocksInput.js';
 import { emit } from '../realtime/emit.js';
 import { appendActivity } from './activity.js';
 import { HttpError } from '../middleware/errorHandler.js';
@@ -61,4 +61,45 @@ export async function appendSpaceBlocks(kind: SpaceKind, id: string, input: Appe
   emit.spaceBlocksUpdated({ kind, id: row.id, updatedAt: String(row.updatedAt), by: whoId, source: 'append' });
   await appendActivity({ whoId, kind: `${kind}.update`, target: `${row.name} notes updated` });
   return { id: row.id, appended: blocks, total: Number(row.total), updatedAt: row.updatedAt };
+}
+
+/**
+ * Edit or delete ONE Notes block by id, leaving every other block untouched.
+ * Read-modify-write guarded by `updated_at` (compare-and-swap), retried a few
+ * times so a concurrent edit elsewhere in the same Space never gets lost.
+ * Linked cards (todo/goal/timer/link) can be deleted but not edited here.
+ */
+export async function mutateSpaceBlock(
+  kind: SpaceKind,
+  id: string,
+  blockId: string,
+  op: { kind: 'update'; patch: UpdateSpaceBlockInput } | { kind: 'delete' },
+  whoId: string,
+): Promise<{ id: string; block: SpaceBlock | null; total: number; updatedAt: string }> {
+  const t = tableFor(kind);
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const cur = await getSpaceBlocks(kind, id);
+    const idx = cur.blocks.findIndex((b) => b.id === blockId);
+    if (idx < 0) throw new HttpError(404, 'block_not_found');
+    const next = [...cur.blocks];
+    let block: SpaceBlock | null = null;
+    if (op.kind === 'delete') {
+      next.splice(idx, 1);
+    } else {
+      block = applyBlockPatch(next[idx]!, op.patch);
+      next[idx] = block;
+    }
+    const now = new Date().toISOString();
+    const [row] = await db
+      .update(t)
+      .set({ spaceBlocks: next, updatedAt: now })
+      .where(and(eq(t.id, id), tenantEq(t.tenantId), sql`${t.updatedAt} = ${cur.updatedAt}::timestamptz`))
+      .returning({ id: t.id, name: t.name, updatedAt: t.updatedAt });
+    if (!row) continue; // lost a race — re-read and retry
+    emit.toOrg(kind === 'client' ? EV.CLIENT_UPDATED : EV.PROJECT_UPDATED, { id: row.id, by: whoId, at: now });
+    emit.spaceBlocksUpdated({ kind, id: row.id, updatedAt: String(row.updatedAt), by: whoId, source: 'patch' });
+    await appendActivity({ whoId, kind: `${kind}.update`, target: `${row.name} notes updated` });
+    return { id: row.id, block, total: next.length, updatedAt: String(row.updatedAt) };
+  }
+  throw new HttpError(409, 'stale_update');
 }
