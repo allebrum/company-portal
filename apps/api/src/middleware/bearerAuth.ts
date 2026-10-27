@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 import type { ApiTokenScope } from '@allebrum/shared';
 import { authenticateToken, touchToken } from '../services/apiTokens.js';
 import { checkTokenRoute, parseBearer } from './tokenPolicy.js';
+import { withTokenActor } from '../lib/requestActor.js';
 
 export { checkTokenRoute, parseBearer, TOKEN_ROUTES } from './tokenPolicy.js';
 
@@ -12,8 +13,10 @@ export { checkTokenRoute, parseBearer, TOKEN_ROUTES } from './tokenPolicy.js';
  * carries `Authorization: Bearer …`:
  *   - the token must resolve (unknown/revoked/expired/removed user → 401;
  *     we never fall back to a cookie session on the same request),
- *   - the method + path must be on the allow-list below and the token must
- *     hold the matching scope (default-deny → 403),
+ *   - the method + path must be in TOKEN_ROUTES (middleware/tokenPolicy.ts)
+ *     and the token must hold the matching scope, or `full` (default-deny →
+ *     403 with `{ error, scope?, message }`); session-only body fields (e.g.
+ *     a user's password/email) are refused,
  *   - rate limits (middleware/rateLimiters.ts, mounted just before this):
  *     120 req/min per token, 20 failed auths / 10 min per IP.
  * On success we attach a non-persistent `req.session` carrying the same
@@ -25,6 +28,9 @@ export { checkTokenRoute, parseBearer, TOKEN_ROUTES } from './tokenPolicy.js';
  * header, so ambient-credential forgery doesn't apply.
  *
  * Requests without an Authorization header are untouched.
+ *
+ * The rest of the request runs inside `withTokenActor`, so the activity log
+ * records which token performed each action.
  */
 
 declare global {
@@ -32,7 +38,7 @@ declare global {
   namespace Express {
     interface Request {
       authVia?: 'token';
-      apiToken?: { id: string; scopes: ApiTokenScope[] };
+      apiToken?: { id: string; name: string; scopes: ApiTokenScope[]; expiresAt: string | null };
     }
   }
 }
@@ -74,17 +80,18 @@ export async function bearerAuth(req: Request, res: Response, next: NextFunction
     }
 
     const fullPath = req.baseUrl + req.path;
-    const decision = checkTokenRoute(req.method, fullPath, tok.scopes);
+    const decision = checkTokenRoute(req.method, fullPath, tok.scopes, req.body);
     if (!decision.ok) {
-      res.status(decision.status).json(decision.scope ? { error: decision.error, scope: decision.scope } : { error: decision.error });
+      const { ok: _ok, status, ...body } = decision;
+      res.status(status).json(body);
       return;
     }
 
     req.authVia = 'token';
-    req.apiToken = { id: tok.id, scopes: tok.scopes };
+    req.apiToken = { id: tok.id, name: tok.name, scopes: tok.scopes, expiresAt: tok.expiresAt };
     req.session = fakeSession(tok.userId, tok.tenantId, tok.id);
     void touchToken(tok);
-    next();
+    withTokenActor({ tokenId: tok.id, tokenName: tok.name }, () => next());
   } catch (e) {
     next(e);
   }

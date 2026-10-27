@@ -90,3 +90,19 @@ export const apiTokenCreateLimiter = rateLimit({
   store: store('pat-create'),
   handler: rateLimited,
 });
+
+/**
+ * `/api/me/*`: 60 requests per minute per user for browser sessions. Bearer
+ * requests are already limited per token by patPerTokenLimiter.
+ */
+export const meRouteLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 60,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  skip: (req) => req.authVia === 'token',
+  keyGenerator: userOrIp,
+  passOnStoreError: true,
+  store: store('me'),
+  handler: rateLimited,
+});

@@ -13,7 +13,7 @@ import { isTokenRequest } from '../middleware/bearerAuth.js';
  * Create / list / revoke are browser-session only: a token can never mint,
  * list, or revoke tokens (bearerAuth's allow-list already blocks these, and
  * `sessionOnly` double-checks). `GET /current` is the one token-reachable
- * route: a bot's "who am I / what can I do".
+ * route here: a bot's "who am I" (see also GET /api/me/capabilities).
  */
 export const apiTokensRouter = Router();
 apiTokensRouter.use(apiTokensRouteLimiter);
@@ -26,7 +26,9 @@ apiTokensRouter.get('/current', (req, res) => {
     tenantId: me.tenantId,
     via: isTokenRequest(req) ? 'token' : 'session',
     tokenId: req.apiToken?.id ?? null,
+    tokenName: req.apiToken?.name ?? null,
     scopes: req.apiToken?.scopes ?? null,
+    expiresAt: req.apiToken?.expiresAt ?? null,
   });
 });
 

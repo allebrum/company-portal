@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AppendSpaceBlocksInput, SpaceBlock } from '@allebrum/shared';
+import type { AppendSpaceBlocksInput, SpaceBlock, UpdateSpaceBlockInput } from '@allebrum/shared';
 import { HttpError } from '../middleware/errorHandler.js';
 
 /** Same cap as UpdateClientSchema/UpdateProjectSchema `spaceBlocks.max`. */
@@ -48,3 +48,22 @@ export function normalizeAppendBlocks(input: AppendSpaceBlocksInput['blocks'], n
   return out;
 }
 
+
+const LINKED_TYPES = new Set(['todo', 'goal', 'link', 'timer']);
+
+/** Pure: apply a single-block patch (exported for tests). */
+export function applyBlockPatch(prev: SpaceBlock, patch: UpdateSpaceBlockInput): SpaceBlock {
+  if (LINKED_TYPES.has(prev.type)) throw new HttpError(400, 'linked_block_not_editable');
+  const type = patch.type ?? prev.type;
+  if (type === 'divider') return { id: prev.id, type: 'divider' };
+  if (type === 'embed') {
+    const url = (patch.embedUrl ?? prev.embedUrl ?? '').trim();
+    if (!/^https?:\/\//i.test(url)) throw new HttpError(400, 'invalid_embed_url');
+    return { id: prev.id, type: 'embed', embedUrl: url, embedKind: prev.embedKind ?? 'link', content: '' };
+  }
+  const content = patch.content ?? prev.content ?? '';
+  if (content.includes('\n')) throw new HttpError(400, 'single_line_content_required');
+  const out: SpaceBlock = { id: prev.id, type, content };
+  if (type === 'checkbox') out.checked = patch.checked ?? prev.checked ?? false;
+  return out;
+}

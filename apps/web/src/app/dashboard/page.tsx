@@ -416,7 +416,15 @@ export default function DashboardPage() {
                     <div className="flex-1 min-w-0">
                       <div className="text-sm text-gray-800 truncate">{a.target}</div>
                       <ActivityChanges meta={a.meta} />
-                      <div className="text-[11px] text-gray-500">{u?.name ?? 'Unknown'} · {relativeFromIso(a.createdAt)}</div>
+                      <div className="text-[11px] text-gray-500">
+                        {u?.name ?? 'Unknown'}
+                        {a.meta?.via === 'api_token' && (
+                          <span title="Done with a personal API token">
+                            {' '}· via API token{typeof a.meta.tokenName === 'string' ? ` “${a.meta.tokenName}”` : ''}
+                          </span>
+                        )}{' '}
+                        · {relativeFromIso(a.createdAt)}
+                      </div>
                     </div>
                   </li>
                 );
