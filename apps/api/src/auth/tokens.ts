@@ -139,3 +139,28 @@ export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;  // 7 days
 export const RESET_TTL_MS = 60 * 60 * 1000;            // 1 hour
 export const PORTAL_MAGIC_TTL_MS = 30 * 24 * 60 * 60 * 1000;  // 30 days for portal magic links
 export const HANDOFF_TTL_MS = 10 * 60 * 1000;          // 10 min — marketing signup auto-login handoff
+
+/**
+ * Read-only lookup used by the portal exchange so it can report WHY a link
+ * failed (used / expired) and run publish + slug checks BEFORE consuming.
+ * Never mutates. Consumption still goes through the atomic `consumeToken`.
+ */
+export async function inspectToken(
+  rawToken: string,
+  kind: AuthTokenKind,
+): Promise<{ state: 'not_found' } | { state: 'used' | 'expired' | 'valid'; userId: string | null; contactId: string | null }> {
+  const rows = await db
+    .select({
+      usedAt: authTokens.usedAt,
+      expiresAt: authTokens.expiresAt,
+      userId: authTokens.userId,
+      contactId: authTokens.contactId,
+    })
+    .from(authTokens)
+    .where(and(eq(authTokens.tokenHash, sha256(rawToken)), eq(authTokens.kind, kind)))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return { state: 'not_found' };
+  const state = row.usedAt ? 'used' : new Date(row.expiresAt).getTime() < Date.now() ? 'expired' : 'valid';
+  return { state, userId: row.userId, contactId: row.contactId };
+}

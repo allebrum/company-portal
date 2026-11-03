@@ -263,3 +263,22 @@ export function useSignOffMilestone() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['portal', 'overview'] }),
   });
 }
+
+export type PortalSenderStatus = {
+  senderUserId: string;
+  senderName: string | null;
+  isSystemSender: boolean;
+  configured: boolean;
+  connected: boolean;
+};
+
+/** Staff — will portal invite emails actually be delivered? */
+export function usePortalSenderStatus(enabled: boolean = true) {
+  return useQuery({
+    queryKey: ['portal', 'senderStatus'],
+    queryFn: () => api.get<PortalSenderStatus>('/clients/portal/sender-status'),
+    enabled,
+    retry: false,
+    staleTime: 60_000,
+  });
+}

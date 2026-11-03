@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ExternalLink, Mail, MailCheck, RefreshCw, Send, Trash2 } from 'lucide-react';
+import { AlertTriangle, Copy, ExternalLink, Mail, MailCheck, RefreshCw, Send, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Field, Input, Select } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
@@ -15,6 +15,7 @@ import {
   type ClientRow,
 } from '@/hooks/useResources';
 import { API_URL } from '@/lib/env';
+import { usePortalSenderStatus } from '@/hooks/usePortal';
 
 const SLUG_REGEX = /^[a-z0-9][a-z0-9-]{2,39}$/;
 
@@ -26,6 +27,12 @@ function slugify(s: string): string {
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 40);
+}
+
+/** Public sign-in page for a client portal — safe to share; it never carries a token. */
+export function portalLoginUrlFor(slug: string): string {
+  const origin = typeof window !== 'undefined' ? window.location.origin : API_URL.replace(/\/api$/, '');
+  return `${origin}/portal/login?slug=${encodeURIComponent(slug)}`;
 }
 
 function portalOriginFor(slug: string): string {
@@ -88,6 +95,18 @@ export function PortalTab({ client }: { client: ClientRow }) {
   };
 
   const liveUrl = client.portalSlug && client.portalPublishedAt ? portalOriginFor(client.portalSlug) : null;
+  const isPublished = !!client.portalSlug && !!client.portalPublishedAt;
+
+  const onCopyLink = async () => {
+    if (!client.portalSlug) return;
+    const url = portalLoginUrlFor(client.portalSlug);
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success(isPublished ? 'Portal link copied' : 'Link copied — note the portal is not published yet');
+    } catch {
+      toast.error(`Copy failed — the link is ${url}`);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -99,6 +118,22 @@ export function PortalTab({ client }: { client: ClientRow }) {
           Preview the live page below the settings.
         </p>
       </div>
+
+      {client.portalSlug && !client.portalPublishedAt && (
+        <div
+          role="status"
+          className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+        >
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <div>
+            <div className="font-semibold">This portal is not published</div>
+            <div className="text-[13px]">
+              Contacts can&apos;t sign in until you tick <span className="font-semibold">Published</span> and save.
+              Links you send now stay valid and will work once it&apos;s published.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Settings card */}
       <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-4">
@@ -145,6 +180,12 @@ export function PortalTab({ client }: { client: ClientRow }) {
         </Field>
 
         <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100">
+          {client.portalSlug && (
+            <Button variant="ghost" size="sm" onClick={onCopyLink} title="Copy the client's portal sign-in URL">
+              <Copy className="w-3.5 h-3.5" />
+              Copy portal link
+            </Button>
+          )}
           {liveUrl && (
             <a
               href={liveUrl}
@@ -174,7 +215,7 @@ export function PortalTab({ client }: { client: ClientRow }) {
 
       {/* Contacts */}
       {client.portalSlug ? (
-        <ContactsCard clientId={client.id} />
+        <ContactsCard clientId={client.id} published={isPublished} />
       ) : (
         <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
           Set a slug and save above to start inviting client contacts.
@@ -224,7 +265,7 @@ export function PortalTab({ client }: { client: ClientRow }) {
 
 // ---- Contacts card ---------------------------------------------------
 
-function ContactsCard({ clientId }: { clientId: string }) {
+function ContactsCard({ clientId, published }: { clientId: string; published: boolean }) {
   const { data: contacts = [] } = useClientContacts(clientId);
   const invite = useInviteClientContact();
   const resend = useResendClientInvite();
@@ -235,9 +276,31 @@ function ContactsCard({ clientId }: { clientId: string }) {
   const [addName, setAddName] = useState('');
   const [addEmail, setAddEmail] = useState('');
   const [addRole, setAddRole] = useState<'primary' | 'viewer'>('viewer');
+  const { data: sender } = usePortalSenderStatus();
+  const senderDown = !!sender && (!sender.configured || !sender.connected);
+
+  /** Confirm before sending into a dead end (unpublished portal / no mail sender). */
+  const confirmSend = async (email: string): Promise<boolean> => {
+    if (senderDown) {
+      return confirmDialog({
+        title: 'Invite email won’t be delivered',
+        body: `${sender?.senderName ?? 'The sending account'} hasn’t connected Gmail, so no email will reach ${email}. The link will still be created. Connect Gmail (Settings → Integrations) or change the system sender first.`,
+        confirmLabel: 'Create anyway',
+      });
+    }
+    if (!published) {
+      return confirmDialog({
+        title: 'Portal is not published',
+        body: `${email} will get a link, but it won’t let them in until you publish this portal. The link stays valid for 30 days.`,
+        confirmLabel: 'Send anyway',
+      });
+    }
+    return true;
+  };
 
   const onInvite = async () => {
     if (!addName.trim() || !addEmail.trim()) return;
+    if (!(await confirmSend(addEmail.trim()))) return;
     try {
       await invite.mutateAsync({
         clientId,
@@ -266,6 +329,19 @@ function ContactsCard({ clientId }: { clientId: string }) {
           {showAdd ? 'Cancel' : '+ Add contact'}
         </Button>
       </div>
+
+      {senderDown && (
+        <div role="status" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-800">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <span>
+            Invite emails are not being sent:{' '}
+            {sender?.configured === false
+              ? 'Gmail sending isn’t configured on this server.'
+              : `${sender?.senderName ?? 'the sending account'} (${sender?.isSystemSender ? 'system sender' : 'you'}) hasn’t connected Gmail.`}{' '}
+            Use &ldquo;Copy portal link&rdquo; and have contacts request a link from the sign-in page once this is fixed.
+          </span>
+        </div>
+      )}
 
       {showAdd && (
         <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 space-y-2">
@@ -322,6 +398,7 @@ function ContactsCard({ clientId }: { clientId: string }) {
                 <button
                   type="button"
                   onClick={async () => {
+                    if (!(await confirmSend(c.email))) return;
                     try {
                       await resend.mutateAsync({ clientId, contactId: c.id });
                       toast.success(`Invite resent to ${c.email}`);
