@@ -16,6 +16,10 @@ import {
   updateContact,
   deleteContact,
 } from '../services/clientContacts.js';
+import { rateLimit } from '../middleware/rateLimit.js';
+import { getSettings } from '../services/settings.js';
+import { getGmailStatusForUser } from '../services/gmail.js';
+import { getUser } from '../services/users.js';
 import { EXPECTED_UPDATED_AT_HEADER, readExpectedUpdatedAt } from '../middleware/expectedUpdatedAt.js';
 
 export const clientsRouter = Router();
@@ -64,6 +68,35 @@ clientsRouter.patch('/:id', validate(UpdateClientSchema), async (req, res, next)
 });
 
 // ---- F23 client portal contacts (staff side) -------------------------
+
+/**
+ * Will portal invites actually be delivered? Invites go out through the
+ * workspace's system-sender Gmail (falling back to the acting user) and
+ * silently log-and-noop when that account hasn't connected Gmail. The
+ * staff Portal tab uses this to warn before "Send invite" / "Resend".
+ */
+clientsRouter.get(
+  '/portal/sender-status',
+  rateLimit({ key: 'portal-sender-status', max: 60, windowSec: 60 }),
+  requirePermission('portal.manage'),
+  async (req, res, next) => {
+    try {
+      const me = req.session.user!;
+      const settings = await getSettings();
+      const senderUserId = settings.systemSenderUserId ?? me.userId;
+      const [status, sender] = await Promise.all([getGmailStatusForUser(senderUserId), getUser(senderUserId)]);
+      res.json({
+        senderUserId,
+        senderName: sender?.name ?? null,
+        isSystemSender: !!settings.systemSenderUserId,
+        configured: status.configured,
+        connected: status.connected,
+      });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
 
 clientsRouter.get('/:id/contacts', requirePermission('portal.manage'), async (req, res, next) => {
   try {
