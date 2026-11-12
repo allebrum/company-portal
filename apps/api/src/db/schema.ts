@@ -12,6 +12,7 @@ import {
   index,
   uniqueIndex,
   primaryKey,
+  check,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import {
@@ -1007,3 +1008,75 @@ export type FormEvent = typeof formEvents.$inferSelect;
 export type FormSubmission = typeof formSubmissions.$inferSelect;
 export type UploadQrSession = typeof uploadQrSessions.$inferSelect;
 export type UploadQrSessionFile = typeof uploadQrSessionFiles.$inferSelect;
+
+// ---- Project / client credentials vault ----
+// Server / SSH / database / hosting logins attached to a client OR a project
+// (exactly one). Secret fields are field-level encrypted (lib/crypto.ts:
+// AES-256-GCM, keyset from CREDENTIALS_KEYS, AAD bound to tenant/row/field)
+// and are never selected by list queries. Soft-deleted via `deleted_at`.
+export const credentials = pgTable('credentials', {
+  id: uuid('id').primaryKey(),
+  tenantId: tenantRefNN(),
+  clientId: uuid('client_id').references(() => clients.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+  label: text('label').notNull(),
+  kind: text('kind').notNull().default('other'),
+  host: text('host').notNull().default(''),
+  port: integer('port'),
+  url: text('url').notNull().default(''),
+  username: text('username').notNull().default(''),
+  secretEnc: text('secret_enc'),
+  notesEnc: text('notes_enc'),
+  totpEnc: text('totp_enc'),
+  secretUpdatedAt: timestamp('secret_updated_at', { withTimezone: true, mode: 'string' }),
+  lastRevealedAt: timestamp('last_revealed_at', { withTimezone: true, mode: 'string' }),
+  createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  updatedByUserId: uuid('updated_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: ts(),
+  updatedAt: updTs(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true, mode: 'string' }),
+}, (t) => ({
+  tenantClientIdx: index('credentials_tenant_client_idx').on(t.tenantId, t.clientId),
+  tenantProjectIdx: index('credentials_tenant_project_idx').on(t.tenantId, t.projectId),
+  oneOwner: check('credentials_one_owner_chk', sql`num_nonnulls(${t.clientId}, ${t.projectId}) = 1`),
+}));
+
+// Per-client credentials allowlist: people (beyond workspace-wide
+// credentials.* holders, i.e. Owner) who may view + reveal credentials on
+// this client and its projects; `can_manage` also lets them add/edit/delete.
+// Groundwork for per-client access restriction (CLIENT_PORTAL_PLAN Phase 4).
+export const credentialClientAccess = pgTable('credential_client_access', {
+  tenantId: tenantRefNN(),
+  clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  canManage: boolean('can_manage').notNull().default(false),
+  grantedByUserId: uuid('granted_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: ts(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.clientId, t.userId] }),
+  tenantUserIdx: index('credential_client_access_tenant_user_idx').on(t.tenantId, t.userId),
+}));
+
+// Credentials audit trail — separate from the workspace activity feed (which
+// every member can read and which is broadcast over sockets). Records every
+// reveal and change, including denied / rate-limited / failed attempts.
+// Readable only by holders of workspace-wide credentials.manage (Owner).
+export const credentialAccessLog = pgTable('credential_access_log', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: tenantRefNN(),
+  credentialId: uuid('credential_id').references(() => credentials.id, { onDelete: 'set null' }),
+  clientId: uuid('client_id').references(() => clients.id, { onDelete: 'set null' }),
+  label: text('label').notNull().default(''),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  tokenId: uuid('token_id'),
+  tokenName: text('token_name'),
+  action: text('action').notNull(),
+  outcome: text('outcome').notNull(),
+  ip: text('ip'),
+  userAgent: text('user_agent'),
+  createdAt: ts(),
+}, (t) => ({
+  tenantTimeIdx: index('credential_access_log_tenant_time_idx').on(t.tenantId, t.createdAt),
+  tenantClientTimeIdx: index('credential_access_log_tenant_client_time_idx').on(t.tenantId, t.clientId, t.createdAt),
+}));
+export type CredentialDbRow = typeof credentials.$inferSelect;

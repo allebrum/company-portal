@@ -25,6 +25,7 @@ import { onboardingRouter } from './onboarding.js';
 import { rbacRouter } from './rbac.js';
 import { settingsRouter } from './settings.js';
 import { websitesRouter } from './websites.js';
+import { credentialsRouter } from './credentials.js';
 import { formsRouter, formsPublicRouter } from './forms.js';
 import { twofaRouter } from './twofa.js';
 import { tenantContext } from '../middleware/tenantContext.js';
@@ -77,6 +78,7 @@ apiRouter.use('/onboarding', onboardingRouter);
 apiRouter.use('/rbac', rbacRouter);
 apiRouter.use('/settings', settingsRouter);
 apiRouter.use('/websites', websitesRouter);
+apiRouter.use('/credentials', credentialsRouter);
 apiRouter.use('/forms', formsRouter);
 apiRouter.use('/f', formsPublicRouter);
 // Hoppa Phase 3: billing portal (session-gated, subscription-exempt) +

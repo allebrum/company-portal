@@ -12,7 +12,9 @@ roadmap and to-dos, and more — using a personal access token (PAT).
   removing you from the workspace disables all of your tokens there.
 - **Scopes** choose which areas a token may touch. Pick individual scopes, or
   **Full access (same as me)** (`full`), which also covers scopes/features
-  added later.
+  added later — **except the project/client credentials vault**
+  (`credentials:read` / `credentials:write`), which is never implied by
+  `full` and must be ticked explicitly (see §3, *Credentials vault*).
 - A few things are **session-only** and never available to any token (see §4):
   creating/listing/revoking tokens, login/logout, password, email, 2FA,
   sign-in policy, connecting third-party accounts, and billing.
@@ -41,7 +43,9 @@ takes effect immediately.
 | `finance:write` | Pay periods, pay config, client invoicing (incl. QuickBooks invoices) |
 | `team:admin` | Invite/edit/remove users, groups & permissions, workspace branding/settings, sample data |
 | `secrets:read` | Read stored website credentials |
-| `full` | All of the above, and anything added later |
+| `credentials:read` | List and reveal project/client credentials on clients you can access. **Not included in `full`** |
+| `credentials:write` | Add, edit and delete project/client credentials on clients you can manage. **Not included in `full`** |
+| `full` | All of the above except `credentials:*`, and anything added later. Can be combined with `credentials:read` / `credentials:write` |
 
 Every scope is still subject to your role. For example, `time:manage` lets a
 token approve time only if *you* hold `time_entry.approve`; `team:admin` does
@@ -206,6 +210,40 @@ curl -s -X POST $HOPPA/users -H "Authorization: Bearer $HOPPA_TOKEN" -H 'Content
 Request bodies are the same as the web app's (zod schemas in
 `packages/shared/src/schemas`). A `400 validation_failed` response lists the
 exact `issues`.
+
+### Credentials vault (`credentials:read` / `credentials:write`)
+
+Encrypted server / SSH / database / hosting logins attached to a client or a
+project. These scopes are **never** part of `full`: pick them explicitly when
+creating the token. On top of the scope, the token's owner must be allowed on
+that client — an Owner (workspace-wide `credentials.*` permissions), or on the
+client's credentials allowlist. Admins and Members see nothing otherwise.
+
+```bash
+# what can I do here? (always 200)
+curl -s -H "Authorization: Bearer $HOPPA_TOKEN" "$HOPPA/credentials/access?clientId=$CLIENT"
+# {"configured":true,"canView":true,"canReveal":true,"canManage":false,"canManageAccess":false,"viaAllowlist":false}
+
+# list (metadata only — never a password). clientId = client + all its projects; projectId = that project
+curl -s -H "Authorization: Bearer $HOPPA_TOKEN" "$HOPPA/credentials?clientId=$CLIENT"
+# {"access":{…},"credentials":[{"id":"…","label":"Prod root","kind":"server","host":"203.0.113.10","port":22,
+#   "username":"root","hasSecret":true,"hasNotes":false,"hasTotp":false,"projectId":null,…}]}
+
+# reveal ONE credential (credentials:read). Logged in the credentials access log. 20 / 10 min per user.
+curl -s -X POST -H "Authorization: Bearer $HOPPA_TOKEN" "$HOPPA/credentials/$ID/reveal"
+# {"credentialId":"…","username":"root","secret":"…","notes":null,"totp":null}
+
+# add (credentials:write) — exactly one of clientId / projectId
+curl -s -X POST -H "Authorization: Bearer $HOPPA_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"projectId":"…","label":"Staging DB","kind":"database","host":"db.internal","port":5432,"username":"app","secret":"…"}' \
+  "$HOPPA/credentials"
+```
+
+- Responses carry `Cache-Control: no-store`. Don't log or persist revealed values.
+- `PATCH /credentials/:id`: omitted fields are unchanged; `""` clears an encrypted field (`secret`, `notes`, `totpSecret`).
+- `kind`: `server`, `ssh`, `database`, `hosting`, `registrar`, `email`, `api_key`, `other`.
+- `503 credentials_not_configured`: the server has no `CREDENTIALS_KEYS` yet.
+- Who-can-see (allowlist) and the access log are signed-in-Owner only (§4).
 
 ### Full endpoint reference
 
@@ -408,6 +446,17 @@ Paths are relative to the base URL. Anything not listed returns
 | DELETE | `/websites/:id` | `tools:write` |
 | GET | `/websites/:id/credentials` | `secrets:read` |
 
+#### Credentials vault (never implied by `full`)
+
+| Method | Path | Scope |
+|---|---|---|
+| GET | `/credentials/access?clientId=…\|projectId=…` | `credentials:read` |
+| GET | `/credentials?clientId=…\|projectId=…` | `credentials:read` |
+| POST | `/credentials/:id/reveal` | `credentials:read` |
+| POST | `/credentials` | `credentials:write` |
+| PATCH | `/credentials/:id` | `credentials:write` |
+| DELETE | `/credentials/:id` | `credentials:write` |
+
 ## 4. Session-only (never available to tokens)
 
 These need you signed in to the web app, even with `full`:
@@ -442,6 +491,9 @@ These need you signed in to the web app, even with `full`:
 | POST | `/api-tokens` | Token management — a token can never mint, list or revoke tokens. |
 | DELETE | `/api-tokens/:id` | Token management — a token can never mint, list or revoke tokens. |
 | POST | `/billing/manage-link` | Subscription billing — session only. |
+| GET | `/credentials/clients/:clientId/allowlist` | Who can see a client's credentials, and the credentials access log — signed-in Owner only. |
+| PUT | `/credentials/clients/:clientId/allowlist` | Who can see a client's credentials, and the credentials access log — signed-in Owner only. |
+| GET | `/credentials/access-log` | Who can see a client's credentials, and the credentials access log — signed-in Owner only. |
 | POST | `/integrations/:kind/connect` | Connecting third-party accounts / credentials — browser OAuth flow, session only. |
 | POST | `/integrations/:kind/disconnect` | Connecting third-party accounts / credentials — browser OAuth flow, session only. |
 | PATCH | `/integrations/:kind` | Connecting third-party accounts / credentials — browser OAuth flow, session only. |
@@ -479,7 +531,8 @@ human-readable `message`.
 | 404 | `client_not_found` / `block_not_found` / … | No such record in this workspace |
 | 409 | `stale_update` | Someone wrote first; re-read and retry |
 | 413 | `space_notes_full` | Space already at 2,000 blocks |
-| 429 | `rate_limited` | 120 requests/min per token; 20 failed auths/10 min per IP |
+| 429 | `rate_limited` | 120 requests/min per token; 20 failed auths/10 min per IP; 20 credential reveals/10 min per user |
+| 503 | `credentials_not_configured` | Credentials vault has no encryption keys on this server |
 
 ```json
 { "error": "insufficient_scope", "scope": "projects:write",

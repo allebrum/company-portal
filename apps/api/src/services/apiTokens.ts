@@ -4,7 +4,7 @@ import { apiTokens, users, type ApiToken } from '../db/schema.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { isMember } from './tenants.js';
 import { DISPLAY_PREFIX_LEN, generateRawToken, hashToken, hashesEqual, looksLikeToken } from '../auth/patFormat.js';
-import { FULL_ACCESS_SCOPE, type ApiTokenScope, type ApiTokenSummary, type CreatedApiToken, type CreateApiTokenInput } from '@allebrum/shared';
+import { FULL_ACCESS_SCOPE, isFullExcludedScope, type ApiTokenScope, type ApiTokenSummary, type CreatedApiToken, type CreateApiTokenInput } from '@allebrum/shared';
 
 /**
  * Personal access tokens — create/list/revoke + bearer resolution. Token
@@ -55,9 +55,10 @@ export async function createToken(
   if (n >= MAX_ACTIVE_TOKENS_PER_USER) throw new HttpError(400, 'too_many_tokens');
 
   const raw = generateRawToken();
-  // `full` already implies everything; store it alone so the list reads cleanly.
+  // `full` implies everything except the sensitive FULL_EXCLUDED_SCOPES, so
+  // store it alone plus any of those that were explicitly picked.
   const scopes: string[] = input.scopes.includes(FULL_ACCESS_SCOPE)
-    ? [FULL_ACCESS_SCOPE]
+    ? [FULL_ACCESS_SCOPE, ...Array.from(new Set<string>(input.scopes.filter(isFullExcludedScope)))]
     : Array.from(new Set<string>(input.scopes));
   const expiresAt = input.expiresInDays
     ? new Date(Date.now() + input.expiresInDays * 86_400_000).toISOString()

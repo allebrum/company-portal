@@ -119,3 +119,24 @@ test('the backstop stays wired into res.json and every socket emit', async () =>
   assert.ok(emits.length >= 7, 'expected the emit helpers');
   for (const e of emits) assert.match(e, /safe\(payload\)/, `unfiltered socket emit: ${e}`);
 });
+
+test('credentials vault: encrypted columns are stripped, the reveal payload survives', () => {
+  const dbRow = {
+    id: 'c1',
+    label: 'prod root',
+    secretEnc: 'v2.k1.iv.ct.tag',
+    notesEnc: 'v2.k1.iv.ct.tag',
+    totpEnc: 'v2.k1.iv.ct.tag',
+    secret_enc: 'v2.k1.iv.ct.tag',
+    notes_enc: 'v2.k1.iv.ct.tag',
+    totp_enc: 'v2.k1.iv.ct.tag',
+    hasSecret: true,
+  };
+  for (const out of [JSON.parse(JSON.stringify({ rows: [dbRow] }, secretsReplacer)), redactSecrets({ rows: [dbRow] })]) {
+    const json = JSON.stringify(out);
+    assert.ok(!json.includes('v2.k1'), 'ciphertext leaked');
+    assert.deepEqual(out.rows[0], { id: 'c1', label: 'prod root', hasSecret: true });
+  }
+  const reveal = { credentialId: 'c1', username: 'root', secret: 'pw', notes: null, totp: { code: '123456', expiresInSec: 12 } };
+  assert.deepEqual(JSON.parse(JSON.stringify(reveal, secretsReplacer)), reveal);
+});

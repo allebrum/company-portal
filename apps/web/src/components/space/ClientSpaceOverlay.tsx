@@ -6,7 +6,7 @@ import {
   X, Layers, Target, CheckSquare, FileText, Play, Square,
   Upload, ExternalLink, Trash2, Link2, Plus, FolderOpen, Globe, Pencil, RefreshCw,
   MessageSquare, QrCode as QrCodeIcon,
-  FormInput, Receipt,
+  FormInput, Receipt, KeyRound,
 } from 'lucide-react';
 import { useSpace } from '@/contexts/SpaceContext';
 import { useSpaceData, useUpdateSpaceFiles } from '@/hooks/useSpace';
@@ -46,6 +46,8 @@ import { TicketsTab } from './TicketsTab';
 import { ProjectOverviewTab } from './ProjectOverviewTab';
 import { InvoicingTab } from './InvoicingTab';
 import { ClientOverviewTab } from './ClientOverviewTab';
+import { CredentialsTab } from './CredentialsTab';
+import { useCredentialAccess, useCredentials } from '@/hooks/useCredentials';
 import { ItemComposer } from '@/components/features/ItemComposer';
 import { ProjectFormModal } from '@/components/features/ProjectFormModal';
 import { ClientFormModal } from '@/components/features/ClientFormModal';
@@ -74,9 +76,9 @@ function useSpaceModals(): SpaceModals {
 // Narrowed scope (the overlay never opens for 'all').
 type OpenScope = Exclude<Scope, { kind: 'all' }>;
 
-type TabKey = 'overview' | 'notes' | 'goals' | 'todos' | 'qr' | 'forms' | 'files' | 'invoicing' | 'portal' | 'tickets';
+type TabKey = 'overview' | 'notes' | 'goals' | 'todos' | 'qr' | 'forms' | 'files' | 'invoicing' | 'portal' | 'tickets' | 'credentials';
 const SPACE_TAB_PARAM = 'spaceTab';
-const TAB_KEYS: ReadonlyArray<TabKey> = ['overview', 'notes', 'goals', 'todos', 'qr', 'forms', 'files', 'invoicing', 'portal', 'tickets'];
+const TAB_KEYS: ReadonlyArray<TabKey> = ['overview', 'notes', 'goals', 'todos', 'qr', 'forms', 'files', 'invoicing', 'portal', 'tickets', 'credentials'];
 
 function readTabFromUrl(): TabKey | null {
   const raw = new URL(window.location.href).searchParams.get(SPACE_TAB_PARAM);
@@ -240,6 +242,13 @@ export function ClientSpaceOverlay() {
             )}
             {tab === 'tickets' && narrowed.kind === 'client' && data.client && (
               <TicketsTab client={data.client} />
+            )}
+            {tab === 'credentials' && (
+              <CredentialsTab
+                scope={narrowed}
+                clientId={data.clientId}
+                clientName={data.client?.name ?? 'this client'}
+              />
             )}
             {tab === 'overview' && narrowed.kind === 'project' && data.project && (
               <ProjectOverviewTab project={data.project} />
@@ -507,6 +516,16 @@ function SpaceTabs({
   const openTicketCount = showTicketsTab
     ? clientTickets.filter((t) => t.status !== 'resolved' && t.status !== 'closed').length
     : 0;
+  // Credentials tab: only for people who can see this client's credentials
+  // (Owner, or on the client's allowlist). Nobody else learns the tab exists.
+  const credScope = data.project
+    ? { kind: 'project' as const, id: data.project.id }
+    : data.client
+      ? { kind: 'client' as const, id: data.client.id }
+      : null;
+  const credAccess = useCredentialAccess(credScope);
+  const showCredentialsTab = !!credAccess.data?.canView;
+  const { data: credList } = useCredentials(credScope, showCredentialsTab);
 
   const Tab = ({ k, label, count, icon: Icon }: { k: TabKey; label: string; count?: number; icon: typeof Target }) => (
     <button
@@ -537,6 +556,9 @@ function SpaceTabs({
       {can('invoices.manage') && <Tab k="invoicing" label="Invoicing" icon={Receipt} />}
       {showTicketsTab && <Tab k="tickets" label="Tickets" icon={MessageSquare} count={openTicketCount} />}
       {showPortalTab && <Tab k="portal" label="Portal" icon={Globe} />}
+      {showCredentialsTab && (
+        <Tab k="credentials" label="Credentials" icon={KeyRound} count={credList?.credentials.length} />
+      )}
       {showOverviewTab && <Tab k="overview" label="Overview" icon={Layers} />}
       <div className="ml-auto text-[11px] text-gray-400 italic">
         Auto-linked to <span className="font-semibold text-gray-600">{data.client?.name ?? '—'}</span>

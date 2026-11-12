@@ -26,6 +26,8 @@ export const API_TOKEN_SCOPES = [
   'finance:write',
   'team:admin',
   'secrets:read',
+  'credentials:read',
+  'credentials:write',
   'full',
 ] as const;
 export const ApiTokenScopeSchema = z.enum(API_TOKEN_SCOPES);
@@ -33,6 +35,18 @@ export type ApiTokenScope = z.infer<typeof ApiTokenScopeSchema>;
 
 /** `full` = everything the owner can do (minus session-only routes), including scopes added later. */
 export const FULL_ACCESS_SCOPE = 'full' satisfies ApiTokenScope;
+
+/**
+ * Sensitive scopes that `full` does NOT imply. A token only holds these when
+ * they were explicitly picked at creation (they can be combined with `full`).
+ * Even then, every request is still capped by the owner's live permissions
+ * and the per-client credentials allowlist.
+ */
+export const FULL_EXCLUDED_SCOPES = ['credentials:read', 'credentials:write'] as const satisfies readonly ApiTokenScope[];
+
+export function isFullExcludedScope(s: string): boolean {
+  return (FULL_EXCLUDED_SCOPES as readonly string[]).includes(s);
+}
 
 /** Human-readable description of each scope (token UI, docs, /api/me/capabilities). */
 export const API_TOKEN_SCOPE_INFO: Record<ApiTokenScope, { label: string; description: string }> = {
@@ -89,10 +103,20 @@ export const API_TOKEN_SCOPE_INFO: Record<ApiTokenScope, { label: string; descri
     label: 'Website credentials',
     description: 'Read stored website credentials from the website memory bank.',
   },
+  'credentials:read': {
+    label: 'Project & client credentials — reveal',
+    description:
+      'List and reveal stored project/client credentials (server, database, hosting passwords) on clients you can access. Never included in Full access.',
+  },
+  'credentials:write': {
+    label: 'Project & client credentials — edit',
+    description:
+      'Add, edit and delete project/client credentials on clients you can manage. Never included in Full access.',
+  },
   full: {
     label: 'Full access (same as me)',
     description:
-      'Everything you can do in Hoppa, including features added later — except session-only security actions (tokens, password, 2FA, login).',
+      'Everything you can do in Hoppa, including features added later — except session-only security actions (tokens, password, 2FA, login) and the project/client credentials vault, which must be picked separately.',
   },
 };
 

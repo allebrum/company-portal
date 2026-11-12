@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { API_TOKEN_SCOPES, type ApiTokenScope } from '@allebrum/shared';
+import { API_TOKEN_SCOPES, FULL_EXCLUDED_SCOPES, type ApiTokenScope } from '@allebrum/shared';
 import {
   checkTokenRoute,
   effectiveScopes,
@@ -117,12 +117,53 @@ test('discovery routes need any valid token, no scope', () => {
   assert.equal(checkTokenRoute('GET', '/api/me/capabilities', []).ok, true);
 });
 
-test('full access = every scope', () => {
-  assert.deepEqual(effectiveScopes(['full']), [...API_TOKEN_SCOPES]);
+test('full access = every scope except the credentials vault', () => {
+  const sensitive = new Set<string>(FULL_EXCLUDED_SCOPES);
+  assert.deepEqual(effectiveScopes(['full']), API_TOKEN_SCOPES.filter((s) => !sensitive.has(s)));
   assert.deepEqual(effectiveScopes(['time:write', 'read']), ['read', 'time:write']);
   for (const r of TOKEN_ROUTES) {
     const path = r.path.replace(':scopeKind', 'clients').replace(/:[A-Za-z]+/g, C);
-    assert.equal(checkTokenRoute(r.method, path, ['full']).ok, true, `${r.method} ${r.path}`);
+    const needsSensitive = !!r.scope && sensitive.has(r.scope);
+    assert.equal(checkTokenRoute(r.method, path, ['full']).ok, !needsSensitive, `${r.method} ${r.path}`);
+  }
+});
+
+test('credentials vault: full is refused, explicit scopes allowed', () => {
+  const routes: [string, string, string][] = [
+    ['GET', '/api/credentials', 'credentials:read'],
+    ['GET', '/api/credentials/access', 'credentials:read'],
+    ['POST', `/api/credentials/${C}/reveal`, 'credentials:read'],
+    ['POST', '/api/credentials', 'credentials:write'],
+    ['PATCH', `/api/credentials/${C}`, 'credentials:write'],
+    ['DELETE', `/api/credentials/${C}`, 'credentials:write'],
+  ];
+  for (const [m, p, scope] of routes) {
+    const full = checkTokenRoute(m, p, ['full']);
+    assert.equal(full.ok, false, `${m} ${p} with full`);
+    assert.equal(!full.ok && full.error, 'insufficient_scope');
+    assert.equal(!full.ok && full.scope, scope);
+    assert.equal(checkTokenRoute(m, p, [scope as 'credentials:read']).ok, true, `${m} ${p} with ${scope}`);
+    assert.equal(checkTokenRoute(m, p, ['full', scope as 'credentials:read']).ok, true, `${m} ${p} with full+${scope}`);
+  }
+  // read doesn't grant write and vice versa
+  assert.equal(checkTokenRoute('POST', '/api/credentials', ['credentials:read']).ok, false);
+  assert.equal(checkTokenRoute('POST', `/api/credentials/${C}/reveal`, ['credentials:write']).ok, false);
+  // full + explicit opt-in shows up in the effective set
+  assert.ok(effectiveScopes(['full', 'credentials:read']).includes('credentials:read'));
+  assert.ok(!effectiveScopes(['full', 'credentials:read']).includes('credentials:write'));
+  // website secrets:read is unchanged — still implied by full
+  assert.equal(checkTokenRoute('GET', `/api/websites/${C}/credentials`, ['full']).ok, true);
+});
+
+test('credentials allowlist + access log are session-only', () => {
+  for (const [m, p] of [
+    ['GET', `/api/credentials/clients/${C}/allowlist`],
+    ['PUT', `/api/credentials/clients/${C}/allowlist`],
+    ['GET', '/api/credentials/access-log'],
+  ] as const) {
+    const d = checkTokenRoute(m, p, ['full', 'credentials:read', 'credentials:write']);
+    assert.equal(d.ok, false, `${m} ${p}`);
+    assert.equal(!d.ok && d.error, 'token_route_not_allowed');
   }
 });
 

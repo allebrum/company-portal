@@ -68,6 +68,14 @@ const EnvSchema = z.object({
   // password fields are encrypted at rest with AES-256-GCM. When unset, the
   // feature still works but credential save/reveal returns a 400.
   WEBSITES_CREDENTIALS_SECRET: z.string().min(16).optional(),
+  // Project / client credentials vault (Spaces > Credentials). A JSON keyset
+  // {"<kid>":"<32+ random bytes as hex or base64>"} plus the kid used for new
+  // writes. Older kids stay listed until `pnpm --filter @allebrum/api
+  // credentials:rotate --apply` has moved everything to the active one.
+  // Unset / invalid → the feature fails closed ("credentials not configured");
+  // the rest of the app is unaffected. Never logged.
+  CREDENTIALS_KEYS: z.string().optional(),
+  CREDENTIALS_ACTIVE_KID: z.string().optional(),
   // Forms builder embed token HMAC secret. Optional; falls back to
   // SESSION_SECRET when unset.
   FORMS_EMBED_SECRET: z.string().min(16).optional(),
