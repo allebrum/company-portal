@@ -266,6 +266,7 @@ Paths are relative to the base URL. Anything not listed returns
 | GET | `/clients` | `read` |
 | POST | `/clients` | `clients:write` |
 | PATCH | `/clients/:id` | `clients:write` (notes-only body → `notes:write`) |
+| GET | `/clients/portal/sender-status` | `read` |
 | GET | `/clients/:id/contacts` | `read` |
 | POST | `/clients/:id/contacts` | `clients:write` |
 | PATCH | `/clients/:id/contacts/:contactId` | `clients:write` |

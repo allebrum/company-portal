@@ -82,6 +82,7 @@ export const TOKEN_ROUTES: TokenRoute[] = [
     scopeFor: notesOr('clients:write'),
     note: 'A body with only spaceBlocks/spaceFiles needs notes:write instead (full Notes replace: edit/reorder/delete).',
   }),
+  r('GET', '/api/clients/portal/sender-status', 'read'),
   r('GET', '/api/clients/:id/contacts', 'read'),
   r('POST', '/api/clients/:id/contacts', 'clients:write'),
   r('PATCH', '/api/clients/:id/contacts/:contactId', 'clients:write'),

@@ -19,7 +19,8 @@ import {
 import { validate, getValidated } from '../middleware/validate.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { findContactByEmail, resendContactInvite } from '../services/clientContacts.js';
-import { consumeToken, type TokenSubject } from '../auth/tokens.js';
+import { consumeToken, inspectToken, type TokenSubject } from '../auth/tokens.js';
+import { exchangePortalToken } from '../services/portalExchange.js';
 import { requireClientPortalAuth } from '../middleware/requireClientPortalAuth.js';
 import { getSettings } from '../services/settings.js';
 import { withTenant } from '../tenancy/context.js';
@@ -134,32 +135,52 @@ portalRouter.post(
   async (req, res, next) => {
     try {
       const { slug, token } = getValidated<typeof PortalExchangeSchema._type>(req);
-      const subject: TokenSubject = await consumeToken(token, 'portal-magic');
-      if (subject.kind !== 'contact') {
-        res.status(400).json({ error: 'invalid_token' });
+      // Checks run BEFORE the token is consumed (see services/portalExchange.ts)
+      // so an unpublished portal or wrong slug never burns a good link.
+      const result = await exchangePortalToken({ slug, token }, {
+        inspect: async (raw) => {
+          const t = await inspectToken(raw, 'portal-magic');
+          return t.state === 'not_found' ? t : { state: t.state, contactId: t.contactId };
+        },
+        loadContact: async (id) => {
+          const [c] = await db
+            .select({ id: clientContacts.id, clientId: clientContacts.clientId })
+            .from(clientContacts)
+            .where(eq(clientContacts.id, id))
+            .limit(1);
+          return c ?? null;
+        },
+        loadClient: async (id) => {
+          const [c] = await db
+            .select({ id: clients.id, slug: clients.portalSlug, publishedAt: clients.portalPublishedAt })
+            .from(clients)
+            .where(eq(clients.id, id))
+            .limit(1);
+          return c ?? null;
+        },
+        consume: async (raw) => {
+          try {
+            const subject: TokenSubject = await consumeToken(raw, 'portal-magic');
+            return subject.kind === 'contact';
+          } catch {
+            return false;
+          }
+        },
+      });
+      if (!result.ok) {
+        res.status(400).json({ error: result.error });
         return;
       }
-
-      // Verify slug + contact line up — defense against a token issued
-      // for client A being used at client B's portal slug.
       const [contact] = await db
         .select()
         .from(clientContacts)
-        .where(eq(clientContacts.id, subject.contactId))
+        .where(eq(clientContacts.id, result.contactId))
         .limit(1);
       if (!contact) {
         res.status(400).json({ error: 'invalid_token' });
         return;
       }
-      const [client] = await db
-        .select({ id: clients.id, slug: clients.portalSlug, publishedAt: clients.portalPublishedAt })
-        .from(clients)
-        .where(and(eq(clients.id, contact.clientId), isNotNull(clients.portalPublishedAt)))
-        .limit(1);
-      if (!client || client.slug !== slug.toLowerCase()) {
-        res.status(400).json({ error: 'invalid_token' });
-        return;
-      }
+      const client = { slug: result.slug };
 
       // Record the acceptance + last-active timestamps. acceptedAt only
       // ever fills once; lastActiveAt rolls forward on every session set.
