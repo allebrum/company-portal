@@ -14,11 +14,14 @@ import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:cr
  * or another tenant makes decryption fail (GCM tag mismatch) instead of
  * silently revealing it in the wrong place.
  *
- * Keys come from a keyset (env CREDENTIALS_KEYS = JSON {"<kid>":"<key>"})
- * plus CREDENTIALS_ACTIVE_KID. New values are always written with the active
- * kid; older kids stay in the keyset until `credentials:rotate` has re-encrypted
- * everything onto the active key. Each master key must be ≥ 32 random bytes,
- * given as 64 hex chars or base64/base64url.
+ * Keys come from a keyset (env CREDENTIALS_KEYS). Prefer the plain format
+ * DigitalOcean's env editor accepts: `k1:<key>` or `k1:<key1>,k2:<key2>`.
+ * JSON `{"<kid>":"<key>"}` is also accepted (detected when the value starts
+ * with `{`). CREDENTIALS_ACTIVE_KID is the kid used for new writes; it can
+ * be omitted when the keyset has exactly one key. Older kids stay in the
+ * keyset until `credentials:rotate` has re-encrypted everything onto the
+ * active key. Each master key must be ≥ 32 random bytes, given as 64 hex
+ * chars or base64/base64url.
  *
  * Nothing in this module logs or returns key material.
  */
@@ -60,13 +63,7 @@ export function deriveKey(master: Buffer, kid: string): Buffer {
   return Buffer.from(hkdfSync('sha256', master, HKDF_SALT, Buffer.from(`hoppa:credentials:${kid}`, 'utf8'), 32));
 }
 
-/**
- * Parse + validate a keyset. Throws KeysetError (code only, never key bytes)
- * when anything is missing or malformed — callers treat that as "not
- * configured" and fail closed.
- */
-export function parseKeyset(keysJson: string | undefined, activeKid: string | undefined): Keyset {
-  if (!keysJson?.trim() || !activeKid?.trim()) throw new KeysetError('credentials_not_configured');
+function entriesFromJson(keysJson: string): Array<[string, string]> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(keysJson);
@@ -74,15 +71,60 @@ export function parseKeyset(keysJson: string | undefined, activeKid: string | un
     throw new KeysetError('credentials_keys_bad_json');
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new KeysetError('credentials_keys_bad_json');
-  const keys = new Map<string, Buffer>();
+  const entries: Array<[string, string]> = [];
   for (const [kid, value] of Object.entries(parsed as Record<string, unknown>)) {
-    if (!KID_RE.test(kid)) throw new KeysetError('credentials_bad_kid');
     if (typeof value !== 'string') throw new KeysetError('credentials_key_bad_encoding');
+    entries.push([kid, value]);
+  }
+  return entries;
+}
+
+/**
+ * Plain format: comma-separated `kid:key` pairs (e.g. `k1:BASE64KEY` or
+ * `k1:KEY1,k2:KEY2`). Split each pair on the first colon only so key
+ * material is never cut. Empty entries (including trailing commas) are
+ * ignored. Duplicate kids are rejected.
+ */
+function entriesFromPlain(raw: string): Array<[string, string]> {
+  const entries: Array<[string, string]> = [];
+  const seen = new Set<string>();
+  for (const part of raw.split(',')) {
+    const entry = part.trim();
+    if (!entry) continue;
+    const colon = entry.indexOf(':');
+    if (colon === -1) throw new KeysetError('credentials_keys_bad_json');
+    const kid = entry.slice(0, colon).trim();
+    const value = entry.slice(colon + 1).trim();
+    if (seen.has(kid)) throw new KeysetError('credentials_bad_kid');
+    seen.add(kid);
+    entries.push([kid, value]);
+  }
+  return entries;
+}
+
+/**
+ * Parse + validate a keyset. Throws KeysetError (code only, never key bytes)
+ * when anything is missing or malformed — callers treat that as "not
+ * configured" and fail closed. Accepts JSON or plain `kid:key` pairs.
+ * CREDENTIALS_ACTIVE_KID may be omitted when the keyset has exactly one key.
+ */
+export function parseKeyset(keysRaw: string | undefined, activeKid: string | undefined): Keyset {
+  if (!keysRaw?.trim()) throw new KeysetError('credentials_not_configured');
+  const trimmed = keysRaw.trim();
+  const pairs = trimmed.startsWith('{') ? entriesFromJson(trimmed) : entriesFromPlain(trimmed);
+  const keys = new Map<string, Buffer>();
+  for (const [kid, value] of pairs) {
+    if (!KID_RE.test(kid)) throw new KeysetError('credentials_bad_kid');
     const master = decodeMasterKey(value);
     if (master.length < 32) throw new KeysetError('credentials_key_too_short');
     keys.set(kid, deriveKey(master, kid));
   }
-  const kid = activeKid.trim();
+  if (keys.size === 0) throw new KeysetError('credentials_not_configured');
+  const kid = activeKid?.trim();
+  if (!kid) {
+    if (keys.size === 1) return { activeKid: [...keys.keys()][0]!, keys };
+    throw new KeysetError('credentials_active_kid_missing');
+  }
   if (!keys.has(kid)) throw new KeysetError('credentials_active_kid_missing');
   return { activeKid: kid, keys };
 }

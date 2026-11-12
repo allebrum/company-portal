@@ -5,8 +5,9 @@
  *   pnpm --filter @allebrum/api credentials:rotate --apply    # write
  *
  * Rotation procedure (docs/CREDENTIALS.md):
- *   1. Add a new kid to CREDENTIALS_KEYS (keep the old one), set
- *      CREDENTIALS_ACTIVE_KID to the new kid, deploy. New writes use it.
+ *   1. Add a new kid to CREDENTIALS_KEYS (keep the old one), e.g.
+ *      `k1:OLD,k2:NEW` (JSON `{"k1":"...","k2":"..."}` is also accepted),
+ *      set CREDENTIALS_ACTIVE_KID to the new kid, deploy. New writes use it.
  *   2. Run this with --apply (DigitalOcean App Platform → Console on the API
  *      component). It decrypts each value with its own kid and re-encrypts
  *      it with the active kid, row by row, with the same AAD binding.

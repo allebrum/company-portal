@@ -88,10 +88,50 @@ test('keyset validation fails closed with codes only (never key material)', () =
     return 'no error';
   };
   assert.equal(code(() => parseKeyset(undefined, 'k1')), 'credentials_not_configured');
-  assert.equal(code(() => parseKeyset(JSON.stringify({ k1: K1 }), undefined)), 'credentials_not_configured');
+  assert.equal(code(() => parseKeyset('', 'k1')), 'credentials_not_configured');
   assert.equal(code(() => parseKeyset('{not json', 'k1')), 'credentials_keys_bad_json');
   assert.equal(code(() => parseKeyset(JSON.stringify({ k1: K1 }), 'k9')), 'credentials_active_kid_missing');
   assert.equal(code(() => parseKeyset(JSON.stringify({ k1: randomBytes(16).toString('base64') }), 'k1')), 'credentials_key_too_short');
   assert.equal(code(() => parseKeyset(JSON.stringify({ 'bad kid!': K1 }), 'bad kid!')), 'credentials_bad_kid');
   assert.equal(code(() => parseKeyset(JSON.stringify([K1]), 'k1')), 'credentials_keys_bad_json');
+});
+
+test('plain kid:key format: single, multiple, whitespace, default active kid', () => {
+  const single = parseKeyset(`  k1:${K1}  `, undefined);
+  assert.equal(single.activeKid, 'k1');
+  assert.equal(decryptField(encryptField('plain single', ctx, single), ctx, ks1), 'plain single');
+
+  // trailing / empty entries ignored; spaces around kids, keys, and commas
+  const both = parseKeyset(` k1: ${K1} , , k2: ${K2} ,`, 'k2');
+  assert.equal(both.activeKid, 'k2');
+  const blob = encryptField('plain both', ctx, both);
+  assert.equal(kidOf(blob), 'k2');
+  assert.equal(decryptField(blob, ctx, ksBoth), 'plain both');
+
+  // JSON still works and is interchangeable with the plain format
+  const fromJson = parseKeyset(JSON.stringify({ k1: K1 }), 'k1');
+  assert.equal(decryptField(encryptField('json', ctx, fromJson), ctx, single), 'json');
+});
+
+test('plain keyset validation: duplicate kid, bad kid, missing active with multiple keys', () => {
+  const code = (fn: () => unknown) => {
+    try {
+      fn();
+    } catch (e) {
+      assert.ok(e instanceof KeysetError);
+      assert.ok(!e.message.includes(K1));
+      assert.ok(!e.message.includes(K2));
+      return e.code;
+    }
+    return 'no error';
+  };
+  assert.equal(code(() => parseKeyset(`k1:${K1},k1:${K2}`, 'k1')), 'credentials_bad_kid');
+  assert.equal(code(() => parseKeyset(`bad kid!:${K1}`, 'k1')), 'credentials_bad_kid');
+  assert.equal(code(() => parseKeyset(`k1:${K1},k2:${K2}`, undefined)), 'credentials_active_kid_missing');
+  assert.equal(code(() => parseKeyset(`k1:${K1},k2:${K2}`, '  ')), 'credentials_active_kid_missing');
+  assert.equal(code(() => parseKeyset(`k1:${K1},k2:${K2}`, 'k9')), 'credentials_active_kid_missing');
+  // one key and no / blank active kid defaults to that key
+  assert.equal(parseKeyset(`k1:${K1}`, undefined).activeKid, 'k1');
+  assert.equal(parseKeyset(`k1:${K1}`, '  ').activeKid, 'k1');
+  assert.equal(parseKeyset(JSON.stringify({ k1: K1 }), undefined).activeKid, 'k1');
 });
