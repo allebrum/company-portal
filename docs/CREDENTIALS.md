@@ -32,9 +32,12 @@ credential on its projects, grouped by project.
 
 - **Encryption:** AES-256-GCM per field (`secret`, `notes`, `totp`), fresh
   96-bit IV each time. Format `v2.<kid>.<iv>.<ciphertext>.<tag>`.
-- **Keys:** `CREDENTIALS_KEYS` (JSON keyset `{"<kid>":"<32+ random bytes, hex or base64>"}`)
-  and `CREDENTIALS_ACTIVE_KID`. The AES key per kid is derived with
-  HKDF-SHA256. This is a separate key from `WEBSITES_CREDENTIALS_SECRET`.
+- **Keys:** `CREDENTIALS_KEYS` (plain keyset `k1:<32+ random bytes, hex or base64>`,
+  or comma-separated `k1:<old>,k2:<new>`). JSON `{"<kid>":"<key>"}` is also
+  accepted. `CREDENTIALS_ACTIVE_KID` is the kid used for new writes; it can
+  be omitted when the keyset has exactly one key. The AES key per kid is
+  derived with HKDF-SHA256. This is a separate key from
+  `WEBSITES_CREDENTIALS_SECRET`.
 - **AAD binding:** each ciphertext is bound to `kid | tenant | row id | field`,
   so copying an encrypted value onto another row, field or workspace fails to
   decrypt instead of revealing it there.
@@ -83,17 +86,20 @@ Mitigations, in order of value:
 ## Setup
 
 1. Generate a key (on your own machine): `openssl rand -base64 32`
-2. DigitalOcean → Apps → the portal app → **Settings** → the **API / web
-   service component** → **Environment Variables** → add, both with
-   **Encrypt** ticked:
-   - `CREDENTIALS_KEYS` = `{"k1":"<paste the key>"}`
-   - `CREDENTIALS_ACTIVE_KID` = `k1`
+2. DigitalOcean → Apps → the portal app → **Settings** → the **API**
+   service → **Environment Variables** → add, both with **Encrypt** ticked:
+   - `CREDENTIALS_KEYS` = `k1:<paste the key>` (no curly braces — DigitalOcean's
+     env editor rejects JSON objects)
+   - `CREDENTIALS_ACTIVE_KID` = `k1` (optional when there is only one key)
 3. Save (this redeploys). Back up the key somewhere safe (a password manager):
    **if it is lost, stored credentials can't be recovered.**
 
+   JSON (`{"k1":"<key>"}`) is also accepted in `.env` files, but use the plain
+   `kid:key` format in DigitalOcean.
+
 ## Rotating the key
 
-1. Generate a new key, set `CREDENTIALS_KEYS` = `{"k1":"<old>","k2":"<new>"}`
+1. Generate a new key, set `CREDENTIALS_KEYS` = `k1:<old>,k2:<new>`
    and `CREDENTIALS_ACTIVE_KID` = `k2`; deploy. New writes use `k2`.
 2. In the API component's **Console**: `pnpm --filter @allebrum/api credentials:rotate`
    (dry run, counts only), then the same with `--apply`.
