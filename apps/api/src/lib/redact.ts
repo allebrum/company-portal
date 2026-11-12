@@ -37,6 +37,13 @@ export const ALWAYS_SECRET_KEYS: ReadonlySet<string> = new Set([
   'credentialPasswordEnc',
   'credential_username_enc',
   'credential_password_enc',
+  // credentials vault: encrypted secret / notes / TOTP seed columns
+  'secretEnc',
+  'notesEnc',
+  'totpEnc',
+  'secret_enc',
+  'notes_enc',
+  'totp_enc',
 ]);
 
 /**

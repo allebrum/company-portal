@@ -37,6 +37,12 @@ export const PERMISSIONS = [
   'websites.view',
   'websites.create',
   'websites.delete',
+  // Project / client credentials vault (server root passwords, DB logins…).
+  // Owner-only by default — NOT granted to Admin — and additionally grantable
+  // per client via the credentials allowlist (credential_client_access).
+  'credentials.view',
+  'credentials.reveal',
+  'credentials.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -57,6 +63,7 @@ export const PERMISSION_CATEGORIES: Record<string, Permission[]> = {
   Workspace: ['clients.manage', 'projects.manage', 'goals.manage', 'integrations.manage', 'media.manage'],
   'Client portal': ['portal.manage', 'tickets.manage'],
   Tools: ['forms.view', 'forms.create', 'forms.delete', 'websites.view', 'websites.create', 'websites.delete'],
+  Credentials: ['credentials.view', 'credentials.reveal', 'credentials.manage'],
 };
 
 export const PERMISSION_LABELS: Record<Permission, string> = {
@@ -85,7 +92,22 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'websites.view': 'View website memory bank',
   'websites.create': 'Create and edit websites',
   'websites.delete': 'Delete websites',
+  'credentials.view': 'See stored credentials on every client (values stay hidden)',
+  'credentials.reveal': 'Reveal stored credential passwords on every client',
+  'credentials.manage': 'Add, edit, delete credentials and choose who can see each client\'s credentials',
 };
+
+/**
+ * Sensitive permissions that are Owner-only by default. They are never part
+ * of the Admin starter group, and only someone who already holds
+ * `groups.manage` (Owner) may grant them through a group or a per-user
+ * override (see services/rbac.ts).
+ */
+export const OWNER_ONLY_PERMISSIONS: readonly Permission[] = [
+  'credentials.view',
+  'credentials.reveal',
+  'credentials.manage',
+];
 
 // Built-in starter groups (seeded; users get mapped onto these).
 export const SYSTEM_GROUPS = ['Owner', 'Admin', 'Bookkeeper', 'Member'] as const;
@@ -93,7 +115,7 @@ export type SystemGroup = (typeof SYSTEM_GROUPS)[number];
 
 export const SYSTEM_GROUP_PERMISSIONS: Record<SystemGroup, Permission[]> = {
   Owner: [...PERMISSIONS],
-  Admin: PERMISSIONS.filter((p) => p !== 'groups.manage'),
+  Admin: PERMISSIONS.filter((p) => p !== 'groups.manage' && !(OWNER_ONLY_PERMISSIONS as readonly string[]).includes(p)),
   // Bookkeepers chase missing time so payroll can run — give them the
   // dedicated on-behalf submit power (they can log + submit a teammate's
   // hours) without the broader edit/delete reach of an admin.

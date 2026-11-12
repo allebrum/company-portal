@@ -1,11 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { Bot, Copy, Trash2 } from 'lucide-react';
+import { Bot, Copy, KeyRound, Trash2 } from 'lucide-react';
 import {
   API_TOKEN_SCOPES,
   API_TOKEN_SCOPE_INFO,
   FULL_ACCESS_SCOPE,
+  FULL_EXCLUDED_SCOPES,
+  isFullExcludedScope,
   type ApiTokenScope,
   type ApiTokenSummary,
 } from '@allebrum/shared';
@@ -15,7 +17,9 @@ import { Checkbox, Field, Input, Select } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { useApiTokens, useCreateApiToken, useRevokeApiToken } from '@/hooks/useApiTokens';
 
-const CUSTOM_SCOPES = API_TOKEN_SCOPES.filter((s) => s !== FULL_ACCESS_SCOPE);
+const CUSTOM_SCOPES = API_TOKEN_SCOPES.filter((s) => s !== FULL_ACCESS_SCOPE && !isFullExcludedScope(s));
+/** Credentials-vault scopes: never part of Full access, always an explicit opt-in. */
+const SENSITIVE_SCOPES: ApiTokenScope[] = [...FULL_EXCLUDED_SCOPES];
 
 type Preset = 'full' | 'custom';
 
@@ -54,6 +58,7 @@ export function ApiTokensSection() {
   const [name, setName] = useState('');
   const [preset, setPreset] = useState<Preset>('custom');
   const [scopes, setScopes] = useState<ApiTokenScope[]>(['read', 'notes:write', 'time:write']);
+  const [sensitive, setSensitive] = useState<ApiTokenScope[]>([]);
   const [expires, setExpires] = useState<string>('90');
   const [secret, setSecret] = useState<string | null>(null);
 
@@ -64,11 +69,12 @@ export function ApiTokensSection() {
     try {
       const created = await create.mutateAsync({
         name: name.trim(),
-        scopes: preset === 'full' ? [FULL_ACCESS_SCOPE] : scopes,
+        scopes: preset === 'full' ? [FULL_ACCESS_SCOPE, ...sensitive] : [...scopes, ...sensitive],
         expiresInDays: expires === 'never' ? null : Number(expires),
       });
       setSecret(created.token);
       setName('');
+      setSensitive([]);
     } catch (e) {
       toast.error(e instanceof Error && e.message.includes('too_many_tokens') ? 'Token limit reached — revoke an old one first' : 'Could not create token');
     }
@@ -174,10 +180,30 @@ export function ApiTokensSection() {
                 ))}
               </div>
             )}
+            <div className="rounded-md border border-red-200 bg-red-50/60 p-3 space-y-2">
+              <div className="flex items-center gap-1.5 text-[12px] font-semibold text-red-900">
+                <KeyRound className="w-3.5 h-3.5" /> Project &amp; client credentials (never included in Full access)
+              </div>
+              <p className="text-[11px] text-red-800">
+                These let the bot read or change stored server, database and hosting passwords on clients you can
+                access. Anyone who gets this token gets those passwords. Only tick them for a bot that truly needs
+                them, give it an expiry, and check the access log.
+              </p>
+              {SENSITIVE_SCOPES.map((s) => (
+                <div key={s}>
+                  <Checkbox
+                    label={`${scopeLabel(s)} (${s})`}
+                    checked={sensitive.includes(s)}
+                    onChange={(v) => setSensitive((prev) => (v ? Array.from(new Set([...prev, s])) : prev.filter((x) => x !== s)))}
+                  />
+                  <div className="pl-6 text-[11px] text-gray-600">{API_TOKEN_SCOPE_INFO[s].description}</div>
+                </div>
+              ))}
+            </div>
             <Button
               variant="primary"
               onClick={submit}
-              disabled={!name.trim() || (preset === 'custom' && scopes.length === 0) || create.isPending}
+              disabled={!name.trim() || (preset === 'custom' && scopes.length + sensitive.length === 0) || create.isPending}
             >
               <Bot className="w-4 h-4" /> Create token
             </Button>
@@ -204,7 +230,9 @@ export function ApiTokensSection() {
                     </div>
                     <div className="text-[11px] text-gray-500">
                       <span className="font-mono">{t.prefix}…</span> ·{' '}
-                      {t.scopes.includes(FULL_ACCESS_SCOPE) ? 'Full access' : t.scopes.join(', ')} · created{' '}
+                      {t.scopes.includes(FULL_ACCESS_SCOPE)
+                        ? ['Full access', ...t.scopes.filter(isFullExcludedScope)].join(' + ')
+                        : t.scopes.join(', ')} · created{' '}
                       {day(t.createdAt)} · last used {t.lastUsedAt ? relTime(t.lastUsedAt) : 'never'}
                       {t.expiresAt ? ` · expires ${day(t.expiresAt)}` : ''}
                     </div>

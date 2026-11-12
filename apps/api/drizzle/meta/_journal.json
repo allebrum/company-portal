@@ -253,6 +253,13 @@
       "when": 1792823723907,
       "tag": "0035_api_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794458667652,
+      "tag": "0036_credentials_vault",
+      "breakpoints": true
     }
   ]
 }

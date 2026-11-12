@@ -1,4 +1,4 @@
-import { eq, asc, and } from 'drizzle-orm';
+import { eq, asc, and, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
   permissions,
@@ -9,10 +9,13 @@ import {
   type Group,
 } from '../db/schema.js';
 import { tenantEq, stampTenant } from '../tenancy/scope.js';
-import type {
-  CreateGroupInput,
-  UpdateGroupInput,
-  Permission,
+import { currentTenantId } from '../tenancy/context.js';
+import { getEffectivePermissions } from '../auth/permissions.js';
+import { groupChangeIsSensitive, overrideChangeIsSensitive } from './rbacGuard.js';
+import {
+  type CreateGroupInput,
+  type UpdateGroupInput,
+  type Permission,
 } from '@allebrum/shared';
 import { emit } from '../realtime/emit.js';
 import { EV } from '@allebrum/shared';
@@ -92,6 +95,18 @@ export async function setGroupPermissions(
   await appendActivity({ whoId, kind: 'group.permissions', target: `Permissions updated for a group` });
 }
 
+// ---- Owner-only permission guard ------------------------------------------
+// `users.manage` (Admin) may assign groups and per-user overrides, which
+// would otherwise let an Admin hand themselves Owner-only powers (e.g. the
+// credentials vault) by joining the Owner group or granting an override.
+// Any change that touches a sensitive permission requires the actor to hold
+// `groups.manage` (Owner by default) — the same gate as editing group perms.
+
+async function assertActorMayChangeSensitive(whoId: string): Promise<void> {
+  const perms = await getEffectivePermissions(whoId, currentTenantId());
+  if (!perms.has('groups.manage')) throw new HttpError(403, 'owner_only_permission_change');
+}
+
 export async function getUserGroupIds(userId: string): Promise<string[]> {
   const rows = await db
     .select({ groupId: userGroups.groupId })
@@ -101,6 +116,17 @@ export async function getUserGroupIds(userId: string): Promise<string[]> {
 }
 
 export async function setUserGroups(userId: string, groupIds: string[], whoId: string): Promise<void> {
+  const before = await getUserGroupIds(userId);
+  const touched = [...new Set([...before, ...groupIds])];
+  if (touched.length > 0) {
+    const gp = await db
+      .select({ groupId: groupPermissions.groupId, permissionKey: groupPermissions.permissionKey })
+      .from(groupPermissions)
+      .where(and(inArray(groupPermissions.groupId, touched), tenantEq(groupPermissions.tenantId)));
+    const permsByGroup = new Map<string, string[]>();
+    for (const r of gp) permsByGroup.set(r.groupId, [...(permsByGroup.get(r.groupId) ?? []), r.permissionKey]);
+    if (groupChangeIsSensitive(before, groupIds, permsByGroup)) await assertActorMayChangeSensitive(whoId);
+  }
   await db.transaction(async (tx) => {
     // Only clear THIS workspace's memberships — the user's groups in other
     // workspaces are untouched.
@@ -168,6 +194,8 @@ export async function setUserOverrides(
   overrides: { permission: Permission; effect: 'grant' | 'deny' }[],
   whoId: string,
 ): Promise<void> {
+  const before = await getUserOverrides(userId);
+  if (overrideChangeIsSensitive(before, overrides)) await assertActorMayChangeSensitive(whoId);
   await db.transaction(async (tx) => {
     await tx.delete(userPermissionOverrides).where(and(eq(userPermissionOverrides.userId, userId), tenantEq(userPermissionOverrides.tenantId)));
     if (overrides.length > 0) {

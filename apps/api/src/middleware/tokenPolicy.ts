@@ -1,4 +1,4 @@
-import { API_TOKEN_SCOPES, FULL_ACCESS_SCOPE, type ApiTokenScope } from '@allebrum/shared';
+import { API_TOKEN_SCOPES, FULL_ACCESS_SCOPE, isFullExcludedScope, type ApiTokenScope } from '@allebrum/shared';
 
 /**
  * Personal-access-token route policy (pure; no I/O so it's unit-testable).
@@ -241,6 +241,16 @@ export const TOKEN_ROUTES: TokenRoute[] = [
   r('PATCH', '/api/websites/:id', 'tools:write'),
   r('DELETE', '/api/websites/:id', 'tools:write'),
   r('GET', '/api/websites/:id/credentials', 'secrets:read'),
+
+  // ---- project / client credentials vault. These scopes are NOT implied by
+  // `full`; they must be picked explicitly. The owner's live role and the
+  // client allowlist still apply inside the routes.
+  r('GET', '/api/credentials/access', 'credentials:read'),
+  r('GET', '/api/credentials', 'credentials:read'),
+  r('POST', '/api/credentials/:id/reveal', 'credentials:read'),
+  r('POST', '/api/credentials', 'credentials:write'),
+  r('PATCH', '/api/credentials/:id', 'credentials:write'),
+  r('DELETE', '/api/credentials/:id', 'credentials:write'),
 ];
 
 export interface SessionOnlyRoute {
@@ -253,6 +263,7 @@ const AUTH = 'Sign-in / account security — needs a real browser session.';
 const TOKENS = 'Token management — a token can never mint, list or revoke tokens.';
 const OAUTH = 'Connecting third-party accounts / credentials — browser OAuth flow, session only.';
 const BILLING = 'Subscription billing — session only.';
+const CRED_ADMIN = 'Who can see a client\'s credentials, and the credentials access log — signed-in Owner only.';
 
 /** Staff routes a token can never reach, with the reason (shown in capabilities + docs). */
 export const SESSION_ONLY_ROUTES: SessionOnlyRoute[] = [
@@ -288,6 +299,9 @@ export const SESSION_ONLY_ROUTES: SessionOnlyRoute[] = [
   { method: 'POST', path: '/api/api-tokens', reason: TOKENS },
   { method: 'DELETE', path: '/api/api-tokens/:id', reason: TOKENS },
   { method: 'POST', path: '/api/billing/manage-link', reason: BILLING },
+  { method: 'GET', path: '/api/credentials/clients/:clientId/allowlist', reason: CRED_ADMIN },
+  { method: 'PUT', path: '/api/credentials/clients/:clientId/allowlist', reason: CRED_ADMIN },
+  { method: 'GET', path: '/api/credentials/access-log', reason: CRED_ADMIN },
   ...(
     [
       ['POST', '/api/integrations/:kind/connect'],
@@ -323,17 +337,24 @@ export const NON_STAFF_ROUTE_PREFIXES = [
   '/api/provisioning/',
 ];
 
-/** Every concrete scope a `full` token is treated as holding. */
-export const ALL_CONCRETE_SCOPES: ApiTokenScope[] = API_TOKEN_SCOPES.filter((s) => s !== FULL_ACCESS_SCOPE);
+/** Every concrete scope a `full` token is treated as holding (never the FULL_EXCLUDED_SCOPES). */
+export const ALL_CONCRETE_SCOPES: ApiTokenScope[] = API_TOKEN_SCOPES.filter(
+  (s) => s !== FULL_ACCESS_SCOPE && !isFullExcludedScope(s),
+);
 
-/** Expand stored scopes into the effective set (`full` → every scope). */
+/**
+ * Expand stored scopes into the effective set. `full` → every scope EXCEPT
+ * the sensitive FULL_EXCLUDED_SCOPES (credentials vault), which a token only
+ * holds when they were explicitly picked.
+ */
 export function effectiveScopes(scopes: readonly ApiTokenScope[]): ApiTokenScope[] {
-  if (scopes.includes(FULL_ACCESS_SCOPE)) return [...API_TOKEN_SCOPES];
-  return API_TOKEN_SCOPES.filter((s) => scopes.includes(s));
+  const full = scopes.includes(FULL_ACCESS_SCOPE);
+  return API_TOKEN_SCOPES.filter((s) => scopes.includes(s) || (full && !isFullExcludedScope(s)));
 }
 
 export function hasScope(scopes: readonly ApiTokenScope[], needed: ApiTokenScope): boolean {
-  return scopes.includes(FULL_ACCESS_SCOPE) || scopes.includes(needed);
+  if (scopes.includes(needed)) return true;
+  return scopes.includes(FULL_ACCESS_SCOPE) && !isFullExcludedScope(needed);
 }
 
 export type TokenRouteDecision =

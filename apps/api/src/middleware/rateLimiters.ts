@@ -106,3 +106,36 @@ export const meRouteLimiter = rateLimit({
   store: store('me'),
   handler: rateLimited,
 });
+
+/**
+ * Credentials vault — reveal: 20 per 10 minutes per user (session and token
+ * requests share the owner's bucket). Unlike the other limiters this one
+ * FAILS CLOSED: if Redis is unavailable, reveals are refused rather than
+ * unlimited. Hitting the limit is written to the credential access log.
+ */
+export function credentialRevealLimiter(onLimited: (req: Request) => Promise<void>) {
+  return rateLimit({
+    windowMs: 10 * 60_000,
+    limit: 20,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    keyGenerator: userOrIp,
+    passOnStoreError: false,
+    store: store('cred-reveal'),
+    handler: (req, res) => {
+      void onLimited(req).finally(() => res.status(429).json({ error: 'rate_limited' }));
+    },
+  });
+}
+
+/** Credentials vault — everything else: 120 requests per minute per user. */
+export const credentialsRouteLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 120,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: userOrIp,
+  passOnStoreError: true,
+  store: store('cred'),
+  handler: rateLimited,
+});
