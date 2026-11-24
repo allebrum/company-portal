@@ -1,11 +1,13 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
-import { and, count, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { and, count, desc, eq, inArray, isNull, max, or, sql } from 'drizzle-orm';
 import type {
   CreateFormInput,
   FormCaptchaProvider,
   FormDefinition,
   FormEventType,
   FormField,
+  FormsConfig,
+  FormTurnstileInput,
   FormFieldCondition,
   FormRow,
   FormSecurity,
@@ -29,7 +31,13 @@ import {
 import { env } from '../env.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { tenantEq, stampTenant } from '../tenancy/scope.js';
+import { currentTenantId } from '../tenancy/context.js';
 import { appendActivity } from './activity.js';
+import { loadKeyset } from './credentials.js';
+import { notifyNewSubmission, senderStatus } from './formNotifications.js';
+import { resolveNotifications } from './formNotifyRules.js';
+import { providerSiteKey, TURNSTILE_SECRET_FIELD, verifyCaptcha } from './formCaptcha.js';
+import { encryptField } from '../lib/crypto.js';
 
 type ScopeLink = { clientId: string | null; projectId: string | null };
 
@@ -49,7 +57,9 @@ type RowStats = {
   views?: number;
   interactions?: number;
   submissions?: number;
+  lastSubmissionAt?: string | null;
 };
+
 
 type PublicRequestContext = {
   origin: string | null;
@@ -68,45 +78,6 @@ function asFormSecurity(definition: FormDefinition): FormSecurity {
     captchaProvider: definition.security?.captchaProvider ?? null,
     honeypotFieldName: definition.security?.honeypotFieldName ?? 'company_website',
   };
-}
-
-function providerSiteKey(provider: FormCaptchaProvider | null): string | null {
-  if (provider === 'hcaptcha') return env.HCAPTCHA_SITE_KEY ?? null;
-  if (provider === 'recaptcha') return env.RECAPTCHA_SITE_KEY ?? null;
-  return null;
-}
-
-function providerSecret(provider: FormCaptchaProvider | null): string | null {
-  if (provider === 'hcaptcha') return env.HCAPTCHA_SECRET ?? null;
-  if (provider === 'recaptcha') return env.RECAPTCHA_SECRET ?? null;
-  return null;
-}
-
-async function verifyCaptcha(args: {
-  provider: FormCaptchaProvider;
-  token: string;
-  remoteIp: string | null;
-}): Promise<boolean> {
-  const secret = providerSecret(args.provider);
-  if (!secret) return false;
-  const body = new URLSearchParams();
-  body.set('secret', secret);
-  body.set('response', args.token);
-  if (args.remoteIp) body.set('remoteip', args.remoteIp);
-
-  const endpoint =
-    args.provider === 'hcaptcha'
-      ? 'https://hcaptcha.com/siteverify'
-      : 'https://www.google.com/recaptcha/api/siteverify';
-
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  });
-  if (!res.ok) return false;
-  const json = (await res.json()) as { success?: boolean };
-  return !!json.success;
 }
 
 function asComparableValue(value: unknown): string {
@@ -280,6 +251,9 @@ function rowToRow(row: Form, stats?: RowStats): FormRow {
     views: Number(stats?.views ?? 0),
     interactions: Number(stats?.interactions ?? 0),
     submissions: Number(stats?.submissions ?? 0),
+    lastSubmissionAt: stats?.lastSubmissionAt ?? null,
+    notifications: resolveNotifications(row.notifications),
+    turnstile: { siteKey: row.turnstileSiteKey ?? null, hasSecret: !!row.turnstileSecretEnc },
     embedToken: encodeToken({ v: 1, formId: row.id, tenantId: row.tenantId }),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -360,7 +334,11 @@ export async function listVisible(args: {
     .groupBy(formEvents.formId, formEvents.eventType);
 
   const submissionStatsRows = await db
-    .select({ formId: formSubmissions.formId, total: count(formSubmissions.id) })
+    .select({
+      formId: formSubmissions.formId,
+      total: count(formSubmissions.id),
+      last: max(formSubmissions.submittedAt),
+    })
     .from(formSubmissions)
     .where(inArray(formSubmissions.formId, formIds))
     .groupBy(formSubmissions.formId);
@@ -376,6 +354,7 @@ export async function listVisible(args: {
   for (const row of submissionStatsRows) {
     const current = statsByForm.get(row.formId) ?? {};
     current.submissions = Number(row.total ?? 0);
+    current.lastSubmissionAt = row.last ?? null;
     statsByForm.set(row.formId, current);
   }
 
@@ -413,15 +392,58 @@ export async function getRowForViewer(args: { id: string; viewerId: string }): P
   return rowToRow(row);
 }
 
+/**
+ * Map the write-only Turnstile input onto columns. The secret is encrypted
+ * with the credentials-vault keyset (bound to tenant + form id + field) and
+ * never leaves the server. Site key and secret must be set together.
+ */
+function turnstileColumns(args: {
+  id: string;
+  existing: Form | null;
+  input: FormTurnstileInput | undefined;
+}): { turnstileSiteKey?: string | null; turnstileSecretEnc?: string | null } {
+  if (!args.input) return {};
+  const out: { turnstileSiteKey?: string | null; turnstileSecretEnc?: string | null } = {};
+  const siteKeyGiven = args.input.siteKey !== undefined;
+  const nextSiteKey = siteKeyGiven ? (args.input.siteKey?.trim() || null) : (args.existing?.turnstileSiteKey ?? null);
+  if (siteKeyGiven) out.turnstileSiteKey = nextSiteKey;
+
+  let hasSecret = !!args.existing?.turnstileSecretEnc;
+  if (args.input.secret !== undefined) {
+    const secret = args.input.secret?.trim() || '';
+    if (!secret) {
+      out.turnstileSecretEnc = null;
+      hasSecret = false;
+    } else {
+      const { keyset } = loadKeyset();
+      if (!keyset) throw new HttpError(503, 'credentials_not_configured');
+      const tenantId = args.existing?.tenantId ?? currentTenantId();
+      out.turnstileSecretEnc = encryptField(secret, { tenantId, rowId: args.id, field: TURNSTILE_SECRET_FIELD }, keyset);
+      hasSecret = true;
+    }
+  }
+  // Clearing the site key clears the secret too (back to the env default).
+  if (!nextSiteKey && hasSecret && siteKeyGiven) {
+    out.turnstileSecretEnc = null;
+    hasSecret = false;
+  }
+  if (nextSiteKey && !hasSecret) throw new HttpError(400, 'form_turnstile_secret_required');
+  if (!nextSiteKey && hasSecret) throw new HttpError(400, 'form_turnstile_site_key_required');
+  return out;
+}
+
 export async function create(args: { ownerId: string; input: CreateFormInput }): Promise<FormRow> {
   const scope = await resolveScopeLink({
     clientId: args.input.clientId ?? null,
     projectId: args.input.projectId ?? null,
   });
 
+  const id = randomUUID();
+  const turnstile = turnstileColumns({ id, existing: null, input: args.input.turnstile });
   const [row] = await db
     .insert(forms)
     .values(stampTenant({
+      id,
       ownerUserId: args.ownerId,
       name: args.input.name,
       description: args.input.description ?? '',
@@ -430,6 +452,8 @@ export async function create(args: { ownerId: string; input: CreateFormInput }):
       visibility: args.input.visibility ?? 'workspace',
       status: args.input.status ?? 'active',
       definition: args.input.definition,
+      notifications: args.input.notifications ?? null,
+      ...turnstile,
     }))
     .returning();
   if (!row) throw new Error('insert_failed');
@@ -465,12 +489,17 @@ export async function update(args: {
     changed.push('clientId', 'projectId');
   }
 
-  for (const k of ['name', 'description', 'visibility', 'status', 'definition'] as const) {
+  for (const k of ['name', 'description', 'visibility', 'status', 'definition', 'notifications'] as const) {
     const v = args.patch[k];
     if (v !== undefined) {
       upd[k] = v;
       changed.push(k);
     }
+  }
+
+  if (args.patch.turnstile !== undefined) {
+    Object.assign(upd, turnstileColumns({ id: existing.id, existing, input: args.patch.turnstile }));
+    changed.push('turnstile');
   }
 
   if (changed.length === 0) return rowToRow(existing);
@@ -737,7 +766,7 @@ export async function getPublicForm(args: { token: string; ctx: PublicRequestCon
     definition,
     security: {
       captchaProvider,
-      captchaSiteKey: captchaProvider ? providerSiteKey(captchaProvider) : null,
+      captchaSiteKey: captchaProvider ? providerSiteKey(captchaProvider, row) : null,
       honeypotFieldName: security.honeypotFieldName,
     },
   };
@@ -794,7 +823,7 @@ export async function submitPublicForm(args: {
     if (!token) {
       return { ok: false, errors: { __form: 'Please complete the captcha challenge.' } };
     }
-    const validCaptcha = await verifyCaptcha({ provider, token, remoteIp: args.ip });
+    const validCaptcha = await verifyCaptcha({ provider, token, remoteIp: args.ip, row });
     if (!validCaptcha) {
       return { ok: false, errors: { __form: 'Captcha verification failed. Please try again.' } };
     }
@@ -807,8 +836,8 @@ export async function submitPublicForm(args: {
 
   const normalized = normalizeAnswers(definition, args.input.answers);
 
-  await db.transaction(async (tx) => {
-    await tx.insert(formSubmissions).values({
+  const submittedAt = await db.transaction(async (tx) => {
+    const [inserted] = await tx.insert(formSubmissions).values({
       tenantId: row.tenantId,
       formId: row.id,
       sessionId: args.input.sessionId,
@@ -816,7 +845,7 @@ export async function submitPublicForm(args: {
       ip: args.ip,
       userAgent: args.userAgent,
       referer: args.referer,
-    });
+    }).returning({ submittedAt: formSubmissions.submittedAt });
 
     await tx.insert(formEvents).values({
       tenantId: row.tenantId,
@@ -828,7 +857,27 @@ export async function submitPublicForm(args: {
       userAgent: args.userAgent,
       referer: args.referer,
     });
+    return inserted?.submittedAt ?? new Date().toISOString();
   });
 
+  // Activity feed + email. Fire-and-forget: never delays or fails the
+  // visitor's submit (notifyNewSubmission swallows its own errors).
+  void notifyNewSubmission({ form: row, answers: normalized, submittedAt, referer: args.referer });
+
   return { ok: true, message: definition.successMessage };
+}
+
+/** Settings-UI status: sender connected, which captcha keys exist. */
+export async function getFormsConfig(): Promise<FormsConfig> {
+  const sender = await senderStatus();
+  return {
+    senderConnected: sender.connected,
+    senderName: sender.name,
+    captcha: {
+      hcaptcha: !!(env.HCAPTCHA_SITE_KEY && env.HCAPTCHA_SECRET),
+      recaptcha: !!(env.RECAPTCHA_SITE_KEY && env.RECAPTCHA_SECRET),
+      turnstileDefault: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET),
+    },
+    secretStorageReady: !!loadKeyset().keyset,
+  };
 }

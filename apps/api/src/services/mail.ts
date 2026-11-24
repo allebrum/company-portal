@@ -1,5 +1,6 @@
 import { sendAsUser } from './gmail.js';
 import { HttpError } from '../middleware/errorHandler.js';
+import type { FormAnswerLine } from './formNotifyRules.js';
 
 /**
  * Thin transactional-mail layer on top of the Gmail OAuth integration.
@@ -23,6 +24,7 @@ async function send(
   html: string,
   text: string,
   cc?: string | null,
+  replyTo?: string | null,
 ): Promise<void> {
   const rcpt = cc ? `to=${to} cc=${cc}` : `to=${to}`;
   if (!senderUserId) {
@@ -31,7 +33,7 @@ async function send(
     return;
   }
   try {
-    await sendAsUser(senderUserId, { to, cc, subject, html, text });
+    await sendAsUser(senderUserId, { to, cc, replyTo, subject, html, text });
   } catch (e) {
     // 412 = sender hasn't connected Gmail yet. Log so the admin sees the
     // action URL and can hand-deliver while they finish the OAuth flow.
@@ -527,6 +529,99 @@ export async function sendApprovalReminderEmail(args: {
     </p>
   `);
   await send(args.senderUserId, args.to, subject, html, text, args.cc);
+}
+
+/**
+ * Forms — new-submission notification to staff. One email per accepted
+ * submission (mode "immediate"). Sent from the workspace system sender;
+ * log-and-noop fallback when it isn't connected. Reply-To is the submitter's
+ * email answer when the form has one, so "Reply" goes straight to the lead.
+ */
+
+function answerRowsHtml(lines: FormAnswerLine[]): string {
+  return lines
+    .map(
+      (l) => `<tr>
+        <td style="padding:6px 12px 6px 0;vertical-align:top;color:#6b7280;font-size:13px;white-space:nowrap;">${esc(l.label)}</td>
+        <td style="padding:6px 0;vertical-align:top;color:#111;font-size:14px;white-space:pre-wrap;word-break:break-word;">${esc(l.value || '—')}</td>
+      </tr>`,
+    )
+    .join('');
+}
+
+export async function sendFormSubmissionEmail(args: {
+  senderUserId: string | null;
+  to: string;
+  replyTo?: string | null;
+  formName: string;
+  submittedAt: string;
+  lines: FormAnswerLine[];
+  pageUrl?: string | null;
+  formsUrl: string;
+}): Promise<void> {
+  const subject = `New submission: ${args.formName}`;
+  const when = new Date(args.submittedAt).toUTCString();
+  const text = [
+    `New submission on "${args.formName}" (${when})`,
+    ...(args.pageUrl ? [`Page: ${args.pageUrl}`] : []),
+    '',
+    ...args.lines.map((l) => `${l.label}: ${l.value || '—'}`),
+    '',
+    `View all submissions: ${args.formsUrl}`,
+  ].join('\n');
+  const html = wrap(`
+    <h2 style="margin:0 0 6px 0;font-size:20px;color:#111;">New submission: ${esc(args.formName)}</h2>
+    <p style="margin:0 0 16px 0;font-size:13px;color:#6b7280;">${esc(when)}${args.pageUrl ? ` · from <span style="word-break:break-all;">${esc(args.pageUrl)}</span>` : ''}</p>
+    <table cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:0 0 20px 0;">${answerRowsHtml(args.lines)}</table>
+    ${button(args.formsUrl, 'View submissions')}
+    <p style="margin:24px 0 0 0;font-size:12px;color:#9ca3af;">
+      You get this because you're a notification recipient on this form. Change it in the form's Notifications settings.
+    </p>
+  `);
+  await send(args.senderUserId, args.to, subject, html, text, null, args.replyTo ?? null);
+}
+
+/** Forms — daily digest of new submissions across a form (mode "digest"). */
+export async function sendFormDigestEmail(args: {
+  senderUserId: string | null;
+  to: string;
+  formName: string;
+  total: number;
+  submissions: { submittedAt: string; lines: FormAnswerLine[] }[];
+  formsUrl: string;
+}): Promise<void> {
+  const subject = `${args.total} new submission${args.total === 1 ? '' : 's'}: ${args.formName}`;
+  const shown = args.submissions;
+  const more = args.total - shown.length;
+  const text = [
+    `${args.total} new submission${args.total === 1 ? '' : 's'} on "${args.formName}" since the last digest.`,
+    '',
+    ...shown.flatMap((s) => [
+      `— ${new Date(s.submittedAt).toUTCString()}`,
+      ...s.lines.map((l) => `  ${l.label}: ${l.value || '—'}`),
+      '',
+    ]),
+    ...(more > 0 ? [`…and ${more} more.`, ''] : []),
+    `View all submissions: ${args.formsUrl}`,
+  ].join('\n');
+  const blocks = shown
+    .map(
+      (s) => `<div style="margin:0 0 14px 0;padding:12px 14px;border:1px solid #e5e7eb;border-radius:10px;">
+        <div style="font-size:12px;color:#6b7280;margin-bottom:6px;">${esc(new Date(s.submittedAt).toUTCString())}</div>
+        <table cellpadding="0" cellspacing="0" border="0" style="width:100%;">${answerRowsHtml(s.lines)}</table>
+      </div>`,
+    )
+    .join('');
+  const html = wrap(`
+    <h2 style="margin:0 0 12px 0;font-size:20px;color:#111;">${esc(subject)}</h2>
+    ${blocks}
+    ${more > 0 ? `<p style="margin:0 0 16px 0;color:#374151;">…and ${more} more.</p>` : ''}
+    ${button(args.formsUrl, 'View submissions')}
+    <p style="margin:24px 0 0 0;font-size:12px;color:#9ca3af;">
+      Daily digest — change it in the form's Notifications settings.
+    </p>
+  `);
+  await send(args.senderUserId, args.to, subject, html, text);
 }
 
 // ---- HTML helpers ----

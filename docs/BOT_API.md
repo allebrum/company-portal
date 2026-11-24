@@ -434,6 +434,7 @@ Paths are relative to the base URL. Anything not listed returns
 | PATCH | `/qr/:id` | `tools:write` |
 | DELETE | `/qr/:id` | `tools:write` |
 | GET | `/forms` | `read` |
+| GET | `/forms/config` | `read` |
 | GET | `/forms/:id/submissions` | `read` |
 | GET | `/forms/:id/submissions.csv` | `read` |
 | GET | `/forms/:id/embed-snippet` | `read` |

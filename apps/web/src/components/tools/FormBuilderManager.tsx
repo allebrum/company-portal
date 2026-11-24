@@ -2,31 +2,42 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
+  ArrowLeft,
+  Bell,
+  ChevronRight,
   Copy,
   FileSpreadsheet,
   FormInput,
   GripVertical,
   Link2,
+  Pencil,
   Plus,
   Save,
+  ShieldCheck,
   Trash2,
 } from 'lucide-react';
+import { DEFAULT_FORM_NOTIFICATIONS } from '@allebrum/shared';
 import type {
+  FormCaptchaProvider,
   FormDefinition,
   FormField,
   FormFieldCondition,
   FormFieldType,
+  FormNotifications,
+  FormNotifyMode,
   FormRow,
   FormStatus,
   FormVisibility,
 } from '@allebrum/shared';
-import { useClients, useProjects } from '@/hooks/useResources';
+import { useClients, useProjects, useUsers } from '@/hooks/useResources';
 import {
   formSubmissionsCsvUrl,
   useCreateForm,
   useDeleteForm,
   useFormEmbedSnippet,
   useForms,
+  useFormsConfig,
   useFormSubmissions,
   useUpdateForm,
 } from '@/hooks/useForms';
@@ -208,7 +219,7 @@ export function FormBuilderManager({
   allowProjectLinkPicker = false,
   createHeading = 'New form',
   emptyTitle = 'No forms yet',
-  emptyHint = 'Build one above and copy the embed snippet into your website.',
+  emptyHint = 'Click “Add form” to build one, then copy the embed snippet into your website.',
   onOpenClient,
   onOpenProject,
   canCreate = true,
@@ -217,6 +228,8 @@ export function FormBuilderManager({
   const { data: clients = [] } = useClients();
   const { data: projects = [] } = useProjects();
   const forms = useForms({ clientId, projectId });
+  const formsConfig = useFormsConfig(canCreate);
+  const { data: users = [] } = useUsers();
   const create = useCreateForm();
   const update = useUpdateForm();
   const remove = useDeleteForm();
@@ -234,6 +247,15 @@ export function FormBuilderManager({
   const [selectedProjectId, setSelectedProjectId] = useState(projectId ?? '');
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [previewAnswers, setPreviewAnswers] = useState<Record<string, unknown>>({});
+  // The page opens on the forms list; the builder only shows after
+  // "Add form" or clicking a form.
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [notifications, setNotifications] = useState<FormNotifications>({ ...DEFAULT_FORM_NOTIFICATIONS });
+  const [extraEmailsText, setExtraEmailsText] = useState('');
+  // Per-form Turnstile keys. The secret is write-only: blank = keep what's stored.
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState('');
+  const [turnstileSecret, setTurnstileSecret] = useState('');
+  const [turnstileHasSecret, setTurnstileHasSecret] = useState(false);
 
   const [submissionsFormId, setSubmissionsFormId] = useState<string | null>(null);
   const [embedFormId, setEmbedFormId] = useState<string | null>(null);
@@ -272,6 +294,21 @@ export function FormBuilderManager({
     setEditingId(null);
     setSelectedClientId(clientId ?? '');
     setSelectedProjectId(projectId ?? '');
+    setNotifications({ ...DEFAULT_FORM_NOTIFICATIONS });
+    setExtraEmailsText('');
+    setTurnstileSiteKey('');
+    setTurnstileSecret('');
+    setTurnstileHasSecret(false);
+  };
+
+  const closeEditor = () => {
+    reset();
+    setEditorOpen(false);
+  };
+
+  const openNew = () => {
+    reset();
+    setEditorOpen(true);
   };
 
   const updateField = (fieldId: string, updater: (field: FormField) => FormField) => {
@@ -317,6 +354,23 @@ export function FormBuilderManager({
     const targetProjectId = projectId ?? (allowProjectLinkPicker ? (selectedProjectId || null) : (selectedProjectId || null));
     const targetClientId = targetProjectId ? null : (selectedClientId || clientId || null);
 
+    const extraEmails = parseLines(extraEmailsText.replace(/[,;]/g, '\n'));
+    const badEmail = extraEmails.find((e) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+    if (badEmail) {
+      toast.error(`“${badEmail}” isn't a valid email address`);
+      return;
+    }
+    const siteKey = turnstileSiteKey.trim();
+    const secret = turnstileSecret.trim();
+    if (siteKey && !secret && !turnstileHasSecret) {
+      toast.error('Add the Turnstile secret key for this site key (or clear both to use the server default).');
+      return;
+    }
+    if (!siteKey && secret) {
+      toast.error('Add the Turnstile site key that goes with this secret.');
+      return;
+    }
+
     const payload = {
       name: name.trim(),
       description: description.trim(),
@@ -325,6 +379,9 @@ export function FormBuilderManager({
       clientId: targetClientId,
       projectId: targetProjectId,
       definition: draft,
+      notifications: { ...notifications, emails: extraEmails },
+      // Secret omitted = keep the stored one; cleared site key clears both.
+      turnstile: secret ? { siteKey: siteKey || null, secret } : { siteKey: siteKey || null },
     };
 
     try {
@@ -335,9 +392,14 @@ export function FormBuilderManager({
         await create.mutateAsync(payload);
         toast.success('Form created');
       }
-      reset();
+      closeEditor();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Save failed');
+      const msg = e instanceof Error ? e.message : 'Save failed';
+      toast.error(
+        msg === 'credentials_not_configured'
+          ? 'Can’t store the Turnstile secret: the server’s CREDENTIALS_KEYS isn’t configured.'
+          : msg,
+      );
     }
   };
 
@@ -352,7 +414,26 @@ export function FormBuilderManager({
     setDraft(row.definition);
     setSelectedFieldId(row.definition.fields[0]?.id ?? null);
     setPreviewAnswers({});
+    const n = row.notifications ?? DEFAULT_FORM_NOTIFICATIONS;
+    setNotifications({ mode: n.mode, userIds: [...n.userIds], emails: [...n.emails] });
+    setExtraEmailsText(n.emails.join('\n'));
+    setTurnstileSiteKey(row.turnstile?.siteKey ?? '');
+    setTurnstileSecret('');
+    setTurnstileHasSecret(!!row.turnstile?.hasSecret);
+    setEditorOpen(true);
   };
+
+  // Deep link from notification emails: /tools/forms?form=<id> opens that
+  // form's submissions once the list has loaded.
+  useEffect(() => {
+    if (!forms.data || typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    const id = url.searchParams.get('form');
+    if (!id) return;
+    if (forms.data.some((f) => f.id === id)) setSubmissionsFormId(id);
+    url.searchParams.delete('form');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [forms.data]);
 
   const archive = async (row: FormRow) => {
     const ok = await confirmDialog({
@@ -365,7 +446,7 @@ export function FormBuilderManager({
     try {
       await remove.mutateAsync(row.id);
       toast.success('Form archived');
-      if (editingId === row.id) reset();
+      if (editingId === row.id) closeEditor();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Archive failed');
     }
@@ -388,11 +469,49 @@ export function FormBuilderManager({
     });
   }, [draft.fields, previewAnswers]);
 
+  const cfg = formsConfig.data;
+  const captchaProvider = draft.security?.captchaProvider ?? null;
+  const editingRow = editingId ? forms.data?.find((f) => f.id === editingId) ?? null : null;
+  const activeUsers = users.filter((u) => u.status === 'active');
+  const captchaKeysMissing =
+    !!draft.security?.requireCaptcha &&
+    !!cfg &&
+    ((captchaProvider === 'hcaptcha' && !cfg.captcha.hcaptcha) ||
+      (captchaProvider === 'recaptcha' && !cfg.captcha.recaptcha) ||
+      (captchaProvider === 'turnstile' && !turnstileSiteKey.trim() && !cfg.captcha.turnstileDefault));
+
+  const setNotifyMode = (mode: FormNotifyMode) => setNotifications((n) => ({ ...n, mode }));
+  const toggleRecipient = (id: string, on: boolean) =>
+    setNotifications((n) => ({
+      ...n,
+      userIds: on ? [...new Set([...n.userIds, id])] : n.userIds.filter((x) => x !== id),
+    }));
+
   return (
     <div className="space-y-6">
-      {canCreate && (
+      {canCreate && editorOpen && (
       <div className="rounded-2xl border border-gray-200 bg-white p-5 space-y-4">
-        <div className="text-[11px] uppercase tracking-widest font-bold text-gray-500">{createHeading}</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={closeEditor} title="Back to forms">
+            <ArrowLeft className="w-4 h-4" />
+            Forms
+          </Button>
+          <div className="text-[11px] uppercase tracking-widest font-bold text-gray-500">
+            {editingRow ? `Edit · ${editingRow.name}` : createHeading}
+          </div>
+          {editingRow && (
+            <div className="ml-auto flex items-center gap-1">
+              <Button variant="ghost" size="sm" onClick={() => setEmbedFormId(editingRow.id)}>
+                <Link2 className="w-4 h-4" />
+                Embed
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setSubmissionsFormId(editingRow.id)}>
+                <FileSpreadsheet className="w-4 h-4" />
+                Submissions · {editingRow.submissions}
+              </Button>
+            </div>
+          )}
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <Field label="Form name" required>
@@ -645,16 +764,128 @@ export function FormBuilderManager({
                         ...d,
                         security: {
                           ...d.security,
-                          captchaProvider: (e.target.value || null) as 'hcaptcha' | 'recaptcha' | null,
+                          captchaProvider: (e.target.value || null) as FormCaptchaProvider | null,
                         },
                       }))
                     }
                   >
                     <option value="">Select provider</option>
-                    <option value="hcaptcha">hCaptcha</option>
+                    <option value="turnstile">Cloudflare Turnstile</option>
                     <option value="recaptcha">reCAPTCHA</option>
+                    <option value="hcaptcha">hCaptcha</option>
                   </Select>
                 </Field>
+              )}
+              {draft.security?.requireCaptcha && captchaProvider === 'turnstile' && (
+                <div className="space-y-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
+                  <Field label="Turnstile site key">
+                    <Input
+                      value={turnstileSiteKey}
+                      onChange={(e) => setTurnstileSiteKey(e.target.value)}
+                      placeholder={cfg?.captcha.turnstileDefault ? 'Blank = use the server default widget' : '0x4AAAAAAA…'}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  </Field>
+                  <Field label="Turnstile secret key">
+                    <Input
+                      type="password"
+                      value={turnstileSecret}
+                      onChange={(e) => setTurnstileSecret(e.target.value)}
+                      placeholder={turnstileHasSecret ? '•••••••• stored — leave blank to keep' : 'Paste the secret key'}
+                      autoComplete="new-password"
+                      spellCheck={false}
+                    />
+                  </Field>
+                  {turnstileHasSecret && (
+                    <div className="flex items-center gap-1.5 text-xs text-emerald-700">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      Secret stored encrypted. It&apos;s never shown again.
+                    </div>
+                  )}
+                  {cfg && !cfg.secretStorageReady && (
+                    <div className="text-xs text-amber-700">
+                      Per-form secrets need the server&apos;s CREDENTIALS_KEYS to be set.
+                      {cfg.captcha.turnstileDefault ? ' Leave both blank to use the server default.' : ''}
+                    </div>
+                  )}
+                  <p className="text-xs text-gray-500">
+                    In Cloudflare → Turnstile, add <strong>every website domain this form is embedded on</strong> to
+                    the widget&apos;s Hostnames. The widget renders on that page, so a missing domain makes the
+                    challenge fail.
+                  </p>
+                </div>
+              )}
+              {captchaKeysMissing && (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>
+                    {captchaProvider === 'turnstile'
+                      ? 'No Turnstile keys yet: add this form’s site + secret key above (or set TURNSTILE_SITE_KEY / TURNSTILE_SECRET on the server).'
+                      : `The server has no ${captchaProvider === 'hcaptcha' ? 'hCaptcha' : 'reCAPTCHA'} keys configured, so submissions will fail the captcha check.`}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-gray-200 p-4 bg-white space-y-3">
+              <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-gray-500 font-bold">
+                <Bell className="w-3.5 h-3.5" />
+                Notifications
+              </div>
+              <Field label="When someone submits">
+                <Select value={notifications.mode} onChange={(e) => setNotifyMode(e.target.value as FormNotifyMode)}>
+                  <option value="immediate">Email me right away (one email per submission)</option>
+                  <option value="digest">Daily digest (8am workspace time)</option>
+                  <option value="off">Don&apos;t email</option>
+                </Select>
+              </Field>
+              {notifications.mode !== 'off' && (
+                <>
+                  {activeUsers.length > 0 && (
+                    <Field label="Team recipients" as="div">
+                      <div className="max-h-40 overflow-auto rounded-lg border border-gray-100 divide-y divide-gray-50">
+                        {activeUsers.map((u) => (
+                          <label key={u.id} className="flex items-center gap-2 px-2.5 py-1.5 text-sm text-gray-700">
+                            <input
+                              type="checkbox"
+                              checked={notifications.userIds.includes(u.id)}
+                              onChange={(e) => toggleRecipient(u.id, e.target.checked)}
+                            />
+                            <span className="truncate">{u.name}</span>
+                            <span className="ml-auto text-xs text-gray-400 truncate">{u.email}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </Field>
+                  )}
+                  <Field label="Other emails (one per line)">
+                    <Textarea
+                      rows={2}
+                      value={extraEmailsText}
+                      onChange={(e) => setExtraEmailsText(e.target.value)}
+                      placeholder="sales@example.com"
+                    />
+                  </Field>
+                  {notifications.userIds.length === 0 && !extraEmailsText.trim() && (
+                    <p className="text-xs text-gray-500">No one picked: the form owner gets the emails.</p>
+                  )}
+                  <p className="text-xs text-gray-500">
+                    Spam caught by the honeypot or a failed captcha is rejected and never emailed.
+                  </p>
+                </>
+              )}
+              {cfg && !cfg.senderConnected && notifications.mode !== 'off' && (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>
+                    {cfg.senderName
+                      ? `The workspace system sender (${cfg.senderName}) hasn't connected Gmail`
+                      : 'No workspace system sender is set'}
+                    , so notification emails won&apos;t go out. Set one in{' '}
+                    <a href="/admin?adminTab=integrations" className="font-semibold underline">Admin → Integrations → Gmail</a>.
+                  </span>
+                </div>
               )}
             </div>
           </div>
@@ -746,7 +977,7 @@ export function FormBuilderManager({
         )}
 
         <div className="flex items-center justify-end gap-2">
-          {editingId && <Button variant="ghost" onClick={reset}>Cancel edit</Button>}
+          <Button variant="ghost" onClick={closeEditor}>Cancel</Button>
           <Button onClick={save} disabled={create.isPending || update.isPending}>
             <Save className="w-4 h-4" />
             {editingId ? 'Save changes' : 'Create form'}
@@ -755,14 +986,29 @@ export function FormBuilderManager({
       </div>
       )}
 
+      {!editorOpen && (
       <div>
-        <div className="text-[11px] uppercase tracking-widest font-bold text-gray-500 mb-2">My forms · {forms.data?.length ?? 0}</div>
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="text-[11px] uppercase tracking-widest font-bold text-gray-500">Forms · {forms.data?.length ?? 0}</div>
+          {canCreate && (
+            <Button size="sm" onClick={openNew}>
+              <Plus className="w-4 h-4" />
+              Add form
+            </Button>
+          )}
+        </div>
         {!forms.data ? (
           <div className="rounded-xl bg-gray-100 animate-pulse h-24" />
         ) : forms.data.length === 0 ? (
           <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-8 text-center">
             <div className="font-semibold text-gray-700">{emptyTitle}</div>
             <p className="mt-1 text-sm text-gray-500">{emptyHint}</p>
+            {canCreate && (
+              <Button size="sm" className="mt-3" onClick={openNew}>
+                <Plus className="w-4 h-4" />
+                Add form
+              </Button>
+            )}
           </div>
         ) : (
           <ul className="rounded-2xl border border-gray-200 bg-white divide-y divide-gray-100">
@@ -773,7 +1019,11 @@ export function FormBuilderManager({
               const projectName = linkedProject?.name ?? null;
 
               return (
-                <li key={form.id} className="p-4">
+                <li
+                  key={form.id}
+                  className="p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                  onClick={() => (canCreate ? startEdit(form) : setSubmissionsFormId(form.id))}
+                >
                   <div className="flex items-start gap-3">
                     <span className="w-9 h-9 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
                       <FormInput className="w-4 h-4" />
@@ -781,7 +1031,7 @@ export function FormBuilderManager({
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <div className="font-semibold text-gray-900 truncate">{form.name}</div>
-                        <span className="text-[10px] uppercase tracking-wider rounded-full px-2 py-0.5 bg-gray-100 text-gray-600">{form.status}</span>
+                        <span className={`text-[10px] uppercase tracking-wider rounded-full px-2 py-0.5 ${form.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>{form.status}</span>
                         <span className="text-[10px] uppercase tracking-wider rounded-full px-2 py-0.5 bg-indigo-50 text-indigo-700">{form.visibility}</span>
                       </div>
                       {form.description && <div className="text-xs text-gray-500 mt-1">{form.description}</div>}
@@ -790,7 +1040,10 @@ export function FormBuilderManager({
                         {clientName && (
                           <button
                             type="button"
-                            onClick={() => resolvedClientId && onOpenClient?.(resolvedClientId)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (resolvedClientId) onOpenClient?.(resolvedClientId);
+                            }}
                             disabled={!resolvedClientId || !onOpenClient}
                             className="inline-flex items-center rounded-full px-2 py-0.5 bg-indigo-50 text-indigo-700 font-semibold uppercase tracking-wider hover:bg-indigo-100"
                           >
@@ -800,7 +1053,10 @@ export function FormBuilderManager({
                         {projectName && (
                           <button
                             type="button"
-                            onClick={() => form.projectId && onOpenProject?.(form.projectId)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (form.projectId) onOpenProject?.(form.projectId);
+                            }}
                             disabled={!form.projectId || !onOpenProject}
                             className="inline-flex items-center rounded-full px-2 py-0.5 bg-sky-50 text-sky-700 font-semibold uppercase tracking-wider hover:bg-sky-100"
                           >
@@ -812,14 +1068,20 @@ export function FormBuilderManager({
                         <span className="inline-flex items-center rounded-full px-2 py-0.5 bg-gray-100 text-gray-600 font-semibold uppercase tracking-wider">{form.submissions} submissions</span>
                       </div>
 
-                      <div className="mt-2 text-xs text-gray-500">Updated {relativeFromIso(form.updatedAt)}</div>
+                      <div className="mt-2 text-xs text-gray-500">
+                        {form.lastSubmissionAt ? `Last submission ${relativeFromIso(form.lastSubmissionAt)}` : 'No submissions yet'}
+                        {' · '}Updated {relativeFromIso(form.updatedAt)}
+                        {form.notifications?.mode === 'off' && ' · Email notifications off'}
+                        {form.notifications?.mode === 'digest' && ' · Daily digest'}
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-1">
-                      {canCreate && <Button variant="ghost" size="sm" onClick={() => startEdit(form)} title="Edit form"><Save className="w-4 h-4" /></Button>}
+                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                      {canCreate && <Button variant="ghost" size="sm" onClick={() => startEdit(form)} title="Edit form"><Pencil className="w-4 h-4" /></Button>}
                       <Button variant="ghost" size="sm" onClick={() => setEmbedFormId(form.id)} title="Embed snippet"><Link2 className="w-4 h-4" /></Button>
                       <Button variant="ghost" size="sm" onClick={() => setSubmissionsFormId(form.id)} title="View submissions"><FileSpreadsheet className="w-4 h-4" /></Button>
                       {canDelete && <Button variant="ghost" size="sm" onClick={() => archive(form)} title="Archive"><Trash2 className="w-4 h-4 text-red-600" /></Button>}
+                      <ChevronRight className="w-4 h-4 text-gray-300 hidden sm:block" />
                     </div>
                   </div>
                 </li>
@@ -828,10 +1090,14 @@ export function FormBuilderManager({
           </ul>
         )}
       </div>
+      )}
 
       <Modal open={!!embedFormId} onClose={() => setEmbedFormId(null)} title="Embed form" size="2xl">
         <div className="space-y-3">
           <p className="text-sm text-gray-600">Paste this snippet where the form should render. Runtime is namespaced and enforces allowed domains/paths.</p>
+          <p className="text-xs text-gray-500">
+            The form (and any captcha) renders directly on the host page, not in an iframe. Using Cloudflare Turnstile? Add the host site&apos;s domain to the widget&apos;s Hostnames in Cloudflare.
+          </p>
           <Textarea rows={6} value={embedSnippet.data?.snippet ?? ''} readOnly />
           {embedSnippet.isLoading && <div className="text-sm text-gray-500">Loading snippet...</div>}
           {embedSnippet.isError && <div className="text-sm text-red-600">Could not load embed snippet.</div>}

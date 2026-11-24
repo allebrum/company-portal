@@ -230,6 +230,7 @@ export const TOKEN_ROUTES: TokenRoute[] = [
   r('PATCH', '/api/qr/:id', 'tools:write'),
   r('DELETE', '/api/qr/:id', 'tools:write'),
   r('GET', '/api/forms', 'read'),
+  r('GET', '/api/forms/config', 'read'),
   r('GET', '/api/forms/:id/submissions', 'read'),
   r('GET', '/api/forms/:id/submissions.csv', 'read'),
   r('GET', '/api/forms/:id/embed-snippet', 'read'),

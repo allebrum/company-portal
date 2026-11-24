@@ -7,6 +7,7 @@ import type {
   CreateFormInput,
   FormRow,
   FormSubmissionRow,
+  FormsConfig,
   UpdateFormInput,
 } from '@allebrum/shared';
 
@@ -72,6 +73,16 @@ export function useFormEmbedSnippet(id: string | null) {
     queryKey: ['formEmbedSnippet', id ?? ''],
     queryFn: () => api.get<{ token: string; snippet: string; apiOrigin: string; webOrigin: string }>(`/forms/${id}/embed-snippet`),
     enabled: !!id,
+  });
+}
+
+/** Sender / captcha-key status for the form settings warnings. */
+export function useFormsConfig(enabled = true) {
+  return useQuery({
+    queryKey: ['formsConfig'],
+    queryFn: () => api.get<FormsConfig>('/forms/config'),
+    enabled,
+    staleTime: 60_000,
   });
 }
 

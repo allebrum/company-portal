@@ -879,6 +879,17 @@ export const forms = pgTable('forms', {
   visibility: text('visibility').notNull().default('workspace'),
   status: text('status').notNull().default('active'),
   definition: jsonb('definition').notNull().default(sql`'{}'::jsonb`),
+  // New-submission notification settings ({ mode, userIds, emails }). NULL =
+  // defaults (immediate email to the form owner) — see services/formNotifications.
+  notifications: jsonb('notifications'),
+  // Daily-digest watermark. Advanced with an optimistic compare-and-set so
+  // several API containers ticking at once can never double-send.
+  lastDigestAt: timestamp('last_digest_at', { withTimezone: true, mode: 'string' }),
+  // Optional per-form Cloudflare Turnstile widget (hostname allowlists differ
+  // per embedding site). Secret is AES-GCM encrypted with the credentials
+  // vault keyset (lib/crypto, field 'forms.turnstile_secret'); never returned.
+  turnstileSiteKey: text('turnstile_site_key'),
+  turnstileSecretEnc: text('turnstile_secret_enc'),
   createdAt: ts(),
   updatedAt: updTs(),
   archivedAt: timestamp('archived_at', { withTimezone: true, mode: 'string' }),
