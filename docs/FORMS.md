@@ -1,9 +1,47 @@
-# Embedded forms: notifications and captcha
+# Embedded forms
 
 Forms live under **Tools → Form Builder** (and on a client's or project's Forms tab).
 The page opens on the list of forms. **Add form** opens the builder for a new form,
 and clicking a form opens it for editing. From there you can also open its
 submissions and its embed snippet.
+
+## Field types and Field IDs
+
+The builder's **Field settings** panel edits the selected field. Each field has two
+identifiers:
+
+- **Field ID** (`field.id`) is the public submission key. Answers in the database, CSV
+  exports, and show-if / required-if rules use this id. It must be unique on the form,
+  start with a letter, and use only letters, numbers, underscores, or hyphens. Invalid
+  ids show an error as you type; they don't block typing, and changing the id does not
+  deselect the field.
+- A hidden, stable **key** is used only in the editor (React list keys and the
+  current selection). Existing forms that don't have a key yet get one when you open
+  them. Changing a Field ID remaps any conditions that pointed at the old id, so
+  show-if / required-if rules keep working. Already-stored submissions stay keyed by
+  whatever id they were submitted with.
+
+### Types
+
+| Type | Input | Validation and settings |
+|---|---|---|
+| Text / long text | `text` / textarea | Optional min/max length. |
+| Email | `email`, `inputmode=email`, `autocomplete=email` | Checked on the embed and again on the server. |
+| Phone | `tel`, `inputmode=tel`, `autocomplete=tel` | Format: **US** (default, formatted as the visitor types, stored as `(555) 123-4567`), **international** (8–15 digits), or **E.164** (stored like `+14155552671`). A leading US `1` is accepted. |
+| URL | `url`, `inputmode=url` | Must be `http://` or `https://`. |
+| Date | `date` | Optional earliest / latest dates (`YYYY-MM-DD`). |
+| Number | `number`, `inputmode=decimal` | Optional min, max, and step (values must land on the step from min, or from 0 if min isn't set). |
+| Dropdown / multiple choice / checkboxes | select / radio / checkbox | Options as before. |
+
+**Presets** (Full name, Email, Phone, Address) add one or more preconfigured fields
+with sensible ids, autocomplete, and placeholders. If an id is already used, a suffix
+is added (`phone_2`, …).
+
+The embed script (`/api/f/embed.js`) renders the matching `type` / `inputmode` /
+`autocomplete` attributes, formats US phone numbers as the visitor types, and shows
+friendly client-side errors before the request is sent. The API still validates and
+normalizes every accepted submission.
+
 
 ## New-submission notifications
 
