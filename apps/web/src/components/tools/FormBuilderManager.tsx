@@ -362,8 +362,15 @@ export function FormBuilderManager({
     }
     const siteKey = turnstileSiteKey.trim();
     const secret = turnstileSecret.trim();
+    if (draft.security?.requireCaptcha && draft.security?.captchaProvider === 'turnstile') {
+      const hasFormWidget = !!(siteKey && (secret || turnstileHasSecret));
+      if (!hasFormWidget && !formsConfig.data?.captcha.turnstile) {
+        toast.error('Connect Cloudflare Turnstile under Admin → Integrations first, or add a per-form widget below.');
+        return;
+      }
+    }
     if (siteKey && !secret && !turnstileHasSecret) {
-      toast.error('Add the Turnstile secret key for this site key (or clear both to use the server default).');
+      toast.error('Add the Turnstile secret key for this site key (or clear both to use the workspace widget).');
       return;
     }
     if (!siteKey && secret) {
@@ -397,8 +404,10 @@ export function FormBuilderManager({
       const msg = e instanceof Error ? e.message : 'Save failed';
       toast.error(
         msg === 'credentials_not_configured'
-          ? 'Can’t store the Turnstile secret: the server’s CREDENTIALS_KEYS isn’t configured.'
-          : msg,
+          ? "Can't store the Turnstile secret: the server's CREDENTIALS_KEYS isn't configured."
+          : msg === 'form_turnstile_not_connected'
+            ? 'Connect Cloudflare Turnstile under Admin → Integrations first, or add a per-form widget.'
+            : msg,
       );
     }
   };
@@ -478,7 +487,7 @@ export function FormBuilderManager({
     !!cfg &&
     ((captchaProvider === 'hcaptcha' && !cfg.captcha.hcaptcha) ||
       (captchaProvider === 'recaptcha' && !cfg.captcha.recaptcha) ||
-      (captchaProvider === 'turnstile' && !turnstileSiteKey.trim() && !cfg.captcha.turnstileDefault));
+      (captchaProvider === 'turnstile' && !turnstileSiteKey.trim() && !cfg.captcha.turnstile));
 
   const setNotifyMode = (mode: FormNotifyMode) => setNotifications((n) => ({ ...n, mode }));
   const toggleRecipient = (id: string, on: boolean) =>
@@ -777,52 +786,73 @@ export function FormBuilderManager({
                 </Field>
               )}
               {draft.security?.requireCaptcha && captchaProvider === 'turnstile' && (
-                <div className="space-y-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
-                  <Field label="Turnstile site key">
-                    <Input
-                      value={turnstileSiteKey}
-                      onChange={(e) => setTurnstileSiteKey(e.target.value)}
-                      placeholder={cfg?.captcha.turnstileDefault ? 'Blank = use the server default widget' : '0x4AAAAAAA…'}
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
-                  </Field>
-                  <Field label="Turnstile secret key">
-                    <Input
-                      type="password"
-                      value={turnstileSecret}
-                      onChange={(e) => setTurnstileSecret(e.target.value)}
-                      placeholder={turnstileHasSecret ? '•••••••• stored — leave blank to keep' : 'Paste the secret key'}
-                      autoComplete="new-password"
-                      spellCheck={false}
-                    />
-                  </Field>
-                  {turnstileHasSecret && (
-                    <div className="flex items-center gap-1.5 text-xs text-emerald-700">
-                      <ShieldCheck className="w-3.5 h-3.5" />
-                      Secret stored encrypted. It&apos;s never shown again.
+                <div className="space-y-3">
+                  {cfg?.captcha.turnstile ? (
+                    <p className="text-xs text-gray-600">
+                      This form will use the workspace Turnstile widget from{' '}
+                      <a href="/admin?adminTab=integrations" className="font-semibold underline">Admin → Integrations</a>.
+                      Add every site this form is embedded on to that widget&apos;s Allowed domains.
+                    </p>
+                  ) : (
+                    <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span>
+                        Turnstile isn&apos;t connected for this workspace yet, so this form can&apos;t be saved with
+                        Turnstile selected. Connect it once under{' '}
+                        <a href="/admin?adminTab=integrations" className="font-semibold underline">Admin → Integrations → Cloudflare Turnstile</a>
+                        {turnstileSiteKey.trim() || turnstileHasSecret ? ', or fill in a per-form widget below.' : '.'}
+                      </span>
                     </div>
                   )}
-                  {cfg && !cfg.secretStorageReady && (
-                    <div className="text-xs text-amber-700">
-                      Per-form secrets need the server&apos;s CREDENTIALS_KEYS to be set.
-                      {cfg.captcha.turnstileDefault ? ' Leave both blank to use the server default.' : ''}
+                  <details className="rounded-lg border border-gray-100 bg-gray-50 p-3" open={!cfg?.captcha.turnstile && !!(turnstileSiteKey || turnstileHasSecret)}>
+                    <summary className="cursor-pointer text-sm font-medium text-gray-700">
+                      Use a different widget for this form (optional)
+                    </summary>
+                    <div className="mt-3 space-y-3">
+                      <p className="text-xs text-gray-500">
+                        Only needed if this form is embedded on sites that shouldn&apos;t share the workspace widget.
+                        Leave both blank to use the workspace keys.
+                      </p>
+                      <Field label="Turnstile site key">
+                        <Input
+                          value={turnstileSiteKey}
+                          onChange={(e) => setTurnstileSiteKey(e.target.value)}
+                          placeholder="0x4AAAAAAA…"
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                      </Field>
+                      <Field label="Turnstile secret key">
+                        <Input
+                          type="password"
+                          value={turnstileSecret}
+                          onChange={(e) => setTurnstileSecret(e.target.value)}
+                          placeholder={turnstileHasSecret ? '•••••••• stored — leave blank to keep' : 'Paste the secret key'}
+                          autoComplete="new-password"
+                          spellCheck={false}
+                        />
+                      </Field>
+                      {turnstileHasSecret && (
+                        <div className="flex items-center gap-1.5 text-xs text-emerald-700">
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          Secret stored encrypted. It&apos;s never shown again.
+                        </div>
+                      )}
+                      {cfg && !cfg.secretStorageReady && (
+                        <div className="text-xs text-amber-700">
+                          Per-form secrets need the server&apos;s CREDENTIALS_KEYS to be set.
+                        </div>
+                      )}
                     </div>
-                  )}
-                  <p className="text-xs text-gray-500">
-                    In Cloudflare → Turnstile, add <strong>every website domain this form is embedded on</strong> to
-                    the widget&apos;s Hostnames. The widget renders on that page, so a missing domain makes the
-                    challenge fail.
-                  </p>
+                  </details>
                 </div>
               )}
-              {captchaKeysMissing && (
+              {captchaKeysMissing && captchaProvider !== 'turnstile' && (
                 <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
                   <span>
-                    {captchaProvider === 'turnstile'
-                      ? 'No Turnstile keys yet: add this form’s site + secret key above (or set TURNSTILE_SITE_KEY / TURNSTILE_SECRET on the server).'
-                      : `The server has no ${captchaProvider === 'hcaptcha' ? 'hCaptcha' : 'reCAPTCHA'} keys configured, so submissions will fail the captcha check.`}
+                    The server has no {captchaProvider === 'hcaptcha' ? 'hCaptcha' : 'reCAPTCHA'} keys configured, so
+                    submissions will fail the captcha check.
                   </span>
                 </div>
               )}
@@ -1096,7 +1126,7 @@ export function FormBuilderManager({
         <div className="space-y-3">
           <p className="text-sm text-gray-600">Paste this snippet where the form should render. Runtime is namespaced and enforces allowed domains/paths.</p>
           <p className="text-xs text-gray-500">
-            The form (and any captcha) renders directly on the host page, not in an iframe. Using Cloudflare Turnstile? Add the host site&apos;s domain to the widget&apos;s Hostnames in Cloudflare.
+            The form (and any captcha) renders directly on the host page, not in an iframe. Using Cloudflare Turnstile? Add the host site&apos;s domain to the workspace widget under Admin → Integrations (or to this form&apos;s own widget, if it has one).
           </p>
           <Textarea rows={6} value={embedSnippet.data?.snippet ?? ''} readOnly />
           {embedSnippet.isLoading && <div className="text-sm text-gray-500">Loading snippet...</div>}

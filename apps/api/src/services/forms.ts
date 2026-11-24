@@ -36,7 +36,8 @@ import { appendActivity } from './activity.js';
 import { loadKeyset } from './credentials.js';
 import { notifyNewSubmission, senderStatus } from './formNotifications.js';
 import { resolveNotifications } from './formNotifyRules.js';
-import { providerSiteKey, TURNSTILE_SECRET_FIELD, verifyCaptcha } from './formCaptcha.js';
+import { resolveCaptchaSiteKey, TURNSTILE_SECRET_FIELD, verifyCaptcha } from './formCaptcha.js';
+import { getTurnstileStatus, getWorkspaceTurnstileKeys } from './turnstile.js';
 import { encryptField } from '../lib/crypto.js';
 
 type ScopeLink = { clientId: string | null; projectId: string | null };
@@ -432,6 +433,21 @@ function turnstileColumns(args: {
   return out;
 }
 
+
+/** Forms that require Turnstile must have either the workspace integration or a per-form widget. */
+async function ensureTurnstileAvailable(args: {
+  definition: { security?: { requireCaptcha?: boolean; captchaProvider?: string | null } } | undefined;
+  turnstileSiteKey: string | null | undefined;
+  turnstileHasSecret: boolean;
+}): Promise<void> {
+  const security = args.definition?.security;
+  if (!security?.requireCaptcha || security.captchaProvider !== 'turnstile') return;
+  if (args.turnstileSiteKey?.trim() && args.turnstileHasSecret) return;
+  const ws = await getWorkspaceTurnstileKeys(currentTenantId());
+  if (ws) return;
+  throw new HttpError(400, 'form_turnstile_not_connected');
+}
+
 export async function create(args: { ownerId: string; input: CreateFormInput }): Promise<FormRow> {
   const scope = await resolveScopeLink({
     clientId: args.input.clientId ?? null,
@@ -440,6 +456,11 @@ export async function create(args: { ownerId: string; input: CreateFormInput }):
 
   const id = randomUUID();
   const turnstile = turnstileColumns({ id, existing: null, input: args.input.turnstile });
+  await ensureTurnstileAvailable({
+    definition: args.input.definition,
+    turnstileSiteKey: turnstile.turnstileSiteKey ?? null,
+    turnstileHasSecret: !!turnstile.turnstileSecretEnc,
+  });
   const [row] = await db
     .insert(forms)
     .values(stampTenant({
@@ -501,6 +522,15 @@ export async function update(args: {
     Object.assign(upd, turnstileColumns({ id: existing.id, existing, input: args.patch.turnstile }));
     changed.push('turnstile');
   }
+
+  const nextDef = (upd.definition as FormDefinition | undefined) ?? asFormDefinition(existing.definition);
+  const nextSite = (upd.turnstileSiteKey as string | null | undefined);
+  const nextSecretEnc = (upd.turnstileSecretEnc as string | null | undefined);
+  await ensureTurnstileAvailable({
+    definition: nextDef,
+    turnstileSiteKey: nextSite !== undefined ? nextSite : existing.turnstileSiteKey,
+    turnstileHasSecret: (nextSecretEnc !== undefined ? nextSecretEnc : existing.turnstileSecretEnc) != null,
+  });
 
   if (changed.length === 0) return rowToRow(existing);
 
@@ -766,7 +796,7 @@ export async function getPublicForm(args: { token: string; ctx: PublicRequestCon
     definition,
     security: {
       captchaProvider,
-      captchaSiteKey: captchaProvider ? providerSiteKey(captchaProvider, row) : null,
+      captchaSiteKey: captchaProvider ? await resolveCaptchaSiteKey(captchaProvider, row) : null,
       honeypotFieldName: security.honeypotFieldName,
     },
   };
@@ -876,7 +906,7 @@ export async function getFormsConfig(): Promise<FormsConfig> {
     captcha: {
       hcaptcha: !!(env.HCAPTCHA_SITE_KEY && env.HCAPTCHA_SECRET),
       recaptcha: !!(env.RECAPTCHA_SITE_KEY && env.RECAPTCHA_SECRET),
-      turnstileDefault: !!(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET),
+      turnstile: (await getTurnstileStatus()).connected,
     },
     secretStorageReady: !!loadKeyset().keyset,
   };

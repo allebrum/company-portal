@@ -411,6 +411,7 @@ Paths are relative to the base URL. Anything not listed returns
 | GET | `/integrations/quickbooks/customers` | `read` |
 | GET | `/integrations/quickbooks/items` | `read` |
 | GET | `/integrations/gmail/status` | `read` |
+| GET | `/integrations/turnstile/status` | `read` |
 | GET | `/integrations/gmail/connected-users` | `read` |
 
 #### Upload-QR sessions

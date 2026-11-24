@@ -6,6 +6,9 @@ import {
   ConnectIntegrationSchema,
   IntegrationKindParam,
   INTEGRATION_KINDS,
+  TurnstileSaveSchema,
+  TurnstileTestSchema,
+  TurnstileSyncSchema,
 } from '@allebrum/shared';
 import type { IntegrationKind } from '@allebrum/shared';
 import { requireAuth } from '../middleware/requireAuth.js';
@@ -57,6 +60,13 @@ import {
   listQboCustomers,
   listQboServiceItems,
 } from '../services/quickbooks.js';
+import {
+  getTurnstileStatus,
+  saveTurnstile,
+  testTurnstile,
+  disconnectTurnstile,
+  syncTurnstileHostnames,
+} from '../services/turnstile.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
 
@@ -126,6 +136,72 @@ integrationsRouter.patch(
     }
   },
 );
+
+
+// ---- Cloudflare Turnstile (workspace widget keys) ----
+// Status is readable by any signed-in member so the form builder can warn.
+// Saving secrets, testing, and disconnecting require integrations.manage
+// and a staff session (same as connecting Drive / Gmail).
+integrationsRouter.get('/turnstile/status', async (_req, res, next) => {
+  try {
+    res.json(await getTurnstileStatus());
+  } catch (e) {
+    next(e);
+  }
+});
+
+integrationsRouter.put(
+  '/turnstile',
+  requirePermission('integrations.manage'),
+  validate(TurnstileSaveSchema),
+  async (req, res, next) => {
+    try {
+      const me = req.session.user!;
+      const input = getValidated<typeof TurnstileSaveSchema._type>(req);
+      res.json(await saveTurnstile(input, me.userId));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+integrationsRouter.post(
+  '/turnstile/test',
+  requirePermission('integrations.manage'),
+  validate(TurnstileTestSchema),
+  async (req, res, next) => {
+    try {
+      const input = getValidated<typeof TurnstileTestSchema._type>(req);
+      res.json(await testTurnstile(input));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+integrationsRouter.post(
+  '/turnstile/sync-hostnames',
+  requirePermission('integrations.manage'),
+  validate(TurnstileSyncSchema),
+  async (req, res, next) => {
+    try {
+      const me = req.session.user!;
+      const input = getValidated<typeof TurnstileSyncSchema._type>(req);
+      res.json(await syncTurnstileHostnames(input, me.userId));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+integrationsRouter.post('/turnstile/disconnect', requirePermission('integrations.manage'), async (req, res, next) => {
+  try {
+    const me = req.session.user!;
+    res.json(await disconnectTurnstile(me.userId));
+  } catch (e) {
+    next(e);
+  }
+});
 
 // ---- Google Drive (real) ----
 integrationsRouter.get('/drive/status', async (_req, res, next) => {

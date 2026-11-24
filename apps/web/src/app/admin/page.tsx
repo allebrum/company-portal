@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronRight, Plus, Search, Trash2, Download, Mail, X, Link2, Copy } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Plus, Search, ShieldCheck, Trash2, Download, Mail, X, Link2, Copy } from 'lucide-react';
 import { API_URL } from '@/lib/env';
 import { Card, Section, Pill, Empty, Tile } from '@/components/ui';
 import {
@@ -10,10 +10,18 @@ import {
   useConnectedGmailUsers,
   gmailConnectUrl,
 } from '@/hooks/useGmail';
+import {
+  useTurnstileStatus,
+  useSaveTurnstile,
+  useTestTurnstile,
+  useSyncTurnstileHostnames,
+  useDisconnectTurnstile,
+  turnstileErrorMessage,
+} from '@/hooks/useTurnstile';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Popover } from '@/components/ui/Popover';
-import { Field, Input, Select, Checkbox } from '@/components/ui/Field';
+import { Field, Input, Select, Checkbox, Textarea } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { UserFormModal } from '@/components/features/UserFormModal';
 import { ClientFormModal } from '@/components/features/ClientFormModal';
@@ -1576,6 +1584,8 @@ function IntegrationsTab() {
 
       <GmailIntegrationPanel />
 
+      <TurnstileIntegrationPanel />
+
       <LinkFolderModal open={linkOpen} onClose={() => setLinkOpen(false)} />
     </>
   );
@@ -2042,3 +2052,300 @@ function GmailIntegrationPanel() {
     </Section>
   );
 }
+
+
+/**
+ * Workspace Cloudflare Turnstile widget. Each company pastes its own keys
+ * once (Cloudflare has no third-party OAuth for Turnstile). Forms in this
+ * workspace then use that widget, unless a form sets an optional override.
+ */
+function TurnstileIntegrationPanel() {
+  const toast = useToast();
+  const { can } = useAuth();
+  const canManage = can('integrations.manage');
+  const { data: status, isLoading } = useTurnstileStatus();
+  const save = useSaveTurnstile();
+  const test = useTestTurnstile();
+  const sync = useSyncTurnstileHostnames();
+  const disconnect = useDisconnectTurnstile();
+
+  const [siteKey, setSiteKey] = useState('');
+  const [secret, setSecret] = useState('');
+  const [hostnamesText, setHostnamesText] = useState('');
+  const [accountId, setAccountId] = useState('');
+  const [apiToken, setApiToken] = useState('');
+  const [enterprise, setEnterprise] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    if (!status || hydrated) return;
+    setSiteKey(status.siteKey ?? '');
+    setHostnamesText((status.hostnames ?? []).join('\n'));
+    setAccountId(status.accountId ?? '');
+    setEnterprise(!!status.enterprise);
+    setShowAdvanced(!!status.hasApiToken || !!status.accountId);
+    setHydrated(true);
+  }, [status, hydrated]);
+
+  useEffect(() => {
+    setHydrated(false);
+  }, [status?.siteKey, status?.accountId, status?.enterprise, status?.hostnames?.join('\n')]);
+
+  const parseHostnames = () =>
+    hostnamesText
+      .split(/[\n,;]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+  const run = async (fn: () => Promise<unknown>, ok: string) => {
+    try {
+      await fn();
+      toast.success(ok);
+    } catch (e) {
+      toast.error(turnstileErrorMessage(e));
+    }
+  };
+
+  const onSave = (extra: { createWidget?: boolean; syncHostnames?: boolean } = {}) =>
+    run(
+      () =>
+        save.mutateAsync({
+          siteKey: siteKey.trim() || null,
+          ...(secret.trim() ? { secret: secret.trim() } : {}),
+          hostnames: parseHostnames(),
+          accountId: accountId.trim() || null,
+          ...(apiToken.trim() ? { apiToken: apiToken.trim() } : {}),
+          enterprise,
+          ...extra,
+        }).then((row) => {
+          setSecret('');
+          setApiToken('');
+          setSiteKey(row.siteKey ?? '');
+          setHostnamesText((row.hostnames ?? []).join('\n'));
+          return row;
+        }),
+      extra.createWidget ? 'Widget created and keys saved' : extra.syncHostnames ? 'Hostnames synced to Cloudflare' : 'Turnstile settings saved',
+    );
+
+  const onTest = async () => {
+    try {
+      const result = await test.mutateAsync(secret.trim() ? { secret: secret.trim() } : {});
+      if (result.ok) toast.success(result.message);
+      else toast.error(result.message);
+    } catch (e) {
+      toast.error(turnstileErrorMessage(e));
+    }
+  };
+
+  const onDisconnect = () =>
+    run(async () => {
+      await disconnect.mutateAsync();
+      setSiteKey('');
+      setSecret('');
+      setHostnamesText('');
+      setAccountId('');
+      setApiToken('');
+      setEnterprise(false);
+    }, 'Turnstile disconnected');
+
+  const busy = save.isPending || test.isPending || sync.isPending || disconnect.isPending;
+  const connected = !!status?.connected;
+
+  return (
+    <Section title="Cloudflare Turnstile (form captcha)">
+      <Card className="p-5 space-y-5">
+        <p className="text-sm text-gray-600">
+          Each workspace uses its own Turnstile widget — Hoppa doesn&apos;t share platform keys across companies.
+          Cloudflare has no third-party login for Turnstile, so you paste the widget keys once here (or an API
+          token, below, and we&apos;ll create the widget for you). Every form in this workspace can then use them.
+        </p>
+
+        {isLoading && <div className="text-sm text-gray-500">Loading…</div>}
+
+        {status && !status.secretStorageReady && (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>
+              Secrets can&apos;t be stored until the server&apos;s <code className="font-mono">CREDENTIALS_KEYS</code> is
+              configured. Ask an operator to set that env var (the same keyset as the credentials vault).
+            </span>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div>
+            <div className="text-sm font-semibold text-gray-900">Status</div>
+            <div className="text-[12px] text-gray-500">
+              {connected ? (
+                <span className="text-emerald-700 font-medium">Connected{status?.siteKey ? ` · ${status.siteKey}` : ''}</span>
+              ) : (
+                'Not connected'
+              )}
+            </div>
+          </div>
+          {connected && canManage && (
+            <Button variant="ghost" size="sm" className="ml-auto" disabled={busy} onClick={() => void onDisconnect()}>
+              Disconnect
+            </Button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Field label="Site key">
+            <Input
+              value={siteKey}
+              onChange={(e) => setSiteKey(e.target.value)}
+              placeholder="0x4AAAAAAA…"
+              autoComplete="off"
+              spellCheck={false}
+              disabled={!canManage}
+            />
+          </Field>
+          <Field label="Secret key">
+            <Input
+              type="password"
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
+              placeholder={status?.hasSecret ? '•••••••• stored — leave blank to keep' : 'Paste the secret key'}
+              autoComplete="new-password"
+              spellCheck={false}
+              disabled={!canManage}
+            />
+          </Field>
+        </div>
+        {status?.hasSecret && (
+          <div className="flex items-center gap-1.5 text-xs text-emerald-700 -mt-2">
+            <ShieldCheck className="w-3.5 h-3.5" />
+            Secret stored encrypted. It&apos;s never shown again.
+          </div>
+        )}
+
+        <Field label="Allowed domains (one per line)" hint="Every website these forms are embedded on, e.g. clientsite.com. A root domain also covers its subdomains. No https:// or path.">
+          <Textarea
+            rows={3}
+            value={hostnamesText}
+            onChange={(e) => setHostnamesText(e.target.value)}
+            placeholder={"example.com\nwww.other-site.com"}
+            disabled={!canManage}
+          />
+        </Field>
+        <p className="text-xs text-gray-500 -mt-3">
+          Free Turnstile widgets allow 10 hostnames; Enterprise allows 200. If you don&apos;t add an API token
+          below, you&apos;ll also need to put this same list on the widget in the Cloudflare dashboard. The form
+          (and the captcha) render on the host page, not in an iframe, so each domain must be listed.
+        </p>
+
+        {canManage && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button disabled={busy || !status?.secretStorageReady} onClick={() => void onSave()}>
+              Save
+            </Button>
+            <Button
+              variant="outline"
+              disabled={busy || (!secret.trim() && !status?.hasSecret)}
+              onClick={() => void onTest()}
+            >
+              Test
+            </Button>
+            {status?.lastTestAt && status.lastTestOk != null && !test.isPending && (
+              <span className={`text-xs ${status.lastTestOk ? 'text-emerald-700' : 'text-amber-700'}`}>
+                Last test {status.lastTestOk ? 'passed' : 'failed'}
+              </span>
+            )}
+          </div>
+        )}
+
+        <div>
+          <button
+            type="button"
+            className="text-sm font-semibold text-gray-800 hover:text-gray-900"
+            onClick={() => setShowAdvanced((v) => !v)}
+          >
+            {showAdvanced ? '▾' : '▸'} Cloudflare API token (optional — create and sync the widget)
+          </button>
+          {showAdvanced && (
+            <div className="mt-3 space-y-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p className="text-xs text-gray-600">
+                Cloudflare doesn&apos;t offer a &quot;Sign in with Cloudflare&quot; flow for Turnstile. A token scoped to{' '}
+                <strong>Account → Turnstile → Edit</strong> is the login. When it&apos;s saved, Hoppa can create the
+                widget and keep its hostname list in sync with the Allowed domains above.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <Field label="Cloudflare account ID">
+                  <Input
+                    value={accountId}
+                    onChange={(e) => setAccountId(e.target.value)}
+                    placeholder="32-character account id"
+                    autoComplete="off"
+                    spellCheck={false}
+                    disabled={!canManage}
+                  />
+                </Field>
+                <Field label="API token">
+                  <Input
+                    type="password"
+                    value={apiToken}
+                    onChange={(e) => setApiToken(e.target.value)}
+                    placeholder={status?.hasApiToken ? '•••••••• stored — leave blank to keep' : 'Paste the API token'}
+                    autoComplete="new-password"
+                    spellCheck={false}
+                    disabled={!canManage}
+                  />
+                </Field>
+              </div>
+              {status?.hasApiToken && (
+                <div className="flex items-center gap-1.5 text-xs text-emerald-700">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  API token stored encrypted. It&apos;s never shown again.
+                </div>
+              )}
+              <Checkbox
+                label="This Cloudflare account is on the Turnstile Enterprise plan (up to 200 hostnames per widget)"
+                checked={enterprise}
+                onChange={setEnterprise}
+                disabled={!canManage}
+              />
+              {canManage && (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    disabled={busy || !status?.secretStorageReady || (!apiToken.trim() && !status?.hasApiToken) || !accountId.trim()}
+                    onClick={() => void onSave({ createWidget: !connected })}
+                    title={connected ? 'The widget already exists — use Sync hostnames to update its domain list.' : undefined}
+                  >
+                    {connected ? 'Save token' : 'Create widget'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={busy || !connected || (!apiToken.trim() && !status?.hasApiToken) || !accountId.trim()}
+                    onClick={() => void onSave({ syncHostnames: true })}
+                  >
+                    Sync hostnames
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    disabled={busy || !connected || (!apiToken.trim() && !status?.hasApiToken) || !accountId.trim()}
+                    onClick={() =>
+                      void run(
+                        () =>
+                          sync.mutateAsync({ includeFormOrigins: true, hostnames: parseHostnames() }).then((row) => {
+                            setHostnamesText((row.hostnames ?? []).join('\n'));
+                            return row;
+                          }),
+                        'Hostnames synced (including domains from your forms)',
+                      )
+                    }
+                  >
+                    Add domains from forms
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </Card>
+    </Section>
+  );
+}
+

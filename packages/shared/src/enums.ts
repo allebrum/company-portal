@@ -177,7 +177,7 @@ export type Cadence = (typeof CADENCES)[number];
 export const WEEKEND_RULES = ['prior', 'after', 'as-is'] as const;
 export type WeekendRule = (typeof WEEKEND_RULES)[number];
 
-export const INTEGRATION_KINDS = ['drive', 'github', 'slack', 'quickbooks'] as const;
+export const INTEGRATION_KINDS = ['drive', 'github', 'slack', 'quickbooks', 'turnstile'] as const;
 export type IntegrationKind = (typeof INTEGRATION_KINDS)[number];
 
 // ---- PM workspace ----

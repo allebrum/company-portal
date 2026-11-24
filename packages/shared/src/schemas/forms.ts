@@ -223,8 +223,8 @@ export type FormsConfig = {
   captcha: {
     hcaptcha: boolean;
     recaptcha: boolean;
-    /** TURNSTILE_SITE_KEY + TURNSTILE_SECRET set (fallback for forms without their own keys). */
-    turnstileDefault: boolean;
+    /** Workspace Turnstile integration is connected (Admin → Integrations). */
+    turnstile: boolean;
   };
   /** Credentials vault keyset works — required to store a per-form Turnstile secret. */
   secretStorageReady: boolean;

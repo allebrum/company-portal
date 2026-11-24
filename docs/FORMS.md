@@ -37,32 +37,46 @@ shows a warning.
 Turn on **Require captcha on submit** in a form's Security card, then choose a provider.
 
 - **reCAPTCHA / hCaptcha** use the server-wide keys `RECAPTCHA_SITE_KEY` / `RECAPTCHA_SECRET`
-  and `HCAPTCHA_SITE_KEY` / `HCAPTCHA_SECRET`, set as env vars.
-- **Cloudflare Turnstile** can be set **per form** or server-wide:
-  - **Per form:** paste the widget's site key and secret key into the form's Security card.
-    The secret is encrypted with the credentials-vault keyset (`CREDENTIALS_KEYS`, see
-    [CREDENTIALS.md](./CREDENTIALS.md)) and is never sent back to the browser. Saving a
-    per-form secret fails with `credentials_not_configured` until that keyset is valid.
-  - **Server default:** set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET` on the API. Forms
-    without their own keys use these.
+  and `HCAPTCHA_SITE_KEY` / `HCAPTCHA_SECRET`, set as env vars on the API.
+- **Cloudflare Turnstile** is **per workspace**, not a platform-wide env var. Hoppa is
+  multi-tenant: each company brings its own widget and enters the keys once under
+  **Admin → Integrations → Cloudflare Turnstile**. Every form in that workspace then
+  uses those keys.
+  - A form may optionally override with its own widget (under "Use a different widget
+    for this form") if that form is embedded on sites that shouldn't share the
+    workspace widget.
+  - Secrets are encrypted with the credentials-vault keyset (`CREDENTIALS_KEYS`, see
+    [CREDENTIALS.md](./CREDENTIALS.md)) and are never sent back to the browser. Saving
+    a secret fails with `credentials_not_configured` until that keyset is valid.
+  - If Turnstile isn't connected, the form builder links to the integration and
+    refuses to save a form with Turnstile selected (unless a per-form widget is filled in).
   - The server verifies each token at
     `https://challenges.cloudflare.com/turnstile/v0/siteverify`.
 
-### Setting up a Turnstile widget
+### Setting up Turnstile for a company
 
 1. In the Cloudflare dashboard, open **Turnstile → Add widget**. "Managed" mode is fine.
-2. Under **Hostnames**, add **every website domain the form is embedded on**, for example
-   `clientsite.com` and `www.clientsite.com`.
+2. Under **Hostnames**, add **every website domain forms will be embedded on**, for
+   example `clientsite.com` and `othersite.com`.
    - The embed snippet (`<script src=".../api/f/embed.js">`) draws the form, and the
      Turnstile widget, **directly in the host page**, not in an iframe on app.hoppa.io.
    - Turnstile checks the host page's hostname, so a domain missing from the list makes
      every challenge fail.
-   - Adding app.hoppa.io alone is **not** enough.
-3. Copy the **site key** and **secret key** into the form's Security card. To use them as
-   the default for all forms instead, set them as `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET`
-   on the API.
-4. Usually one widget per client site works best. A single widget can list several
-   hostnames, but Cloudflare limits how many you can add.
+   - Adding app.hoppa.io alone is **not** enough. A root domain also covers its subdomains
+     (`example.com` covers `www.example.com`).
+   - Free widgets allow **10 hostnames**; Enterprise allows **200**.
+3. In Hoppa, go to **Admin → Integrations → Cloudflare Turnstile**. Paste the **site key**
+   and **secret key**, add the same domain list under **Allowed domains**, and click
+   **Save**. Click **Test** to check the secret (Hoppa asks Cloudflare's siteverify
+   whether the secret is real — it doesn't need a live challenge).
+4. Optionally, instead of creating the widget by hand: create a Cloudflare API token
+   with **Account → Turnstile → Edit**, paste the token and the account ID into the
+   integration, fill in Allowed domains, and click **Create widget**. Hoppa will
+   store the returned keys and can later **Sync hostnames** (or **Add domains from
+   forms**, which also pulls `allowedOrigins` from your forms). Cloudflare has no
+   third-party OAuth for Turnstile; the token is the login.
+5. In a form, turn on **Require captcha → Cloudflare Turnstile**. That's it — there's
+   no need to paste keys on every form.
 
 Cloudflare's test keys work locally: site key `1x00000000000000000000AA` with secret
 `1x0000000000000000000000000000000AA` always passes, and secret
