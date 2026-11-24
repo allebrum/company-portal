@@ -1984,7 +1984,8 @@ function GmailIntegrationPanel() {
       <Card className="p-5 space-y-5">
         <p className="text-sm text-gray-600">
           Each teammate sends invites from their own Gmail account. The workspace also designates
-          one connected account as the <strong>system sender</strong> for password-reset emails —
+          one connected account as the <strong>system sender</strong> for password-reset emails,
+          portal invites, reminders and form-submission notifications —
           those happen without a logged-in user, so they need a stable mailbox to send through.
         </p>
 

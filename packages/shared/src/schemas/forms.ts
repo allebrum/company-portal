@@ -26,7 +26,7 @@ export const FORM_CONDITION_OPERATORS = [
 ] as const;
 export type FormConditionOperator = (typeof FORM_CONDITION_OPERATORS)[number];
 
-export const FORM_CAPTCHA_PROVIDERS = ['hcaptcha', 'recaptcha'] as const;
+export const FORM_CAPTCHA_PROVIDERS = ['hcaptcha', 'recaptcha', 'turnstile'] as const;
 export type FormCaptchaProvider = (typeof FORM_CAPTCHA_PROVIDERS)[number];
 
 export const FormFieldOptionSchema = z.object({
@@ -74,6 +74,41 @@ export const FormSecuritySchema = z.object({
 });
 export type FormSecurity = z.infer<typeof FormSecuritySchema>;
 
+/**
+ * New-submission notifications (per form).
+ *  - off:       no email.
+ *  - immediate: one email per accepted submission.
+ *  - digest:    one daily summary email (sent each morning, workspace time).
+ * Recipients = workspace users (by id) + extra email addresses. When both
+ * lists are empty the form owner is notified.
+ */
+export const FORM_NOTIFY_MODES = ['off', 'immediate', 'digest'] as const;
+export type FormNotifyMode = (typeof FORM_NOTIFY_MODES)[number];
+
+export const FormNotificationsSchema = z.object({
+  mode: z.enum(FORM_NOTIFY_MODES).optional().default('immediate'),
+  userIds: z.array(z.string().uuid()).max(50).optional().default([]),
+  emails: z.array(z.string().trim().email().max(320)).max(50).optional().default([]),
+});
+export type FormNotifications = z.infer<typeof FormNotificationsSchema>;
+
+export const DEFAULT_FORM_NOTIFICATIONS: FormNotifications = { mode: 'immediate', userIds: [], emails: [] };
+
+/**
+ * Per-form Cloudflare Turnstile keys. Turnstile widgets carry a hostname
+ * allowlist, so forms embedded on different client sites usually need their
+ * own widget. Write-only secret:
+ *   - `secret` omitted → keep the stored secret
+ *   - `secret` null / '' → clear it
+ *   - `secret` string → encrypt + store (never returned to the client)
+ * Leave both blank to fall back to the server-wide TURNSTILE_* env keys.
+ */
+export const FormTurnstileInputSchema = z.object({
+  siteKey: z.string().trim().max(200).nullable().optional(),
+  secret: z.string().trim().max(400).nullable().optional(),
+});
+export type FormTurnstileInput = z.infer<typeof FormTurnstileInputSchema>;
+
 export const FormDefinitionSchema = z.object({
   title: z.string().max(160).optional().default(''),
   description: z.string().max(2000).optional().default(''),
@@ -92,6 +127,8 @@ export const CreateFormSchema = z.object({
   visibility: z.enum(FORM_VISIBILITIES).optional().default('workspace'),
   status: z.enum(FORM_STATUSES).optional().default('active'),
   definition: FormDefinitionSchema,
+  notifications: FormNotificationsSchema.optional(),
+  turnstile: FormTurnstileInputSchema.optional(),
 });
 export type CreateFormInput = z.input<typeof CreateFormSchema>;
 
@@ -103,6 +140,8 @@ export const UpdateFormSchema = z.object({
   visibility: z.enum(FORM_VISIBILITIES).optional(),
   status: z.enum(FORM_STATUSES).optional(),
   definition: FormDefinitionSchema.optional(),
+  notifications: FormNotificationsSchema.optional(),
+  turnstile: FormTurnstileInputSchema.optional(),
 });
 export type UpdateFormInput = z.infer<typeof UpdateFormSchema>;
 
@@ -137,6 +176,11 @@ export type FormRow = {
   views: number;
   interactions: number;
   submissions: number;
+  /** ISO timestamp of the newest submission, null when none. */
+  lastSubmissionAt: string | null;
+  notifications: FormNotifications;
+  /** Per-form Turnstile config. The secret itself is never sent. */
+  turnstile: { siteKey: string | null; hasSecret: boolean };
   embedToken: string;
   createdAt: string;
   updatedAt: string;
@@ -169,3 +213,19 @@ export type PublicFormPayload = {
 export type PublicFormSubmitResult =
   | { ok: true; message: string }
   | { ok: false; errors: Record<string, string> };
+
+/** GET /api/forms/config — what the form settings UI needs to warn about. */
+export type FormsConfig = {
+  /** Workspace system sender (Settings → Email) is set AND has Gmail connected. */
+  senderConnected: boolean;
+  senderName: string | null;
+  /** Server-wide captcha keys present (env). */
+  captcha: {
+    hcaptcha: boolean;
+    recaptcha: boolean;
+    /** TURNSTILE_SITE_KEY + TURNSTILE_SECRET set (fallback for forms without their own keys). */
+    turnstileDefault: boolean;
+  };
+  /** Credentials vault keyset works — required to store a per-form Turnstile secret. */
+  secretStorageReady: boolean;
+};

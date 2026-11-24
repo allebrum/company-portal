@@ -141,7 +141,7 @@ async function getGmailClient(userId: string): Promise<gmail_v1.Gmail> {
  */
 export async function sendAsUser(
   senderUserId: string,
-  args: { to: string; cc?: string | null; subject: string; html: string; text: string },
+  args: { to: string; cc?: string | null; replyTo?: string | null; subject: string; html: string; text: string },
 ): Promise<void> {
   const senderRows = await db
     .select({ name: users.name, email: users.email })
@@ -156,6 +156,7 @@ export async function sendAsUser(
     from: `${sender.name} <${sender.email}>`,
     to: args.to,
     cc: args.cc ?? undefined,
+    replyTo: args.replyTo ?? undefined,
     subject: args.subject,
     html: args.html,
     text: args.text,
@@ -175,6 +176,7 @@ function buildRfc822(args: {
   from: string;
   to: string;
   cc?: string;
+  replyTo?: string;
   subject: string;
   html: string;
   text: string;
@@ -185,6 +187,9 @@ function buildRfc822(args: {
     `To: ${args.to}`,
     // Comma-separated list of additional recipients (bookkeeper team CC).
     ...(args.cc ? [`Cc: ${args.cc}`] : []),
+    // Reply-To comes from untrusted input (a public form's email answer):
+    // strip CR/LF so it can never inject extra headers.
+    ...(args.replyTo ? [`Reply-To: ${args.replyTo.replace(/[\r\n]/g, '')}`] : []),
     `Subject: ${encodeHeader(args.subject)}`,
     'MIME-Version: 1.0',
     `Content-Type: multipart/alternative; boundary="${boundary}"`,

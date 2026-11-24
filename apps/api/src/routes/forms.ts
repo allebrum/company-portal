@@ -26,6 +26,16 @@ formsRouter.get('/', requirePermission('forms.view'), async (req, res, next) => 
   }
 });
 
+// Status the form settings UI warns about: is the workspace system sender
+// connected (notification email), which captcha keys exist server-side.
+formsRouter.get('/config', requirePermission('forms.view'), async (_req, res, next) => {
+  try {
+    res.json(await formsSvc.getFormsConfig());
+  } catch (e) {
+    next(e);
+  }
+});
+
 formsRouter.post('/', requirePermission('forms.create'), validate(CreateFormSchema), async (req, res, next) => {
   try {
     const me = req.session.user!;
@@ -258,6 +268,38 @@ const EMBED_JS = String.raw`(() => {
 
   function loadCaptcha(provider, siteKey, mount, onToken) {
     if (!provider || !siteKey || !mount) return Promise.resolve(null);
+    if (provider === 'turnstile') {
+      // Cloudflare Turnstile renders on THIS page, so the host page's domain
+      // must be in the widget's hostname allowlist in Cloudflare.
+      return new Promise((resolve) => {
+        const ensure = () => {
+          if (!window.turnstile || !window.turnstile.render) {
+            setTimeout(ensure, 50);
+            return;
+          }
+          const id = window.turnstile.render(mount, {
+            sitekey: siteKey,
+            callback: onToken,
+            'expired-callback': () => onToken(''),
+            'error-callback': () => onToken(''),
+          });
+          resolve({ reset: () => window.turnstile && window.turnstile.reset(id) });
+        };
+        if (window.turnstile && window.turnstile.render) {
+          ensure();
+          return;
+        }
+        if (!document.querySelector('script[data-hoppa-turnstile]')) {
+          const s = document.createElement('script');
+          s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+          s.async = true;
+          s.defer = true;
+          s.setAttribute('data-hoppa-turnstile', '1');
+          document.head.appendChild(s);
+        }
+        ensure();
+      });
+    }
     if (provider === 'hcaptcha') {
       return new Promise((resolve) => {
         const ensure = () => {

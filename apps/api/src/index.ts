@@ -20,6 +20,7 @@ import { staticCacheHeaders } from './lib/staticHeaders.js';
 import { initIO } from './realtime/io.js';
 import { startPayPeriodSweep } from './jobs/payPeriodSweep.js';
 import { startTimeReminderSweep } from './jobs/timeReminders.js';
+import { startFormDigestSweep } from './jobs/formDigest.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -165,6 +166,7 @@ startPayPeriodSweep();
 // employees (morning) to submit time and approvers (end of day) to review it.
 // Idempotent per (tenant, period, kind, local-day); honors per-workspace tz.
 startTimeReminderSweep();
+startFormDigestSweep();
 
 // Billing (Stripe + the recurring-charge cron) lives in the separate marketing
 // service now; the portal only reads the tenant billing columns to gate.

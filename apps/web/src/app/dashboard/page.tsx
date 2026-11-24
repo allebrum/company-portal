@@ -417,7 +417,7 @@ export default function DashboardPage() {
                       <div className="text-sm text-gray-800 truncate">{a.target}</div>
                       <ActivityChanges meta={a.meta} />
                       <div className="text-[11px] text-gray-500">
-                        {u?.name ?? 'Unknown'}
+                        {u?.name ?? (a.kind === 'forms.submission' ? 'Website form' : 'Unknown')}
                         {a.meta?.via === 'api_token' && (
                           <span title="Done with a personal API token">
                             {' '}· via API token{typeof a.meta.tokenName === 'string' ? ` “${a.meta.tokenName}”` : ''}
