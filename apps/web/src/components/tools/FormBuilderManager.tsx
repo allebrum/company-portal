@@ -32,6 +32,7 @@ import {
   newFieldKey,
   phoneFormatOf,
   instantiatePreset,
+  trimUnderscores,
   uniqueFieldId,
   updateFieldByKey,
   PHONE_FORMATS,
@@ -85,7 +86,7 @@ type Props = {
 };
 
 function normalizeOptionValue(label: string): string {
-  return label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'option';
+  return trimUnderscores(label.trim().slice(0, 200).toLowerCase().replace(/[^a-z0-9]+/g, '_')) || 'option';
 }
 
 function newField(type: FormFieldType, existingIds: string[] = []): FormField {

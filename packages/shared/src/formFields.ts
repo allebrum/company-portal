@@ -342,8 +342,17 @@ export const FIELD_PRESETS: FieldPreset[] = [
   },
 ];
 
+/** Strip leading/trailing underscores without a backtracking regex. */
+export function trimUnderscores(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value[start] === '_') start++;
+  while (end > start && value[end - 1] === '_') end--;
+  return value.slice(start, end);
+}
+
 export function uniqueFieldId(base: string, existing: string[]): string {
-  const slug = base.replace(/[^a-zA-Z0-9_]+/g, '_').replace(/^_+|_+$/g, '') || 'field';
+  const slug = trimUnderscores(base.slice(0, 200).replace(/[^a-zA-Z0-9_]+/g, '_')) || 'field';
   const safe = /^[a-zA-Z]/.test(slug) ? slug : `f_${slug}`;
   if (!existing.includes(safe)) return safe.slice(0, 80);
   for (let i = 2; i < 1000; i++) {
