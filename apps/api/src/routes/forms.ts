@@ -260,6 +260,144 @@ const EMBED_JS = String.raw`(() => {
     return out;
   }
 
+
+  function digitsOnly(value) {
+    return String(value || '').replace(/\D+/g, '');
+  }
+  function formatPhoneUS(raw) {
+    let d = digitsOnly(raw);
+    if (d.length === 11 && d[0] === '1') d = d.slice(1);
+    d = d.slice(0, 10);
+    if (d.length === 0) return '';
+    if (d.length < 4) return '(' + d;
+    if (d.length < 7) return '(' + d.slice(0, 3) + ') ' + d.slice(3);
+    return '(' + d.slice(0, 3) + ') ' + d.slice(3, 6) + '-' + d.slice(6);
+  }
+  function phoneFormatOf(field) {
+    return (field.validation && field.validation.phoneFormat) || 'us';
+  }
+  function inputTypeOf(type) {
+    if (type === 'email') return 'email';
+    if (type === 'phone') return 'tel';
+    if (type === 'url') return 'url';
+    if (type === 'date') return 'date';
+    if (type === 'number') return 'number';
+    return 'text';
+  }
+  function inputModeOf(type) {
+    if (type === 'email') return 'email';
+    if (type === 'phone') return 'tel';
+    if (type === 'url') return 'url';
+    if (type === 'number') return 'decimal';
+    return '';
+  }
+  function autocompleteOf(field) {
+    if (field.autocomplete) return field.autocomplete;
+    if (field.type === 'email') return 'email';
+    if (field.type === 'phone') return 'tel';
+    if (field.type === 'url') return 'url';
+    return '';
+  }
+  function isValidIsoDate(value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const parts = value.split('-').map(Number);
+    const y = parts[0], m = parts[1], d = parts[2];
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  }
+  function validateClientField(field, raw) {
+    const v = field.validation || {};
+    if (field.type === 'number') {
+      if (raw === undefined || raw === null || raw === '') return null;
+      const n = typeof raw === 'number' ? raw : Number(raw);
+      if (!isFinite(n)) return 'Please enter a valid number.';
+      if (typeof v.min === 'number' && n < v.min) return 'Must be at least ' + v.min + '.';
+      if (typeof v.max === 'number' && n > v.max) return 'Must be at most ' + v.max + '.';
+      if (typeof v.step === 'number' && v.step > 0) {
+        const base = typeof v.min === 'number' ? v.min : 0;
+        const steps = (n - base) / v.step;
+        if (Math.abs(steps - Math.round(steps)) > 1e-8) return 'Must be a multiple of ' + v.step + '.';
+      }
+      return null;
+    }
+    const str = String(raw == null ? '' : raw).trim();
+    if (!str) return null;
+    if (field.type === 'email') {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str)) return 'Please enter a valid email address.';
+      return null;
+    }
+    if (field.type === 'phone') {
+      const fmt = phoneFormatOf(field);
+      let d = digitsOnly(str);
+      if (fmt === 'us') {
+        if (d.length === 11 && d[0] === '1') d = d.slice(1);
+        if (d.length !== 10) return 'Enter a 10-digit US phone number.';
+        return null;
+      }
+      if (fmt === 'e164') {
+        let compact = str.trim().replace(/[\s()-]/g, '');
+        if (compact[0] !== '+') compact = d.length === 10 ? '+1' + d : '+' + d;
+        if (compact.indexOf('00') === 0) compact = '+' + compact.slice(2);
+        if (!/^\+[1-9]\d{7,14}$/.test(compact)) return 'Enter a phone number in E.164 format, like +14155552671.';
+        return null;
+      }
+      if (d.length < 8 || d.length > 15) return 'Enter a valid phone number (8–15 digits).';
+      return null;
+    }
+    if (field.type === 'url') {
+      try {
+        const u = new URL(str);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'Enter a URL starting with http:// or https://.';
+      } catch (err) {
+        return 'Enter a valid URL, like https://example.com.';
+      }
+      return null;
+    }
+    if (field.type === 'date') {
+      if (!isValidIsoDate(str)) return 'Enter a valid date.';
+      if (v.minDate && str < v.minDate) return 'Date must be on or after ' + v.minDate + '.';
+      if (v.maxDate && str > v.maxDate) return 'Date must be on or before ' + v.maxDate + '.';
+      return null;
+    }
+    if (typeof v.minLength === 'number' && str.length < v.minLength) return 'Must be at least ' + v.minLength + ' characters.';
+    if (typeof v.maxLength === 'number' && str.length > v.maxLength) return 'Must be at most ' + v.maxLength + ' characters.';
+    return null;
+  }
+  function clientErrors(fields, answers) {
+    const errors = {};
+    fields.forEach((field) => {
+      if (field.showWhen && field.showWhen.length > 0 && !conditionsPass(field.showWhen, answers)) return;
+      const required = !!field.required || (!!field.requiredWhen && field.requiredWhen.length > 0 && conditionsPass(field.requiredWhen, answers));
+      const raw = answers[field.id];
+      if (field.type === 'checkbox' && (field.options || []).length > 0) {
+        const arr = Array.isArray(raw) ? raw : [];
+        if (required && arr.length === 0) errors[field.id] = 'Please select at least one option.';
+        return;
+      }
+      if (field.type === 'checkbox') {
+        if (required && !raw) errors[field.id] = 'This checkbox is required.';
+        return;
+      }
+      if (field.type === 'number') {
+        if ((raw === '' || raw == null) && required) {
+          errors[field.id] = 'This field is required.';
+          return;
+        }
+        const err = validateClientField(field, raw);
+        if (err) errors[field.id] = err;
+        return;
+      }
+      const str = String(raw == null ? '' : raw).trim();
+      if (!str) {
+        if (required) errors[field.id] = 'This field is required.';
+        return;
+      }
+      const err = validateClientField(field, raw);
+      if (err) errors[field.id] = err;
+    });
+    return errors;
+  }
+
   function clearErrors(errorNodes) {
     Object.keys(errorNodes).forEach((k) => {
       errorNodes[k].textContent = '';
@@ -395,6 +533,9 @@ const EMBED_JS = String.raw`(() => {
           el.className = 'hf-textarea';
           el.name = field.id;
           el.placeholder = field.placeholder || '';
+          const ac = autocompleteOf(field);
+          if (ac) el.setAttribute('autocomplete', ac);
+          if (field.validation && typeof field.validation.maxLength === 'number') el.maxLength = field.validation.maxLength;
           addInput(el);
         } else if (field.type === 'select') {
           const el = document.createElement('select');
@@ -453,9 +594,30 @@ const EMBED_JS = String.raw`(() => {
         } else {
           const el = document.createElement('input');
           el.className = 'hf-input';
-          el.type = field.type === 'email' ? 'email' : field.type === 'number' ? 'number' : 'text';
+          el.type = inputTypeOf(field.type);
           el.name = field.id;
           el.placeholder = field.placeholder || '';
+          const mode = inputModeOf(field.type);
+          if (mode) el.setAttribute('inputmode', mode);
+          const ac = autocompleteOf(field);
+          if (ac) el.setAttribute('autocomplete', ac);
+          const v = field.validation || {};
+          if (field.type === 'number') {
+            if (typeof v.min === 'number') el.min = String(v.min);
+            if (typeof v.max === 'number') el.max = String(v.max);
+            if (typeof v.step === 'number') el.step = String(v.step);
+          }
+          if (field.type === 'date') {
+            if (v.minDate) el.min = v.minDate;
+            if (v.maxDate) el.max = v.maxDate;
+          }
+          if (typeof v.maxLength === 'number') el.maxLength = v.maxLength;
+          if (field.type === 'phone' && phoneFormatOf(field) === 'us') {
+            el.addEventListener('input', () => {
+              const next = formatPhoneUS(el.value);
+              if (next !== el.value) el.value = next;
+            });
+          }
           addInput(el);
         }
 
@@ -534,6 +696,14 @@ const EMBED_JS = String.raw`(() => {
         submit.disabled = true;
 
         const answers = readAnswers(formEl, fields);
+        const localErrors = clientErrors(fields, answers);
+        if (Object.keys(localErrors).length > 0) {
+          Object.keys(localErrors).forEach((k) => {
+            if (errorNodes[k]) errorNodes[k].textContent = String(localErrors[k]);
+          });
+          submit.disabled = false;
+          return;
+        }
         postJson(submitUrl, {
           sessionId: ensureSessionId(),
           answers,

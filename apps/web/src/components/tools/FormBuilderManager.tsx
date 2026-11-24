@@ -17,7 +17,25 @@ import {
   ShieldCheck,
   Trash2,
 } from 'lucide-react';
-import { DEFAULT_FORM_NOTIFICATIONS } from '@allebrum/shared';
+import {
+  DEFAULT_FORM_NOTIFICATIONS,
+  FIELD_PRESETS,
+  FIELD_TYPE_GROUPS,
+  FIELD_TYPE_LABELS,
+  defaultAutocomplete,
+  ensureFieldKeys,
+  fieldIdError,
+  findFieldByKey,
+  formatPhoneUS,
+  htmlInputMode,
+  htmlInputType,
+  newFieldKey,
+  phoneFormatOf,
+  instantiatePreset,
+  uniqueFieldId,
+  updateFieldByKey,
+  PHONE_FORMATS,
+} from '@allebrum/shared';
 import type {
   FormCaptchaProvider,
   FormDefinition,
@@ -29,6 +47,7 @@ import type {
   FormRow,
   FormStatus,
   FormVisibility,
+  PhoneFormat,
 } from '@allebrum/shared';
 import { useClients, useProjects, useUsers } from '@/hooks/useResources';
 import {
@@ -48,7 +67,7 @@ import { useToast } from '@/components/ui/Toast';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { relativeFromIso } from '@/lib/formatters';
 
-const FIELD_TYPES: FormFieldType[] = ['text', 'email', 'number', 'textarea', 'select', 'checkbox', 'radio'];
+const FIELD_TYPES: FormFieldType[] = FIELD_TYPE_GROUPS.flatMap((g) => g.types);
 const OPERATORS = ['equals', 'not_equals', 'includes', 'is_truthy', 'is_falsy'] as const;
 
 type Props = {
@@ -69,15 +88,18 @@ function normalizeOptionValue(label: string): string {
   return label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'option';
 }
 
-function newField(type: FormFieldType): FormField {
-  const id = `fld_${Math.random().toString(36).slice(2, 8)}_${Date.now().toString(36)}`;
+function newField(type: FormFieldType, existingIds: string[] = []): FormField {
+  const baseId = type === 'phone' ? 'phone' : type === 'url' ? 'url' : type === 'date' ? 'date' : type === 'email' ? 'email' : 'fld';
+  const id = uniqueFieldId(baseId === 'fld' ? `fld_${Math.random().toString(36).slice(2, 6)}` : baseId, existingIds);
   return {
     id,
-    label: 'New field',
+    key: newFieldKey(),
+    label: type === 'phone' ? 'Phone number' : type === 'url' ? 'Website' : type === 'date' ? 'Date' : type === 'email' ? 'Email' : 'New field',
     type,
     required: false,
-    placeholder: '',
+    placeholder: type === 'phone' ? '(555) 123-4567' : type === 'email' ? 'you@company.com' : type === 'url' ? 'https://' : '',
     helpText: '',
+    autocomplete: defaultAutocomplete(type) ?? '',
     options:
       type === 'select' || type === 'radio'
         ? [
@@ -85,11 +107,26 @@ function newField(type: FormFieldType): FormField {
             { label: 'Option 2', value: 'option_2' },
           ]
         : [],
-    validation: {},
+    validation: type === 'phone' ? { phoneFormat: 'us' } : {},
     showWhen: [],
     requiredWhen: [],
   };
 }
+
+function optionalNumber(value: string): number | undefined {
+  if (value.trim() === '') return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+const PHONE_FORMAT_LABELS: Record<PhoneFormat, string> = {
+  us: 'US  (555) 123-4567',
+  international: 'International',
+  e164: 'E.164  +14155552671',
+};
+
+const TEXT_LIKE: FormFieldType[] = ['text', 'email', 'phone', 'url', 'date', 'number'];
+
 
 function blankDefinition(): FormDefinition {
   return {
@@ -100,11 +137,13 @@ function blankDefinition(): FormDefinition {
     fields: [
       {
         id: 'full_name',
+        key: 'k_full_name',
         label: 'Full name',
         type: 'text',
         required: true,
         placeholder: 'Jane Doe',
         helpText: '',
+        autocomplete: 'name',
         options: [],
         validation: { minLength: 2 },
         showWhen: [],
@@ -112,11 +151,13 @@ function blankDefinition(): FormDefinition {
       },
       {
         id: 'email',
+        key: 'k_email',
         label: 'Email',
         type: 'email',
         required: true,
         placeholder: 'you@company.com',
         helpText: '',
+        autocomplete: 'email',
         options: [],
         validation: {},
         showWhen: [],
@@ -139,9 +180,9 @@ function validateBuilder(def: FormDefinition): string[] {
   if (def.fields.length === 0) errors.push('At least one field is required.');
 
   for (const field of def.fields) {
-    if (!field.id.trim()) errors.push('Every field needs an id.');
-    if (ids.has(field.id)) errors.push(`Duplicate field id: ${field.id}`);
-    ids.add(field.id);
+    const idErr = fieldIdError(field.id, [...ids]);
+    if (idErr) errors.push(`${field.label || 'Field'}: ${idErr}`);
+    if (field.id.trim()) ids.add(field.id.trim());
     if (!field.label.trim()) errors.push(`Field ${field.id || '(no id)'} needs a label.`);
     if ((field.type === 'select' || field.type === 'radio') && field.options.length === 0) {
       errors.push(`Field ${field.label || field.id} needs options.`);
@@ -242,7 +283,7 @@ export function FormBuilderManager({
   const [visibility, setVisibility] = useState<FormVisibility>(defaultVisibility);
   const [draft, setDraft] = useState<FormDefinition>(blankDefinition());
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(draft.fields[0]?.id ?? null);
+  const [selectedFieldKey, setSelectedFieldKey] = useState<string | null>(draft.fields[0]?.key ?? null);
   const [selectedClientId, setSelectedClientId] = useState(clientId ?? '');
   const [selectedProjectId, setSelectedProjectId] = useState(projectId ?? '');
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -272,15 +313,19 @@ export function FormBuilderManager({
   const builderErrors = useMemo(() => validateBuilder(draft), [draft]);
 
   const selectedField = useMemo(
-    () => draft.fields.find((f) => f.id === selectedFieldId) ?? null,
-    [draft.fields, selectedFieldId],
+    () => findFieldByKey(draft.fields, selectedFieldKey) ?? null,
+    [draft.fields, selectedFieldKey],
   );
+  const selectedIdError = useMemo(() => {
+    if (!selectedField) return null;
+    return fieldIdError(selectedField.id, draft.fields.filter((f) => f.key !== selectedField.key).map((f) => f.id.trim()));
+  }, [selectedField, draft.fields]);
 
   useEffect(() => {
-    if (!selectedFieldId || !draft.fields.some((f) => f.id === selectedFieldId)) {
-      setSelectedFieldId(draft.fields[0]?.id ?? null);
+    if (!selectedFieldKey || !draft.fields.some((f) => f.key === selectedFieldKey)) {
+      setSelectedFieldKey(draft.fields[0]?.key ?? null);
     }
-  }, [draft.fields, selectedFieldId]);
+  }, [draft.fields, selectedFieldKey]);
 
   const reset = () => {
     setName('');
@@ -289,7 +334,7 @@ export function FormBuilderManager({
     setVisibility(defaultVisibility);
     const def = blankDefinition();
     setDraft(def);
-    setSelectedFieldId(def.fields[0]?.id ?? null);
+    setSelectedFieldKey(def.fields[0]?.key ?? null);
     setPreviewAnswers({});
     setEditingId(null);
     setSelectedClientId(clientId ?? '');
@@ -311,11 +356,21 @@ export function FormBuilderManager({
     setEditorOpen(true);
   };
 
-  const updateField = (fieldId: string, updater: (field: FormField) => FormField) => {
-    setDraft((prev) => ({
-      ...prev,
-      fields: prev.fields.map((f) => (f.id === fieldId ? updater(f) : f)),
-    }));
+  const updateField = (fieldKey: string, updater: (field: FormField) => FormField) => {
+    setDraft((prev) => {
+      const current = findFieldByKey(prev.fields, fieldKey);
+      const nextFields = updateFieldByKey(prev.fields, fieldKey, updater);
+      const next = findFieldByKey(nextFields, fieldKey);
+      if (current && next && current.id !== next.id) {
+        setPreviewAnswers((answers) => {
+          if (!(current.id in answers)) return answers;
+          const moved = { ...answers, [next.id]: answers[current.id] };
+          delete moved[current.id];
+          return moved;
+        });
+      }
+      return { ...prev, fields: nextFields };
+    });
   };
 
   const removeField = (fieldId: string) => {
@@ -420,8 +475,9 @@ export function FormBuilderManager({
     setVisibility(row.visibility);
     setSelectedClientId(row.clientId ?? '');
     setSelectedProjectId(row.projectId ?? '');
-    setDraft(row.definition);
-    setSelectedFieldId(row.definition.fields[0]?.id ?? null);
+    const fields = ensureFieldKeys(row.definition.fields);
+    setDraft({ ...row.definition, fields });
+    setSelectedFieldKey(fields[0]?.key ?? null);
     setPreviewAnswers({});
     const n = row.notifications ?? DEFAULT_FORM_NOTIFICATIONS;
     setNotifications({ mode: n.mode, userIds: [...n.userIds], emails: [...n.emails] });
@@ -569,20 +625,41 @@ export function FormBuilderManager({
         <div className="grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-4">
           <div className="space-y-4">
             <div className="rounded-xl border border-gray-200 p-4 bg-gray-50 space-y-3">
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 items-center">
+                <span className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Add field</span>
                 {FIELD_TYPES.map((type) => (
                   <Button
                     key={type}
                     size="sm"
                     variant="ghost"
                     onClick={() => {
-                      const field = newField(type);
+                      const field = newField(type, draft.fields.map((f) => f.id));
                       setDraft((d) => ({ ...d, fields: [...d.fields, field] }));
-                      setSelectedFieldId(field.id);
+                      setSelectedFieldKey(field.key ?? field.id);
                     }}
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    {type}
+                    {FIELD_TYPE_LABELS[type]}
+                  </Button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2 items-center">
+                <span className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Presets</span>
+                {FIELD_PRESETS.map((preset) => (
+                  <Button
+                    key={preset.id}
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setDraft((d) => {
+                        const added = instantiatePreset(preset, d.fields);
+                        if (added[0]?.key) setSelectedFieldKey(added[0].key);
+                        return { ...d, fields: [...d.fields, ...added] };
+                      });
+                    }}
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    {preset.label}
                   </Button>
                 ))}
               </div>
@@ -590,18 +667,18 @@ export function FormBuilderManager({
               <ul className="rounded-xl border border-gray-200 divide-y divide-gray-100 bg-white">
                 {draft.fields.map((field, idx) => (
                   <li
-                    key={field.id}
+                    key={field.key ?? field.id}
                     draggable
                     onDragStart={() => setDragIndex(idx)}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={() => onDragDrop(idx)}
-                    className={`p-3 flex items-center gap-2 cursor-pointer ${selectedFieldId === field.id ? 'bg-indigo-50' : ''}`}
-                    onClick={() => setSelectedFieldId(field.id)}
+                    className={`p-3 flex items-center gap-2 cursor-pointer ${selectedFieldKey === (field.key ?? field.id) ? 'bg-indigo-50' : ''}`}
+                    onClick={() => setSelectedFieldKey(field.key ?? field.id)}
                   >
                     <GripVertical className="w-4 h-4 text-gray-400" />
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-semibold text-gray-900 truncate">{field.label || field.id}</div>
-                      <div className="text-xs text-gray-500">{field.type} · {field.id}</div>
+                      <div className="text-xs text-gray-500">{FIELD_TYPE_LABELS[field.type] ?? field.type} · {field.id}</div>
                     </div>
                     {(field.showWhen?.length ?? 0) > 0 && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-50 text-sky-700">show-if</span>
@@ -622,14 +699,23 @@ export function FormBuilderManager({
                 {visiblePreviewFields.map((field) => {
                   const required = !!field.required || conditionsPass(field.requiredWhen, previewAnswers);
                   return (
-                    <div key={field.id} className="space-y-1">
+                    <div key={field.key ?? field.id} className="space-y-1">
                       <div className="text-sm font-medium text-gray-800">{field.label}{required ? ' *' : ''}</div>
-                      {(field.type === 'text' || field.type === 'email' || field.type === 'number') && (
+                      {TEXT_LIKE.includes(field.type) && (
                         <Input
-                          type={field.type === 'text' ? 'text' : field.type}
+                          type={htmlInputType(field.type)}
+                          inputMode={htmlInputMode(field.type)}
+                          autoComplete={defaultAutocomplete(field.type, field.autocomplete) || undefined}
                           placeholder={field.placeholder || ''}
-                          value={typeof previewAnswers[field.id] === 'string' ? String(previewAnswers[field.id]) : ''}
-                          onChange={(e) => setPreviewAnswers((prev) => ({ ...prev, [field.id]: e.target.value }))}
+                          min={field.type === 'number' ? field.validation?.min : field.type === 'date' ? field.validation?.minDate : undefined}
+                          max={field.type === 'number' ? field.validation?.max : field.type === 'date' ? field.validation?.maxDate : undefined}
+                          step={field.type === 'number' ? field.validation?.step : undefined}
+                          value={typeof previewAnswers[field.id] === 'string' || typeof previewAnswers[field.id] === 'number' ? String(previewAnswers[field.id] ?? '') : ''}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            const value = field.type === 'phone' && phoneFormatOf(field) === 'us' ? formatPhoneUS(raw) : raw;
+                            setPreviewAnswers((prev) => ({ ...prev, [field.id]: value }));
+                          }}
                         />
                       )}
                       {field.type === 'textarea' && (
@@ -928,27 +1014,182 @@ export function FormBuilderManager({
               ) : (
                 <>
                   <Field label="Label">
-                    <Input value={selectedField.label} onChange={(e) => updateField(selectedField.id, (f) => ({ ...f, label: e.target.value }))} />
+                    <Input value={selectedField.label} onChange={(e) => updateField(selectedField.key ?? selectedField.id, (f) => ({ ...f, label: e.target.value }))} />
                   </Field>
-                  <Field label="Field id">
-                    <Input value={selectedField.id} onChange={(e) => updateField(selectedField.id, (f) => ({ ...f, id: e.target.value.trim() }))} />
+                  <Field
+                    label="Field ID"
+                    hint="Submission key. Letters, numbers, _ and -; must start with a letter and be unique on this form."
+                    error={selectedIdError ?? undefined}
+                  >
+                    <Input
+                      value={selectedField.id}
+                      invalid={!!selectedIdError}
+                      autoComplete="off"
+                      spellCheck={false}
+                      onChange={(e) => updateField(selectedField.key ?? selectedField.id, (f) => ({ ...f, id: e.target.value }))}
+                      onBlur={(e) => updateField(selectedField.key ?? selectedField.id, (f) => ({ ...f, id: e.target.value.trim() }))}
+                    />
                   </Field>
                   <Field label="Type">
-                    <Select value={selectedField.type} onChange={(e) => updateField(selectedField.id, (f) => ({ ...f, type: e.target.value as FormFieldType }))}>
-                      {FIELD_TYPES.map((t) => (
-                        <option key={t} value={t}>{t}</option>
+                    <Select
+                      value={selectedField.type}
+                      onChange={(e) =>
+                        updateField(selectedField.key ?? selectedField.id, (f) => {
+                          const type = e.target.value as FormFieldType;
+                          const validation = { ...f.validation };
+                          if (type === 'phone' && !validation.phoneFormat) validation.phoneFormat = 'us';
+                          return {
+                            ...f,
+                            type,
+                            autocomplete: f.autocomplete || defaultAutocomplete(type) || '',
+                            validation,
+                          };
+                        })
+                      }
+                    >
+                      {FIELD_TYPE_GROUPS.map((g) => (
+                        <optgroup key={g.label} label={g.label}>
+                          {g.types.map((t) => (
+                            <option key={t} value={t}>{FIELD_TYPE_LABELS[t]}</option>
+                          ))}
+                        </optgroup>
                       ))}
                     </Select>
                   </Field>
-                  {(selectedField.type === 'text' || selectedField.type === 'email' || selectedField.type === 'number' || selectedField.type === 'textarea') && (
-                    <>
-                      <Field label="Placeholder">
-                        <Input value={selectedField.placeholder ?? ''} onChange={(e) => updateField(selectedField.id, (f) => ({ ...f, placeholder: e.target.value }))} />
+                  <Field label="Placeholder">
+                    <Input value={selectedField.placeholder ?? ''} onChange={(e) => updateField(selectedField.key ?? selectedField.id, (f) => ({ ...f, placeholder: e.target.value }))} />
+                  </Field>
+                  <Field label="Help text">
+                    <Input value={selectedField.helpText ?? ''} onChange={(e) => updateField(selectedField.key ?? selectedField.id, (f) => ({ ...f, helpText: e.target.value }))} />
+                  </Field>
+                  {(selectedField.type === 'text' || selectedField.type === 'email' || selectedField.type === 'phone' || selectedField.type === 'url' || selectedField.type === 'textarea') && (
+                    <Field label="Autocomplete" hint="Browser autofill hint (optional).">
+                      <Input
+                        value={selectedField.autocomplete ?? ''}
+                        placeholder={defaultAutocomplete(selectedField.type) || ''}
+                        onChange={(e) => updateField(selectedField.key ?? selectedField.id, (f) => ({ ...f, autocomplete: e.target.value }))}
+                      />
+                    </Field>
+                  )}
+
+                  {selectedField.type === 'phone' && (
+                    <Field label="Phone format" hint="US format is applied as the visitor types. Submissions are normalized before they are stored.">
+                      <Select
+                        value={phoneFormatOf(selectedField)}
+                        onChange={(e) =>
+                          updateField(selectedField.key ?? selectedField.id, (f) => ({
+                            ...f,
+                            validation: { ...f.validation, phoneFormat: e.target.value as PhoneFormat },
+                          }))
+                        }
+                      >
+                        {PHONE_FORMATS.map((fmt) => (
+                          <option key={fmt} value={fmt}>{PHONE_FORMAT_LABELS[fmt]}</option>
+                        ))}
+                      </Select>
+                    </Field>
+                  )}
+
+                  {selectedField.type === 'number' && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <Field label="Min">
+                        <Input
+                          type="number"
+                          value={selectedField.validation?.min ?? ''}
+                          onChange={(e) =>
+                            updateField(selectedField.key ?? selectedField.id, (f) => ({
+                              ...f,
+                              validation: { ...f.validation, min: optionalNumber(e.target.value) },
+                            }))
+                          }
+                        />
                       </Field>
-                      <Field label="Help text">
-                        <Input value={selectedField.helpText ?? ''} onChange={(e) => updateField(selectedField.id, (f) => ({ ...f, helpText: e.target.value }))} />
+                      <Field label="Max">
+                        <Input
+                          type="number"
+                          value={selectedField.validation?.max ?? ''}
+                          onChange={(e) =>
+                            updateField(selectedField.key ?? selectedField.id, (f) => ({
+                              ...f,
+                              validation: { ...f.validation, max: optionalNumber(e.target.value) },
+                            }))
+                          }
+                        />
                       </Field>
-                    </>
+                      <Field label="Step">
+                        <Input
+                          type="number"
+                          value={selectedField.validation?.step ?? ''}
+                          placeholder="any"
+                          onChange={(e) =>
+                            updateField(selectedField.key ?? selectedField.id, (f) => ({
+                              ...f,
+                              validation: { ...f.validation, step: optionalNumber(e.target.value) },
+                            }))
+                          }
+                        />
+                      </Field>
+                    </div>
+                  )}
+
+                  {selectedField.type === 'date' && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <Field label="Earliest date">
+                        <Input
+                          type="date"
+                          value={selectedField.validation?.minDate ?? ''}
+                          onChange={(e) =>
+                            updateField(selectedField.key ?? selectedField.id, (f) => ({
+                              ...f,
+                              validation: { ...f.validation, minDate: e.target.value || undefined },
+                            }))
+                          }
+                        />
+                      </Field>
+                      <Field label="Latest date">
+                        <Input
+                          type="date"
+                          value={selectedField.validation?.maxDate ?? ''}
+                          onChange={(e) =>
+                            updateField(selectedField.key ?? selectedField.id, (f) => ({
+                              ...f,
+                              validation: { ...f.validation, maxDate: e.target.value || undefined },
+                            }))
+                          }
+                        />
+                      </Field>
+                    </div>
+                  )}
+
+                  {(selectedField.type === 'text' || selectedField.type === 'textarea') && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <Field label="Min length">
+                        <Input
+                          type="number"
+                          min={0}
+                          value={selectedField.validation?.minLength ?? ''}
+                          onChange={(e) =>
+                            updateField(selectedField.key ?? selectedField.id, (f) => ({
+                              ...f,
+                              validation: { ...f.validation, minLength: optionalNumber(e.target.value) },
+                            }))
+                          }
+                        />
+                      </Field>
+                      <Field label="Max length">
+                        <Input
+                          type="number"
+                          min={1}
+                          value={selectedField.validation?.maxLength ?? ''}
+                          onChange={(e) =>
+                            updateField(selectedField.key ?? selectedField.id, (f) => ({
+                              ...f,
+                              validation: { ...f.validation, maxLength: optionalNumber(e.target.value) },
+                            }))
+                          }
+                        />
+                      </Field>
+                    </div>
                   )}
 
                   {(selectedField.type === 'select' || selectedField.type === 'radio' || selectedField.type === 'checkbox') && (
@@ -957,7 +1198,7 @@ export function FormBuilderManager({
                         rows={4}
                         value={selectedField.options.map((o) => o.label).join('\n')}
                         onChange={(e) =>
-                          updateField(selectedField.id, (f) => {
+                          updateField(selectedField.key ?? selectedField.id, (f) => {
                             const labels = parseLines(e.target.value);
                             return {
                               ...f,
@@ -970,22 +1211,22 @@ export function FormBuilderManager({
                   )}
 
                   <label className="inline-flex items-center gap-2 text-sm text-gray-700">
-                    <input type="checkbox" checked={!!selectedField.required} onChange={(e) => updateField(selectedField.id, (f) => ({ ...f, required: e.target.checked }))} />
+                    <input type="checkbox" checked={!!selectedField.required} onChange={(e) => updateField(selectedField.key ?? selectedField.id, (f) => ({ ...f, required: e.target.checked }))} />
                     Always required
                   </label>
 
                   <ConditionEditor
                     title="Show if"
                     conditions={selectedField.showWhen ?? []}
-                    fields={draft.fields.filter((f) => f.id !== selectedField.id)}
-                    onChange={(next) => updateField(selectedField.id, (f) => ({ ...f, showWhen: next }))}
+                    fields={draft.fields.filter((f) => (f.key ?? f.id) !== (selectedField.key ?? selectedField.id))}
+                    onChange={(next) => updateField(selectedField.key ?? selectedField.id, (f) => ({ ...f, showWhen: next }))}
                   />
 
                   <ConditionEditor
                     title="Required if"
                     conditions={selectedField.requiredWhen ?? []}
-                    fields={draft.fields.filter((f) => f.id !== selectedField.id)}
-                    onChange={(next) => updateField(selectedField.id, (f) => ({ ...f, requiredWhen: next }))}
+                    fields={draft.fields.filter((f) => (f.key ?? f.id) !== (selectedField.key ?? selectedField.id))}
+                    onChange={(next) => updateField(selectedField.key ?? selectedField.id, (f) => ({ ...f, requiredWhen: next }))}
                   />
 
                   <Button variant="ghost" size="sm" onClick={() => removeField(selectedField.id)}>

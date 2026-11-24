@@ -9,6 +9,9 @@ export type FormStatus = (typeof FORM_STATUSES)[number];
 export const FORM_FIELD_TYPES = [
   'text',
   'email',
+  'phone',
+  'url',
+  'date',
   'number',
   'textarea',
   'select',
@@ -35,12 +38,21 @@ export const FormFieldOptionSchema = z.object({
 });
 export type FormFieldOption = z.infer<typeof FormFieldOptionSchema>;
 
+export const PHONE_FORMATS = ['us', 'international', 'e164'] as const;
+export type PhoneFormat = (typeof PHONE_FORMATS)[number];
+
 export const FormFieldValidationSchema = z.object({
   minLength: z.number().int().min(0).max(5000).optional(),
   maxLength: z.number().int().min(1).max(5000).optional(),
   pattern: z.string().max(500).optional(),
   min: z.number().optional(),
   max: z.number().optional(),
+  step: z.number().positive().optional(),
+  /** Phone formatting: US (default), loose international, or E.164. */
+  phoneFormat: z.enum(PHONE_FORMATS).optional(),
+  /** Inclusive YYYY-MM-DD bounds for `date` fields. */
+  minDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').optional(),
+  maxDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').optional(),
 });
 export type FormFieldValidation = z.infer<typeof FormFieldValidationSchema>;
 
@@ -53,11 +65,18 @@ export type FormFieldCondition = z.infer<typeof FormFieldConditionSchema>;
 
 export const FormFieldSchema = z.object({
   id: z.string().min(1).max(80),
+  /**
+   * Stable editor identity, separate from the user-editable submission `id`.
+   * Optional so existing saved forms (which have no key) still parse; the
+   * builder assigns one when a form is opened.
+   */
+  key: z.string().min(1).max(80).optional(),
   label: z.string().min(1).max(160),
   type: z.enum(FORM_FIELD_TYPES),
   required: z.boolean().optional().default(false),
   placeholder: z.string().max(200).optional().default(''),
   helpText: z.string().max(400).optional().default(''),
+  autocomplete: z.string().max(80).optional().default(''),
   options: z.array(FormFieldOptionSchema).max(200).optional().default([]),
   validation: FormFieldValidationSchema.optional().default({}),
   showWhen: z.array(FormFieldConditionSchema).max(20).optional().default([]),

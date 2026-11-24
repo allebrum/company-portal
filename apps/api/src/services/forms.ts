@@ -31,6 +31,7 @@ import {
 import { env } from '../env.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { tenantEq, stampTenant } from '../tenancy/scope.js';
+import { normalizeTypedValue, validateNumber, validateTypedValue } from '@allebrum/shared';
 import { currentTenantId } from '../tenancy/context.js';
 import { appendActivity } from './activity.js';
 import { loadKeyset } from './credentials.js';
@@ -664,24 +665,8 @@ function validateAnswers(definition: FormDefinition, answers: Record<string, unk
     }
 
     if (field.type === 'number') {
-      if (raw === undefined || raw === null || raw === '') {
-        if (required) errors[field.id] = 'This field is required.';
-        continue;
-      }
-      const n = typeof raw === 'number' ? raw : Number(raw);
-      if (!Number.isFinite(n)) {
-        errors[field.id] = 'Please enter a valid number.';
-        continue;
-      }
-      const min = field.validation.min;
-      const max = field.validation.max;
-      if (typeof min === 'number' && n < min) {
-        errors[field.id] = `Must be at least ${min}.`;
-        continue;
-      }
-      if (typeof max === 'number' && n > max) {
-        errors[field.id] = `Must be at most ${max}.`;
-      }
+      const err = validateNumber(raw, field.validation, required);
+      if (err) errors[field.id] = err;
       continue;
     }
 
@@ -699,12 +684,10 @@ function validateAnswers(definition: FormDefinition, answers: Record<string, unk
       }
     }
 
-    if (field.type === 'email') {
-      const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str);
-      if (!emailOk) {
-        errors[field.id] = 'Please enter a valid email address.';
-        continue;
-      }
+    const typedErr = validateTypedValue(field, str);
+    if (typedErr) {
+      errors[field.id] = typedErr;
+      continue;
     }
 
     const minLength = field.validation.minLength;
@@ -759,7 +742,8 @@ function normalizeAnswers(definition: FormDefinition, rawAnswers: Record<string,
       out[field.id] = '';
       continue;
     }
-    out[field.id] = String(raw);
+    const normalized = normalizeTypedValue(field, raw);
+    out[field.id] = normalized == null ? '' : typeof normalized === 'string' ? normalized : String(normalized);
   }
   return out;
 }
