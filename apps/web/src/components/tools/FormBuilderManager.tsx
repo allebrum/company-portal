@@ -254,6 +254,40 @@ function parseLines(value: string): string[] {
     .filter(Boolean);
 }
 
+/**
+ * A "one per line" textarea. Keeps the raw text locally so Enter and blank
+ * lines aren't stripped while typing; only the parsed list goes upstream.
+ */
+function LinesTextarea({
+  lines,
+  onLinesChange,
+  rows,
+  placeholder,
+}: {
+  lines: string[];
+  onLinesChange: (lines: string[]) => void;
+  rows?: number;
+  placeholder?: string;
+}) {
+  const [text, setText] = useState(() => lines.join('\n'));
+  const joined = lines.join('\n');
+  useEffect(() => {
+    // Resync only when the list changed from outside (e.g. switching forms/fields).
+    setText((cur) => (parseLines(cur).join('\n') === joined ? cur : joined));
+  }, [joined]);
+  return (
+    <Textarea
+      rows={rows}
+      value={text}
+      placeholder={placeholder}
+      onChange={(e) => {
+        setText(e.target.value);
+        onLinesChange(parseLines(e.target.value));
+      }}
+    />
+  );
+}
+
 export function FormBuilderManager({
   clientId = null,
   projectId = null,
@@ -813,26 +847,26 @@ export function FormBuilderManager({
             <div className="rounded-xl border border-gray-200 p-4 bg-white space-y-3">
               <div className="text-xs uppercase tracking-wider text-gray-500 font-bold">Security</div>
               <Field label="Allowed origins (one per line)">
-                <Textarea
+                <LinesTextarea
                   rows={3}
-                  value={(draft.security?.allowedOrigins ?? []).join('\n')}
-                  onChange={(e) =>
+                  lines={draft.security?.allowedOrigins ?? []}
+                  onLinesChange={(lines) =>
                     setDraft((d) => ({
                       ...d,
-                      security: { ...d.security, allowedOrigins: parseLines(e.target.value) },
+                      security: { ...d.security, allowedOrigins: lines },
                     }))
                   }
                   placeholder="https://www.example.com"
                 />
               </Field>
               <Field label="Allowed page path prefixes (one per line)">
-                <Textarea
+                <LinesTextarea
                   rows={3}
-                  value={(draft.security?.allowedPathPrefixes ?? []).join('\n')}
-                  onChange={(e) =>
+                  lines={draft.security?.allowedPathPrefixes ?? []}
+                  onLinesChange={(lines) =>
                     setDraft((d) => ({
                       ...d,
-                      security: { ...d.security, allowedPathPrefixes: parseLines(e.target.value) },
+                      security: { ...d.security, allowedPathPrefixes: lines },
                     }))
                   }
                   placeholder="/contact"
@@ -1195,12 +1229,12 @@ export function FormBuilderManager({
 
                   {(selectedField.type === 'select' || selectedField.type === 'radio' || selectedField.type === 'checkbox') && (
                     <Field label="Options (one label per line)">
-                      <Textarea
+                      <LinesTextarea
+                        key={selectedField.key ?? selectedField.id}
                         rows={4}
-                        value={selectedField.options.map((o) => o.label).join('\n')}
-                        onChange={(e) =>
+                        lines={selectedField.options.map((o) => o.label)}
+                        onLinesChange={(labels) =>
                           updateField(selectedField.key ?? selectedField.id, (f) => {
-                            const labels = parseLines(e.target.value);
                             return {
                               ...f,
                               options: labels.map((label) => ({ label, value: normalizeOptionValue(label) })),
