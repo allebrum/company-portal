@@ -3,27 +3,29 @@ import type { Form } from '../db/schema.js';
 import { env } from '../env.js';
 import { decryptField } from '../lib/crypto.js';
 import { loadKeyset } from './credentials.js';
+import { TURNSTILE_VERIFY_URL } from './turnstileRules.js';
 
 /**
  * Captcha key resolution + server-side verification for public form submits.
- * hCaptcha / reCAPTCHA keys are server-wide (env). Cloudflare Turnstile can
- * also be configured PER FORM (site key + encrypted secret on the form row)
- * because a Turnstile widget only works on the hostnames listed for it in
- * Cloudflare, and forms are embedded on many different client sites.
+ * hCaptcha / reCAPTCHA keys are server-wide (env). Cloudflare Turnstile is
+ * per-workspace (Admin → Integrations); a form may optionally override with
+ * its own widget when a client site needs a separate hostname list.
  */
 
 export const TURNSTILE_SECRET_FIELD = 'forms.turnstile_secret';
-export const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+export { TURNSTILE_VERIFY_URL };
 
-/** Site key the embed renders. Turnstile: the form's own key wins over env. */
+type TurnstileRow = Pick<Form, 'id' | 'tenantId' | 'turnstileSiteKey' | 'turnstileSecretEnc'>;
+
+/** Sync helper for tests: form-level site key only (no workspace lookup). */
 export function providerSiteKey(provider: FormCaptchaProvider | null, row?: Pick<Form, 'turnstileSiteKey'> | null): string | null {
   if (provider === 'hcaptcha') return env.HCAPTCHA_SITE_KEY ?? null;
   if (provider === 'recaptcha') return env.RECAPTCHA_SITE_KEY ?? null;
-  if (provider === 'turnstile') return row?.turnstileSiteKey?.trim() || env.TURNSTILE_SITE_KEY || null;
+  if (provider === 'turnstile') return row?.turnstileSiteKey?.trim() || null;
   return null;
 }
 
-function decryptTurnstileSecret(row: Pick<Form, 'id' | 'tenantId' | 'turnstileSecretEnc'>): string | null {
+function decryptFormTurnstileSecret(row: TurnstileRow): string | null {
   if (!row.turnstileSecretEnc) return null;
   const { keyset } = loadKeyset();
   if (!keyset) {
@@ -38,19 +40,23 @@ function decryptTurnstileSecret(row: Pick<Form, 'id' | 'tenantId' | 'turnstileSe
   }
 }
 
-/**
- * Server-side secret. Turnstile: a form with its OWN site key must use its own
- * secret (a mismatched env secret would always fail); otherwise the env default.
- */
-function providerSecret(
-  provider: FormCaptchaProvider | null,
-  row?: Pick<Form, 'id' | 'tenantId' | 'turnstileSiteKey' | 'turnstileSecretEnc'> | null,
-): string | null {
+/** Site key the embed renders. Form override wins; otherwise the workspace integration. */
+export async function resolveCaptchaSiteKey(provider: FormCaptchaProvider | null, row: TurnstileRow): Promise<string | null> {
+  if (provider !== 'turnstile') return providerSiteKey(provider, row);
+  if (row.turnstileSiteKey?.trim()) return row.turnstileSiteKey.trim();
+  const { getWorkspaceTurnstileKeys } = await import('./turnstile.js');
+  const ws = await getWorkspaceTurnstileKeys(row.tenantId);
+  return ws?.siteKey ?? null;
+}
+
+async function resolveCaptchaSecret(provider: FormCaptchaProvider | null, row: TurnstileRow): Promise<string | null> {
   if (provider === 'hcaptcha') return env.HCAPTCHA_SECRET ?? null;
   if (provider === 'recaptcha') return env.RECAPTCHA_SECRET ?? null;
   if (provider === 'turnstile') {
-    if (row?.turnstileSiteKey?.trim()) return row ? decryptTurnstileSecret(row) : null;
-    return env.TURNSTILE_SECRET ?? null;
+    if (row.turnstileSiteKey?.trim()) return decryptFormTurnstileSecret(row);
+    const { getWorkspaceTurnstileKeys } = await import('./turnstile.js');
+    const ws = await getWorkspaceTurnstileKeys(row.tenantId);
+    return ws?.secret ?? null;
   }
   return null;
 }
@@ -67,7 +73,7 @@ export async function verifyCaptcha(args: {
   remoteIp: string | null;
   row: Form;
 }): Promise<boolean> {
-  const secret = providerSecret(args.provider, args.row);
+  const secret = await resolveCaptchaSecret(args.provider, args.row);
   if (!secret) return false;
   const body = new URLSearchParams();
   body.set('secret', secret);

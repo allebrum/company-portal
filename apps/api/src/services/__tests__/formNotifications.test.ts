@@ -89,7 +89,7 @@ test('parsePgTimestamp handles Postgres text and ISO', () => {
   assert.equal(parsePgTimestamp('2026-11-24 08:31:00-08').toISOString(), '2026-11-24T16:31:00.000Z');
 });
 
-test('turnstile: verify endpoint + per-form site key beats the env default', () => {
+test('turnstile: verify endpoint + per-form site key is used when set', () => {
   assert.equal(captchaVerifyEndpoint('turnstile'), 'https://challenges.cloudflare.com/turnstile/v0/siteverify');
   assert.equal(captchaVerifyEndpoint('recaptcha'), 'https://www.google.com/recaptcha/api/siteverify');
   assert.equal(providerSiteKey('turnstile', { turnstileSiteKey: '0x4AAA-form' }), '0x4AAA-form');

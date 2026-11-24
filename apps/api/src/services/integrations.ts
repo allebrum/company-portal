@@ -16,9 +16,11 @@ import { disconnectDrive } from './drive.js';
 import { disconnectQuickBooks } from './quickbooks.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { tenantEq, stampTenant } from '../tenancy/scope.js';
+import { redactIntegrationConfig, TURNSTILE_KIND } from './turnstile.js';
 
 export async function listIntegrations(): Promise<Integration[]> {
-  return db.select().from(integrations).where(tenantEq(integrations.tenantId));
+  const rows = await db.select().from(integrations).where(tenantEq(integrations.tenantId));
+  return rows.map(redactIntegrationConfig);
 }
 
 export async function getIntegration(kind: IntegrationKind): Promise<Integration | undefined> {
@@ -59,6 +61,7 @@ async function upsertIntegration(kind: IntegrationKind, patch: Partial<Integrati
 }
 
 export async function connect(kind: IntegrationKind, input: ConnectIntegrationInput, whoId: string): Promise<Integration> {
+  if (kind === TURNSTILE_KIND) throw new HttpError(400, 'use_turnstile_endpoints');
   const row = await upsertIntegration(kind, {
     connected: true,
     account: input.account ?? kind,
@@ -73,6 +76,7 @@ export async function connect(kind: IntegrationKind, input: ConnectIntegrationIn
 }
 
 export async function disconnect(kind: IntegrationKind, whoId: string): Promise<Integration> {
+  if (kind === TURNSTILE_KIND) throw new HttpError(400, 'use_turnstile_endpoints');
   if (kind === 'drive') {
     await disconnectDrive();
   }
@@ -92,6 +96,7 @@ export async function disconnect(kind: IntegrationKind, whoId: string): Promise<
 }
 
 export async function update(kind: IntegrationKind, patch: ConnectIntegrationInput, whoId: string): Promise<Integration> {
+  if (kind === TURNSTILE_KIND) throw new HttpError(400, 'use_turnstile_endpoints');
   const row = await upsertIntegration(kind, {
     account: patch.account,
     autoSync: patch.autoSync,

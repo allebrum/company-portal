@@ -214,6 +214,7 @@ export const TOKEN_ROUTES: TokenRoute[] = [
   r('GET', '/api/integrations/quickbooks/items', 'read'),
   r('GET', '/api/integrations/gmail/status', 'read'),
   r('GET', '/api/integrations/gmail/connected-users', 'read'),
+  r('GET', '/api/integrations/turnstile/status', 'read'),
 
   // ---- upload-QR sessions (staff side)
   r('GET', '/api/upload/qr/sessions', 'read'),
@@ -317,6 +318,10 @@ export const SESSION_ONLY_ROUTES: SessionOnlyRoute[] = [
       ['GET', '/api/integrations/gmail/connect'],
       ['GET', '/api/integrations/gmail/callback'],
       ['POST', '/api/integrations/gmail/disconnect'],
+      ['PUT', '/api/integrations/turnstile'],
+      ['POST', '/api/integrations/turnstile/test'],
+      ['POST', '/api/integrations/turnstile/sync-hostnames'],
+      ['POST', '/api/integrations/turnstile/disconnect'],
     ] as const
   ).map(([method, path]) => ({ method, path, reason: OAUTH })),
 ];
