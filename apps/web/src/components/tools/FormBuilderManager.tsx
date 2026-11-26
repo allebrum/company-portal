@@ -19,7 +19,12 @@ import {
 } from 'lucide-react';
 import {
   DEFAULT_FORM_NOTIFICATIONS,
+  DEFAULT_MAX_SUBMISSIONS_PER_HOUR,
+  DEFAULT_MAX_SUBMISSIONS_PER_IP_PER_HOUR,
+  DEFAULT_RESET_LABEL,
+  DEFAULT_RESUBMIT_WINDOW_HOURS,
   FIELD_PRESETS,
+  isSafeRedirectUrl,
   FIELD_TYPE_GROUPS,
   FIELD_TYPE_LABELS,
   defaultAutocomplete,
@@ -135,6 +140,11 @@ function blankDefinition(): FormDefinition {
     description: 'Drop us a message and we will reply shortly.',
     submitLabel: 'Submit',
     successMessage: 'Thanks, we got your submission.',
+    allowAnotherSubmission: true,
+    resetLabel: DEFAULT_RESET_LABEL,
+    resubmitWindowHours: DEFAULT_RESUBMIT_WINDOW_HOURS,
+    maxSubmissionsPerIpPerHour: DEFAULT_MAX_SUBMISSIONS_PER_IP_PER_HOUR,
+    maxSubmissionsPerHour: DEFAULT_MAX_SUBMISSIONS_PER_HOUR,
     fields: [
       {
         id: 'full_name',
@@ -208,7 +218,37 @@ function validateBuilder(def: FormDefinition): string[] {
     }
   }
 
+  const redirect = (def.redirectUrl ?? '').trim();
+  if (redirect && !isSafeRedirectUrl(redirect)) {
+    errors.push('Redirect after submit must be an http:// or https:// URL.');
+  }
+
+  const ipHour = def.maxSubmissionsPerIpPerHour ?? DEFAULT_MAX_SUBMISSIONS_PER_IP_PER_HOUR;
+  if (ipHour < 1 || ipHour > 100) {
+    errors.push('Max submissions per visitor per hour must be between 1 and 100.');
+  }
+  const formHour = def.maxSubmissionsPerHour ?? DEFAULT_MAX_SUBMISSIONS_PER_HOUR;
+  if (formHour < 10 || formHour > 10000) {
+    errors.push('Max submissions per hour (everyone) must be between 10 and 10,000.');
+  }
+  const windowHours = def.resubmitWindowHours ?? DEFAULT_RESUBMIT_WINDOW_HOURS;
+  if (windowHours < 1 || windowHours > 8760) {
+    errors.push('The one-submission window must be between 1 hour and 8,760 hours (1 year).');
+  }
+
   return errors;
+}
+
+function withFormDefaults(def: FormDefinition): FormDefinition {
+  return {
+    ...def,
+    allowAnotherSubmission: def.allowAnotherSubmission !== false,
+    resetLabel: def.resetLabel?.trim() || DEFAULT_RESET_LABEL,
+    resubmitWindowHours: def.resubmitWindowHours ?? DEFAULT_RESUBMIT_WINDOW_HOURS,
+    maxSubmissionsPerIpPerHour: def.maxSubmissionsPerIpPerHour ?? DEFAULT_MAX_SUBMISSIONS_PER_IP_PER_HOUR,
+    maxSubmissionsPerHour: def.maxSubmissionsPerHour ?? DEFAULT_MAX_SUBMISSIONS_PER_HOUR,
+    redirectUrl: def.redirectUrl || undefined,
+  };
 }
 
 function asComparableValue(value: unknown): string {
@@ -511,7 +551,7 @@ export function FormBuilderManager({
     setSelectedClientId(row.clientId ?? '');
     setSelectedProjectId(row.projectId ?? '');
     const fields = ensureFieldKeys(row.definition.fields);
-    setDraft({ ...row.definition, fields });
+    setDraft(withFormDefaults({ ...row.definition, fields }));
     setSelectedFieldKey(fields[0]?.key ?? null);
     setPreviewAnswers({});
     const n = row.notifications ?? DEFAULT_FORM_NOTIFICATIONS;
@@ -842,6 +882,61 @@ export function FormBuilderManager({
               <Field label="Success message">
                 <Input value={draft.successMessage} onChange={(e) => setDraft((d) => ({ ...d, successMessage: e.target.value }))} />
               </Field>
+              <Field
+                label="Redirect after submit"
+                hint="Optional. If set, visitors are sent to this page instead of the in-place confirmation. Must start with http:// or https://."
+              >
+                <Input
+                  value={draft.redirectUrl ?? ''}
+                  onChange={(e) => setDraft((d) => ({ ...d, redirectUrl: e.target.value }))}
+                  placeholder="https://example.com/thank-you"
+                />
+              </Field>
+              <label className="inline-flex items-start gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={draft.allowAnotherSubmission !== false}
+                  onChange={(e) => setDraft((d) => ({ ...d, allowAnotherSubmission: e.target.checked }))}
+                />
+                <span>
+                  <span className="font-medium">Allow more submissions</span>
+                  <span className="block text-xs text-gray-500 mt-0.5">
+                    When on, the confirmation panel includes a link to submit again. Turn this off for things like email signups — each visitor can submit once per the window below.
+                  </span>
+                </span>
+              </label>
+              {draft.allowAnotherSubmission !== false ? (
+                <Field label="“Submit another” link label">
+                  <Input
+                    value={draft.resetLabel ?? DEFAULT_RESET_LABEL}
+                    onChange={(e) => setDraft((d) => ({ ...d, resetLabel: e.target.value }))}
+                    placeholder={DEFAULT_RESET_LABEL}
+                  />
+                </Field>
+              ) : (
+                <Field
+                  label="One submission per visitor every"
+                  hint="Enforced on the server (not just in the browser). The confirmation stays on the page if they come back."
+                >
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={1}
+                      max={8760}
+                      value={draft.resubmitWindowHours ?? DEFAULT_RESUBMIT_WINDOW_HOURS}
+                      onChange={(e) => {
+                        const n = Number(e.target.value);
+                        setDraft((d) => ({
+                          ...d,
+                          resubmitWindowHours: Number.isFinite(n) ? Math.trunc(n) : DEFAULT_RESUBMIT_WINDOW_HOURS,
+                        }));
+                      }}
+                    />
+                    <span className="text-sm text-gray-500 shrink-0">hours</span>
+                  </div>
+                </Field>
+              )}
             </div>
 
             <div className="rounded-xl border border-gray-200 p-4 bg-white space-y-3">
@@ -977,6 +1072,53 @@ export function FormBuilderManager({
                   </span>
                 </div>
               )}
+              <div className="pt-2 border-t border-gray-100 space-y-3">
+                <div className="text-xs uppercase tracking-wider text-gray-500 font-bold">Rate limiting</div>
+                <p className="text-xs text-gray-500">
+                  Captchas like Turnstile check that a visitor is human; they don&apos;t cap how many times someone can submit.
+                  Hoppa also limits accepted submissions per visitor and per form.
+                </p>
+                <Field
+                  label="Max submissions per visitor per hour"
+                  hint={
+                    draft.allowAnotherSubmission === false
+                      ? 'A short burst limit of 5 per 10 minutes also applies. Visitors are already limited to one submission per the window in Form Settings.'
+                      : 'Default 10. A short burst limit of 5 per 10 minutes also applies. Identical repeats within 10 minutes are ignored.'
+                  }
+                >
+                  <Input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={draft.maxSubmissionsPerIpPerHour ?? DEFAULT_MAX_SUBMISSIONS_PER_IP_PER_HOUR}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      setDraft((d) => ({
+                        ...d,
+                        maxSubmissionsPerIpPerHour: Number.isFinite(n) ? Math.trunc(n) : DEFAULT_MAX_SUBMISSIONS_PER_IP_PER_HOUR,
+                      }));
+                    }}
+                  />
+                </Field>
+                <Field
+                  label="Max submissions per hour (everyone)"
+                  hint="Default 200. Protects the inbox if many people submit at once."
+                >
+                  <Input
+                    type="number"
+                    min={10}
+                    max={10000}
+                    value={draft.maxSubmissionsPerHour ?? DEFAULT_MAX_SUBMISSIONS_PER_HOUR}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      setDraft((d) => ({
+                        ...d,
+                        maxSubmissionsPerHour: Number.isFinite(n) ? Math.trunc(n) : DEFAULT_MAX_SUBMISSIONS_PER_HOUR,
+                      }));
+                    }}
+                  />
+                </Field>
+              </div>
             </div>
 
             <div className="rounded-xl border border-gray-200 p-4 bg-white space-y-3">

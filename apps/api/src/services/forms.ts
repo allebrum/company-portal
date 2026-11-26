@@ -40,6 +40,8 @@ import { resolveNotifications } from './formNotifyRules.js';
 import { resolveCaptchaSiteKey, TURNSTILE_SECRET_FIELD, verifyCaptcha } from './formCaptcha.js';
 import { getTurnstileStatus, getWorkspaceTurnstileKeys } from './turnstile.js';
 import { encryptField } from '../lib/crypto.js';
+import { redisSession } from '../redis.js';
+import { guardPublicSubmit, type RedisCounter } from './formSubmitGuard.js';
 
 type ScopeLink = { clientId: string | null; projectId: string | null };
 
@@ -849,6 +851,25 @@ export async function submitPublicForm(args: {
   }
 
   const normalized = normalizeAnswers(definition, args.input.answers);
+
+  const guard = await guardPublicSubmit({
+    formId: row.id,
+    ip: args.ip,
+    sessionId: args.input.sessionId,
+    answers: normalized,
+    definition,
+    redis: redisSession as unknown as RedisCounter,
+  });
+  if (!guard.ok) {
+    return { ok: false, errors: guard.errors, status: guard.status };
+  }
+  if ('skipStore' in guard && guard.skipStore) {
+    return {
+      ok: true,
+      message: guard.message,
+      alreadySubmitted: guard.skipStore === 'already_submitted',
+    };
+  }
 
   const submittedAt = await db.transaction(async (tx) => {
     const [inserted] = await tx.insert(formSubmissions).values({

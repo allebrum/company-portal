@@ -119,3 +119,56 @@ Turn on **Require captcha on submit** in a form's Security card, then choose a p
 Cloudflare's test keys work locally: site key `1x00000000000000000000AA` with secret
 `1x0000000000000000000000000000000AA` always passes, and secret
 `2x0000000000000000000000000000000AA` always fails.
+
+## After a successful submit
+
+The embed (`/api/f/embed.js`) hides the form (fields, captcha, and submit button)
+and shows a confirmation panel inside the same card: a check icon, the form's
+**Success message**, and — when allowed — a **Submit another response** link.
+Host sites can style this with stable classes: `hoppa-form-card`, `hoppa-form`,
+`hoppa-form-success`, `hoppa-form-success-icon`, `hoppa-form-success-message`,
+and `hoppa-form-reset`. The panel uses `role="status"` and moves focus to itself
+so screen readers announce it. Turnstile is not reset until the visitor clicks
+the link to submit again, so the widget doesn't immediately run another challenge.
+
+**Redirect after submit:** an optional `http://` or `https://` URL on the form.
+When set, a successful submit navigates the top window to that page instead of
+showing the panel. `javascript:` and other schemes are rejected.
+
+### Allow more submissions
+
+This switch is **on** by default.
+
+| Setting | What happens |
+|---|---|
+| On | The confirmation panel includes the reset link (label is editable). Visitors can submit again, subject to the rate limits below. |
+| Off | No reset link. The server allows **one accepted submission per visitor** per a configurable window (default **24 hours**). A repeat gets a friendly “You've already submitted this form” confirmation (nothing new is stored). The embed also remembers this in `localStorage`, so a reload of the host page still shows the confirmation instead of an empty form. |
+
+“Visitor” is keyed by hashed IP and by the embed's session id, not by a stored
+raw address in Redis.
+
+## Rate limiting and spam
+
+Turnstile (and reCAPTCHA / hCaptcha) **do not throttle volume**. They verify that
+a challenge was completed and typically accept a token only once. A determined
+person — or a flood of distinct tokens — can still submit many times unless the
+API caps it.
+
+Hoppa already rejects honeypot fills and failed captchas before storing or
+emailing anything. Public form endpoints also have a coarse Redis limit of
+**120 submit requests per minute per IP** (and similar caps on render and event
+tracking). `trust proxy` is set so `req.ip` is the client behind DigitalOcean's
+proxy.
+
+On top of that, every **accepted** submission is checked against Redis-backed
+per-form limits (IP and session id are hashed; keys expire with the window):
+
+| Limit | Default | Adjustable? |
+|---|---|---|
+| Burst per visitor per form | 5 per 10 minutes | No (server default) |
+| Per visitor per form per hour | 10 | Yes, 1–100, in the form's Security → Rate limiting card |
+| All visitors on one form per hour | 200 | Yes, 10–10,000 |
+| Identical answers from the same visitor | ignored for 10 minutes (returns the success message, does not store a second row) | No |
+| One-per-visitor window | 24 hours | Only when **Allow more submissions** is off (1–8,760 hours) |
+
+Over-limit requests return **429** with `{ ok: false, errors: { __form: "Too many submissions. Please try again later." } }`, which the embed shows on the form. If Redis is down, these tighter counters fail open (the coarse per-IP request limit still applies).
