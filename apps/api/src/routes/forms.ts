@@ -214,11 +214,11 @@ const EMBED_JS = String.raw`(() => {
   }
 
   function injectStyles() {
-    if (document.getElementById('hf-styles-v2')) return;
+    if (document.getElementById('hf-styles-v3')) return;
     const style = document.createElement('style');
-    style.id = 'hf-styles-v2';
+    style.id = 'hf-styles-v3';
     style.textContent = [
-      '.hf-card{font-family:inherit;color:inherit;border:1px solid rgba(15,23,42,.15);border-radius:14px;padding:16px;background:transparent;}',
+      '.hf-card,.hoppa-form-card{font-family:inherit;color:inherit;border:1px solid rgba(15,23,42,.15);border-radius:14px;padding:16px;background:transparent;}',
       '.hf-title{font-size:1.2rem;font-weight:700;margin:0 0 4px;}',
       '.hf-desc{opacity:.8;margin:0 0 12px;font-size:.95rem;}',
       '.hf-grid{display:grid;gap:10px;}',
@@ -232,7 +232,16 @@ const EMBED_JS = String.raw`(() => {
       '.hf-submit{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:10px;padding:10px 14px;background:#0f172a;color:#fff;font-weight:700;cursor:pointer;}',
       '.hf-submit[disabled]{opacity:.55;cursor:not-allowed;}',
       '.hf-ok{font-size:.9rem;color:#166534;min-height:1.2em;}',
+      '.hf-ok.is-error{color:#b91c1c;}',
       '.hf-captcha{margin-top:6px;}',
+      '.hoppa-form-success{display:none;text-align:center;padding:8px 4px 2px;outline:none;}',
+      '.hoppa-form-success[data-open="1"]{display:block;}',
+      '.hoppa-form-success-icon{display:inline-flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:999px;background:rgba(22,101,52,.12);color:#166534;margin:0 auto 12px;}',
+      '.hoppa-form-success-icon svg{width:28px;height:28px;display:block;}',
+      '.hoppa-form-success-message{font-size:1.05rem;font-weight:650;line-height:1.45;margin:0 0 14px;color:inherit;}',
+      '.hoppa-form-reset{background:none;border:0;padding:0;font:inherit;font-size:.9rem;color:inherit;opacity:.8;text-decoration:underline;cursor:pointer;}',
+      '.hoppa-form-reset:hover,.hoppa-form-reset:focus{opacity:1;}',
+      '.hoppa-form-body[hidden],.hoppa-form[hidden],.hoppa-form-success[hidden],.hoppa-form-reset[hidden]{display:none !important;}',
     ].join('');
     document.head.appendChild(style);
   }
@@ -495,24 +504,27 @@ const EMBED_JS = String.raw`(() => {
       }
 
       const card = document.createElement('div');
-      card.className = 'hf-card';
+      card.className = 'hf-card hoppa-form-card';
+
+      const body = document.createElement('div');
+      body.className = 'hoppa-form-body';
 
       if (payload.definition.title && payload.definition.title.trim()) {
         const title = document.createElement('h3');
         title.className = 'hf-title';
         title.textContent = payload.definition.title;
-        card.appendChild(title);
+        body.appendChild(title);
       }
 
       if (payload.definition.description) {
         const desc = document.createElement('p');
         desc.className = 'hf-desc';
         desc.textContent = payload.definition.description;
-        card.appendChild(desc);
+        body.appendChild(desc);
       }
 
       const formEl = document.createElement('form');
-      formEl.className = 'hf-grid';
+      formEl.className = 'hf-grid hoppa-form';
       const errorNodes = {};
       const wrappers = {};
       const labels = {};
@@ -670,6 +682,104 @@ const EMBED_JS = String.raw`(() => {
       submit.textContent = payload.definition.submitLabel || 'Submit';
       formEl.appendChild(submit);
 
+      const allowMore = payload.definition.allowAnotherSubmission !== false;
+      const resetLabel = payload.definition.resetLabel || 'Submit another response';
+      const redirectUrl = payload.definition.redirectUrl || '';
+      const doneKey = 'hoppa_form_done_' + token;
+
+      function isSafeHttpUrl(value) {
+        try {
+          const u = new URL(value);
+          return u.protocol === 'http:' || u.protocol === 'https:';
+        } catch (err) {
+          return false;
+        }
+      }
+
+      const success = document.createElement('div');
+      success.className = 'hoppa-form-success';
+      success.setAttribute('role', 'status');
+      success.setAttribute('aria-live', 'polite');
+      success.tabIndex = -1;
+      success.hidden = true;
+
+      const successIcon = document.createElement('div');
+      successIcon.className = 'hoppa-form-success-icon';
+      successIcon.setAttribute('aria-hidden', 'true');
+      successIcon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M8 12.5l2.5 2.5L16 9.5"></path></svg>';
+      success.appendChild(successIcon);
+
+      const successMsg = document.createElement('p');
+      successMsg.className = 'hoppa-form-success-message';
+      success.appendChild(successMsg);
+
+      const resetBtn = document.createElement('button');
+      resetBtn.type = 'button';
+      resetBtn.className = 'hoppa-form-reset';
+      resetBtn.textContent = resetLabel;
+      if (!allowMore) resetBtn.hidden = true;
+      success.appendChild(resetBtn);
+
+      function rememberDone(message) {
+        if (allowMore) return;
+        try {
+          window.localStorage.setItem(doneKey, JSON.stringify({ message: message || '', at: Date.now() }));
+        } catch (err) {}
+      }
+
+      function readDoneMessage() {
+        if (allowMore) return null;
+        try {
+          const raw = window.localStorage.getItem(doneKey);
+          if (!raw) return null;
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed.message === 'string') return parsed.message;
+          return null;
+        } catch (err) {
+          return null;
+        }
+      }
+
+      function showSuccess(message, fromStorage) {
+        const text = message || payload.definition.successMessage || 'Thanks, we got your submission.';
+        if (!fromStorage && isSafeHttpUrl(redirectUrl)) {
+          rememberDone(text);
+          try {
+            if (window.top) window.top.location.href = redirectUrl;
+            else window.location.href = redirectUrl;
+          } catch (err) {
+            window.location.href = redirectUrl;
+          }
+          return;
+        }
+        rememberDone(text);
+        body.hidden = true;
+        success.hidden = false;
+        success.setAttribute('data-open', '1');
+        successMsg.textContent = text;
+        try { success.focus(); } catch (err) {}
+      }
+
+      function restoreForm() {
+        try { window.localStorage.removeItem(doneKey); } catch (err) {}
+        success.hidden = true;
+        success.removeAttribute('data-open');
+        successMsg.textContent = '';
+        body.hidden = false;
+        formEl.reset();
+        captchaToken = '';
+        ok.textContent = '';
+        ok.classList.remove('is-error');
+        clearErrors(errorNodes);
+        if (captchaApi && captchaApi.reset) captchaApi.reset();
+        applyRules();
+        submit.disabled = false;
+        const first = formEl.querySelector('input,select,textarea,button');
+        if (first && first.focus) try { first.focus(); } catch (err) {}
+      }
+
+      resetBtn.addEventListener('click', restoreForm);
+
       function applyRules() {
         const answers = readAnswers(formEl, fields);
         fields.forEach((field) => {
@@ -693,6 +803,7 @@ const EMBED_JS = String.raw`(() => {
         ev.preventDefault();
         clearErrors(errorNodes);
         ok.textContent = '';
+        ok.classList.remove('is-error');
         submit.disabled = true;
 
         const answers = readAnswers(formEl, fields);
@@ -710,34 +821,44 @@ const EMBED_JS = String.raw`(() => {
           captchaToken,
           honey: honey.value,
         })
-          .then((r) => r.json())
-          .then((result) => {
+          .then((r) => r.json().then((body) => ({ status: r.status, body })).catch(() => ({ status: r.status, body: null })))
+          .then((res) => {
+            const result = res.body;
             if (result && result.ok) {
-              ok.textContent = result.message || 'Submitted successfully.';
-              formEl.reset();
-              captchaToken = '';
-              if (captchaApi && captchaApi.reset) captchaApi.reset();
-              applyRules();
+              showSuccess(result.message || 'Submitted successfully.', false);
               return;
             }
             const errs = result && result.errors ? result.errors : {};
             Object.keys(errs).forEach((k) => {
               if (errorNodes[k]) errorNodes[k].textContent = String(errs[k]);
             });
-            if (errs.__form) ok.textContent = String(errs.__form);
+            if (errs.__form) {
+              ok.textContent = String(errs.__form);
+              ok.classList.add('is-error');
+            } else if (res.status === 429 || (result && result.error === 'rate_limited')) {
+              ok.textContent = 'Too many submissions. Please try again later.';
+              ok.classList.add('is-error');
+            }
           })
           .catch(() => {
             ok.textContent = 'Could not submit. Please try again.';
+            ok.classList.add('is-error');
           })
           .finally(() => {
-            submit.disabled = false;
+            if (!success.getAttribute('data-open')) submit.disabled = false;
           });
       });
 
-      card.appendChild(formEl);
+      body.appendChild(formEl);
+      card.appendChild(body);
+      card.appendChild(success);
       root.innerHTML = '';
       root.appendChild(card);
       applyRules();
+      const remembered = readDoneMessage();
+      if (remembered !== null) {
+        showSuccess(remembered || payload.definition.successMessage || 'Thanks, we got your submission.', true);
+      }
       sendEvent('view');
     })
     .catch(() => {
@@ -807,7 +928,7 @@ formsPublicRouter.post(
         referer,
       });
       if (!result.ok) {
-        res.status(400).json(result);
+        res.status(result.status ?? 400).json(result);
         return;
       }
       res.json(result);

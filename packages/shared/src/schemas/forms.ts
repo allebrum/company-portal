@@ -128,11 +128,61 @@ export const FormTurnstileInputSchema = z.object({
 });
 export type FormTurnstileInput = z.infer<typeof FormTurnstileInputSchema>;
 
+export const DEFAULT_RESET_LABEL = 'Submit another response';
+export const DEFAULT_RESUBMIT_WINDOW_HOURS = 24;
+export const DEFAULT_MAX_SUBMISSIONS_PER_IP_PER_HOUR = 10;
+export const DEFAULT_MAX_SUBMISSIONS_PER_HOUR = 200;
+export const FORM_ALREADY_SUBMITTED_MESSAGE = "You've already submitted this form.";
+export const FORM_RATE_LIMITED_MESSAGE = 'Too many submissions. Please try again later.';
+
+/** Accept only absolute http(s) URLs — never javascript:, data:, or relative paths. */
+export function isSafeRedirectUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+const OptionalRedirectUrl = z.preprocess((v) => {
+  if (v == null) return undefined;
+  if (typeof v === 'string' && v.trim() === '') return undefined;
+  return typeof v === 'string' ? v.trim() : v;
+}, z
+  .string()
+  .max(2000)
+  .url()
+  .refine(isSafeRedirectUrl, 'Must start with http:// or https://')
+  .optional());
+
+const OptionalResetLabel = z.preprocess((v) => {
+  if (typeof v === 'string' && v.trim() === '') return undefined;
+  return v;
+}, z.string().min(1).max(80).optional().default(DEFAULT_RESET_LABEL));
+
 export const FormDefinitionSchema = z.object({
   title: z.string().max(160).optional().default(''),
   description: z.string().max(2000).optional().default(''),
   submitLabel: z.string().min(1).max(80).optional().default('Submit'),
   successMessage: z.string().min(1).max(280).optional().default('Thanks, we got your submission.'),
+  /**
+   * If set, the embed navigates the top window here after a successful submit
+   * instead of showing the in-place confirmation panel.
+   */
+  redirectUrl: OptionalRedirectUrl,
+  /**
+   * When true (default), the confirmation panel offers “Submit another response”.
+   * When false, that link is hidden and the server allows one submission per
+   * visitor per `resubmitWindowHours` (default 24h) — useful for email signups.
+   */
+  allowAnotherSubmission: z.boolean().optional().default(true),
+  resetLabel: OptionalResetLabel,
+  resubmitWindowHours: z.number().int().min(1).max(8760).optional().default(DEFAULT_RESUBMIT_WINDOW_HOURS),
+  /** Per-visitor cap on accepted submissions for this form. Burst of 5 / 10 min also applies. */
+  maxSubmissionsPerIpPerHour: z.number().int().min(1).max(100).optional().default(DEFAULT_MAX_SUBMISSIONS_PER_IP_PER_HOUR),
+  /** Form-wide cap on accepted submissions (all visitors) per hour. */
+  maxSubmissionsPerHour: z.number().int().min(10).max(10000).optional().default(DEFAULT_MAX_SUBMISSIONS_PER_HOUR),
   fields: z.array(FormFieldSchema).min(1).max(100),
   security: FormSecuritySchema.optional().default({}),
 });
@@ -230,8 +280,8 @@ export type PublicFormPayload = {
 };
 
 export type PublicFormSubmitResult =
-  | { ok: true; message: string }
-  | { ok: false; errors: Record<string, string> };
+  | { ok: true; message: string; alreadySubmitted?: boolean }
+  | { ok: false; errors: Record<string, string>; status?: 400 | 429 };
 
 /** GET /api/forms/config — what the form settings UI needs to warn about. */
 export type FormsConfig = {
